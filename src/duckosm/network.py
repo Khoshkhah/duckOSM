@@ -673,13 +673,13 @@ class Network(os.PathLike):
         from duckosm import analysis
         return analysis.stats(self, area_m2=area_m2, mode=mode)
 
-    def route(self, a, b, mode: str | None = None, weight: str = "time") -> dict | None:
+    def route(self, a, b, mode: str | None = None, weight="time", **kwargs) -> dict | None:
         """The fastest route (``weight="length"``: the shortest) from ``a`` to ``b``: edge ids, ``(lon, lat)`` points or
         place names. A :class:`duckosm.routing.Route`. :func:`duckosm.routing.route`.
 
         >>> r = net.walking.route((7.4155, 43.7285), (7.4335, 43.7468))"""
         from duckosm import routing
-        return routing.route(self, a, b, mode=mode, weight=weight)
+        return routing.route(self, a, b, mode=mode, weight=weight, **kwargs)
 
     def route_points(self, a: tuple, b: tuple, mode: str | None = None, **kwargs) -> dict | None:
         """:func:`duckosm.routing.route_points`: the route between two ``(lon, lat)`` points.
@@ -716,12 +716,12 @@ class Network(os.PathLike):
         from duckosm import routing
         return routing.isochrones(self, origins, minutes, mode=mode, **kwargs)
 
-    def accessibility(self, origins, targets, minutes=15, mode: str | None = None):
+    def accessibility(self, origins, targets, minutes=15, mode: str | None = None, **kwargs):
         """:func:`duckosm.routing.accessibility`: the targets reached from each origin, and the nearest.
 
         >>> acc = net.walking.accessibility(homes, shops, minutes=[5, 10])"""
         from duckosm import routing
-        return routing.accessibility(self, origins, targets, minutes, mode=mode)
+        return routing.accessibility(self, origins, targets, minutes, mode=mode, **kwargs)
 
     def route_multimodal_points(self, a: tuple, b: tuple, **kwargs) -> dict:
         """:func:`duckosm.routing.route_multimodal_points`: a route across the modes (needs the multimodal graph ``mm``).

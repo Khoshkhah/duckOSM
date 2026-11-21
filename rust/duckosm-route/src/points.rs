@@ -236,27 +236,64 @@ fn end_info(point: (f64, f64), c: &Cand, v: f64) -> J {
 
 /// duckOSM `route_points`: the dict of the route between two points (lon, lat) in one mode, or null.
 pub fn route_points(con: &Connection, a: (f64, f64), b: (f64, f64), mode: &str, weight: &str, radius_m: f64, access_kmh: f64) -> Result<J> {
-    if weight != "time" && weight != "length" {
+    route_points_own(con, a, b, mode, weight, None, radius_m, access_kmh)
+}
+
+/// `route_points` with your own cost of each edge (`own`; `weight` then only names it in the result as `weight`, and the
+/// result also has `cost`: the own cost of the used parts of the edges; the access legs cost 0).
+#[allow(clippy::too_many_arguments)]
+pub fn route_points_own(
+    con: &Connection,
+    a: (f64, f64),
+    b: (f64, f64),
+    mode: &str,
+    weight: &str,
+    own: Option<&crate::route::Own>,
+    radius_m: f64,
+    access_kmh: f64,
+) -> Result<J> {
+    if own.is_none() && weight != "time" && weight != "length" {
         return Err("weight must be 'time' or 'length'".into());
     }
-    let (s, t) = ends(con, mode, a, b, radius_m)?;
+    let (mut s, mut t) = ends(con, mode, a, b, radius_m)?;
     let v = access_kmh / 3.6;
-    let key = if weight == "time" { "cost_s" } else { "length_m" };
+    let key = if weight == "length" && own.is_none() { "length_m" } else { "cost_s" };
     let mut w: HashMap<i64, f64> = HashMap::new();
     let mut st = con.prepare(&format!("SELECT edge_id, {key}::DOUBLE FROM {mode}.edges")).map_err(err)?;
     let mut rows = st.query([]).map_err(err)?;
     while let Some(r) = rows.next().map_err(err)? {
-        let x: Option<f64> = r.get(1).map_err(err)?;
-        w.insert(r.get(0).map_err(err)?, x.unwrap_or(0.0));
+        let (e, x): (i64, Option<f64>) = (r.get(0).map_err(err)?, r.get(1).map_err(err)?);
+        match own {
+            Some(o) => match o.costs.get(&e) {
+                Some(&c) => _ = w.insert(e, c),
+                None if o.skip => {}
+                None => _ = w.insert(e, x.unwrap_or(0.0)),
+            },
+            None => _ = w.insert(e, x.unwrap_or(0.0)),
+        }
     }
     let g = crate::route::routed_graph(con, mode, &[])?;
     let mut next: HashMap<i64, Vec<i64>> = HashMap::new();
     let mut st = con.prepare(&format!("SELECT from_edge, to_edge FROM {g}")).map_err(err)?;
     let mut rows = st.query([]).map_err(err)?;
     while let Some(r) = rows.next().map_err(err)? {
-        next.entry(r.get(0).map_err(err)?).or_default().push(r.get(1).map_err(err)?);
+        let (x, y): (i64, i64) = (r.get(0).map_err(err)?, r.get(1).map_err(err)?);
+        if own.is_some() && !(w.contains_key(&x) && w.contains_key(&y)) {
+            continue;
+        }
+        next.entry(x).or_default().push(y);
     }
-    let Some(r) = points::route_points(&s, &t, weight == "time", v, &w, &next) else { return Ok(J::Null) };
+    // own costs: each candidate costs its own cost, and the access legs cost nothing (an infinite access speed)
+    let mut v_route = v;
+    if own.is_some() {
+        for c in s.iter_mut().chain(t.iter_mut()) {
+            c.cost_s = w.get(&c.edge_id).copied().unwrap_or(f64::NAN);
+        }
+        s.retain(|c| !c.cost_s.is_nan());
+        t.retain(|c| !c.cost_s.is_nan());
+        v_route = f64::INFINITY;
+    }
+    let Some(r) = points::route_points(&s, &t, weight == "time" || own.is_some(), v_route, &w, &next) else { return Ok(J::Null) };
     let ids: Vec<String> = r.path.iter().map(i64::to_string).collect::<HashSet<_>>().into_iter().collect();
     let mut info: HashMap<i64, (Option<String>, Option<String>, Option<f64>, Option<f64>)> = HashMap::new();
     let mut st = con
@@ -267,16 +304,29 @@ pub fn route_points(con: &Connection, a: (f64, f64), b: (f64, f64), mode: &str, 
         info.insert(x.get(0).map_err(err)?, (x.get(1).map_err(err)?, x.get(2).map_err(err)?, x.get(3).map_err(err)?, x.get(4).map_err(err)?));
     }
     let mut rows_out = Vec::new();
-    let (mut sum_cost, mut sum_len) = (0.0f64, 0.0f64);
+    let (mut sum_cost, mut sum_len, mut sum_own) = (0.0f64, 0.0f64, 0.0f64);
     for (e, (f0, f1)) in r.path.iter().zip(&r.parts) {
         let (name, hw, len, cost) = info[e].clone();
         let share = f1 - f0;
         let (l, c) = (len.unwrap_or(0.0) * share, cost.unwrap_or(0.0) * share);
         sum_cost += c;
         sum_len += l;
+        sum_own += w.get(e).copied().unwrap_or(0.0) * share;
         rows_out.push(json!({"edge_id": e, "name": name, "highway": hw, "from_fraction": f0, "to_fraction": f1, "length_m": l, "cost_s": c}));
     }
     let (start, end) = (end_info(a, &r.start, v), end_info(b, &r.end, v));
+    if own.is_some() {
+        return Ok(json!({
+            "time_s": start["access_s"].as_f64().unwrap_or(0.0) + sum_cost + end["access_s"].as_f64().unwrap_or(0.0),
+            "length_m": r.start.access_m + sum_len + r.end.access_m,
+            "weight": weight,
+            "cost": sum_own,
+            "edges": r.path,
+            "start": start,
+            "end": end,
+            "path": rows_out,
+        }));
+    }
     Ok(json!({
         "time_s": start["access_s"].as_f64().unwrap_or(0.0) + sum_cost + end["access_s"].as_f64().unwrap_or(0.0),
         "length_m": r.start.access_m + sum_len + r.end.access_m,

@@ -23,16 +23,48 @@ A place (`a`, `b`, an item of `origins`, `destinations` or `targets`) is one of 
 | `routes(view, origins, destinations, weight="time")` | the route from each origin to the destination at the same place in the list (`zip`), in parallel. A list of `Route` (`None`: not connected). |
 | `k_shortest_paths(view, a, b, k=3, weight="time")` | the `k` best routes that use no edge two times, the best first. A list of `Route`. |
 | `matrix(view, origins, destinations=None, weight="time", max_cost=None)` | a DataFrame: a row for each origin, a column for each destination. The cells are seconds (`weight="length"`: metres). `NaN`: not connected, more than `max_cost`, or an edge that is not in the graph of the mode (for example a bus-only edge). |
-| `isochrones(view, origins, minutes=(5, 10, 15), buffer_m=25.0)` | a GeoDataFrame with a polygon for each origin and each time: `origin`, `minutes`, `n_edges`, `geometry` |
-| `accessibility(view, origins, targets, minutes=15)` | a DataFrame with a row for each origin: `n_<m>min` (the number of targets within `m` minutes), `nearest`, `nearest_s` |
+| `isochrones(view, origins, minutes=(5, 10, 15), buffer_m=25.0, weight="time")` | a GeoDataFrame with a polygon for each origin and each time: `origin`, `minutes`, `n_edges`, `geometry` |
+| `accessibility(view, origins, targets, minutes=15, weight="time")` | a DataFrame with a row for each origin: `n_<m>min` (the number of targets within `m` minutes), `nearest`, `nearest_s` |
 | `geocode(view, name)` | the `(lon, lat)` of a place name |
 | `routed_graph(view)` | the SQL relation of the rows of `<mode>.edge_graph` that the mode routes on: the graph of all calls |
 | `directions(view, route)` | the turn-by-turn steps of a route |
 | `route_multimodal(net, src_node, dst_node, schema="mm", start_mode="walking", end_mode="walking", ...)` | a route across the modes between two nodes. Needs the [`mm` schema](../../concepts/multimodal.md). |
 | `route_multimodal_points(net, a, b, ...)` | a route across the modes between two points: the legs of each mode |
 
+Each call that has `weight` also has `missing="time"` (see [Your own cost](#your-own-cost)).
+
 The rows and the columns of a matrix (and the rows of `accessibility`) have the labels of the places when all places
 are edge ids or names, else the numbers `0, 1, 2 ...`.
+
+## Your own cost
+
+`weight` sets the cost that a route makes smallest:
+
+| `weight` | The cost of an edge |
+|---|---|
+| `"time"` (the default) | `cost_s`, the travel time in seconds |
+| `"length"` | `length_m` |
+| the name of a column, for example `"toll_eur"` | the value of that numeric column of `<mode>.edges`; you can add the column with SQL |
+| a pandas Series (or a dict) keyed by `edge_id` | your value for each edge: a toll, CO2, danger, noise |
+
+Your own cost replaces the time of the edge. The turn costs of the edge graph are not added. A cost must be 0 or more.
+`missing` sets what an edge with no value (not in the Series, or `NULL` in the column) costs:
+
+| `missing` | An edge with no value |
+|---|---|
+| `"time"` (the default) | costs its time (`cost_s`) |
+| `"skip"` | is not used: no route goes on it |
+
+```python
+toll = net.driving.edges().set_index("edge_id").cost_s       # the time of each edge
+toll[toll.index.isin(louis_ii)] += 600                        # 10 minutes more on Boulevard Louis II
+r = net.driving.route(a, b, weight=toll)
+r.weight, r.cost, r.time_s                                    # "cost_s", the cost with the toll, the real time
+```
+
+The routing stays in Rust: duckOSM gives the cost of each edge to the router. In `matrix`, the cells are your cost. In
+`isochrones` and `accessibility`, a minute is 60 units of your cost. In `route_points`, the access legs from the points
+to the roads cost 0 in your cost.
 
 ## The Route object
 
@@ -43,6 +75,7 @@ A `Route` is also the dict of the old `route`: `r["edges"]` is the list of edge 
 |---|---|
 | `r.edge_ids` | the edge ids, in the order of the route |
 | `r.edges` | a GeoDataFrame of the edges in the order of the route: `seq`, `edge_id` and the columns of `<mode>.edges` |
+| `r.cost`, `r.weight` | the cost that the route makes smallest, and its name: `"time"` (then `r.cost` is `r.time_s`), `"length"` (`r.length_m`), the column, the name of your Series, or `"own"` for a dict. With your own cost, `r["cost"]` is the sum of your costs of the edges |
 | `r.length_m`, `r.time_s` | the sums of `length_m` and `cost_s` of the edges. A route between two points also includes the access legs: `length_m` includes `start.access_m` and `end.access_m` (the distance from each point to its road), `time_s` includes `access_s` (walking time), and only the used parts of the first and the last edge count |
 | `r.geometry` | one shapely line (a `MultiLineString` where the edges do not join) |
 | `r.directions()` | the turn-by-turn steps |
