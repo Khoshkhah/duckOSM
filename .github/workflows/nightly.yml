@@ -33,7 +33,8 @@ jobs:
         run: |
           v=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
           sed -i "0,/^version = \"$v\"/s//version = \"$v.dev${{ github.run_number }}\"/" pyproject.toml
-          grep -m1 '^version' pyproject.toml
+          sed -i "s/^__version__ = \"$v\"/__version__ = \"$v.dev${{ github.run_number }}\"/" src/duckosm/__init__.py
+          grep -m1 '^version' pyproject.toml && grep '^__version__' src/duckosm/__init__.py
       - name: Build the wheel
         uses: PyO3/maturin-action@v1
         with:
