@@ -31,13 +31,21 @@
 [data-md-color-scheme="default"] .md-nav__link:hover,
 [data-md-color-scheme="default"] .md-nav__link:focus { color: var(--dk-ink); background: #ffd43b66; border-radius: 0.3rem; }
 
+/* dark mode: a soft dark gray, not black (the colors of GitHub's "dark dimmed"; the same as the notebook book) */
 [data-md-color-scheme="slate"] {
-  --md-default-bg-color: #111318;
+  --md-default-bg-color: #22272e;
+  --md-default-fg-color: #adbac7;
+  --md-default-fg-color--light: #8b98a5;
+  --md-default-fg-color--lighter: #636e7b;
+  --md-default-fg-color--lightest: #444c56;
+  --md-code-bg-color: #2d333b;
+  --md-code-fg-color: #adbac7;
+  --md-typeset-table-color: #444c56;
 }
 /* slate re-sets the primary colours with a more specific selector; restate them for dark mode */
 [data-md-color-scheme="slate"][data-md-color-primary="custom"] {
-  --md-primary-fg-color: #1b1e25;
-  --md-primary-fg-color--light: #2a2d36;
+  --md-primary-fg-color: #1c2128;
+  --md-primary-fg-color--light: #2d333b;
   --md-primary-fg-color--dark: #0d0e12;
   --md-primary-bg-color: var(--dk-paper);
   --md-primary-bg-color--light: #f6f4eeb3;
