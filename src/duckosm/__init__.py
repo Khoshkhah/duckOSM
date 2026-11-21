@@ -31,6 +31,7 @@ _NAMES = {
     "init_config": "duckosm._api", "build": "duckosm._api", "levels": "duckosm._api",
     "to_rustworkx": "duckosm._api",
     "get": "duckosm._api", "Area": "duckosm._api", "AreaPicker": "duckosm.widget",
+    "work_dir": "duckosm._api", "clear_work": "duckosm._api",
     "Network": "duckosm.network", "ModeView": "duckosm.network", "open": "duckosm.network", "network": "duckosm.network",
     "DuckOSMError": "duckosm.errors",
     "build_lane_graph": "duckosm._api", "route_lanes": "duckosm._api", "to_elevation": "duckosm._api",

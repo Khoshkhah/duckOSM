@@ -10,7 +10,7 @@ from notebook_book import Chapter  # noqa: E402
 
 ch = Chapter(1, "01_area_to_network", "Get and build an area",
              "From a place, a box, a polygon or your own OSM file to one network file",
-             learn="the parts of a duckOSM build; seven ways to choose an area; the modes; your own PBF file; the build options and `config=`; where the files go",
+             learn="the parts of a duckOSM build; seven ways to choose an area; the modes; your own PBF file; the build options and `config=`; how you save a network",
              time="about 3 minutes (the first download included)", extras="widget,viz",
              next_=("02_inspect", "2. Look inside the file", "the tables, the columns and SQL"))
 
@@ -69,7 +69,8 @@ ch.code("""net = duckosm.network(osm_id=2220322, modes=["driving", "walking"], n
 net                                                                                 # the card of the network""")
 ch.md("""**What the output shows.** The progress lines name each step: the boundary from Nominatim, the extract and the
 cut, then the build. The card at the end shows the file and, for each mode, the number of edges and nodes and the
-length in km. A `Network` is also the path of its file, so `str(net)` gives `data/monaco.duckdb`.
+length in km. The file is in duckOSM's work folder, so the card says **not saved**: section "Save your network" shows
+how you keep it. A `Network` is also the path of its file.
 
 > **Warning:** the name "Monaco" finds the *country* of Monaco, whose boundary includes a large part of the sea. That
 > is why this chapter uses the OSM id of the city. When a name gives the wrong area, find its OSM id on
@@ -186,7 +187,7 @@ ch.md("""## Your own PBF file
 file that you cut with osmium. Without `boundary=`, the whole file is the area. With it, duckOSM cuts the file to
 the boundary before the build. Here the file is a Monaco extract (0.6 MB).""")
 ch.code("""import urllib.request                                                           # your own file: here, a download
-mine = "data/my_monaco.osm.pbf"
+mine = "my_monaco.osm.pbf"
 urllib.request.urlretrieve("https://github.com/Khoshkhah/duckOSM/raw/main/tests/data/monaco.osm.pbf", mine)
 whole = duckosm.network(pbf=mine, name="monaco_whole", modes=["driving"])        # the whole file
 whole.summary()""")
@@ -239,19 +240,51 @@ ch.code("""try:
 except duckosm.DuckOSMError as e:
     print(e)""")
 
-ch.md("""## Open the file again
+ch.md("""## Save your network
 
-The file stays on disk. `duckosm.open` gives its `Network` in a new session, without a build.""")
-ch.code("""again = duckosm.open("data/monaco.duckdb")      # the file of the quick start
+A build writes its files to duckOSM's **work folder**, not to your folder, so your folder stays clean while you try
+things. The card of a network says **not saved** while the file is there. `net.save(path)` copies the network to the
+place that you choose, with its OSM file and its boundary beside it, and gives the `Network` of the copy.""")
+ch.code("""kept = net.save("monaco.duckdb")
+kept""")
+ch.md("""**What the output shows.** The card of the copy has no "not saved" note: `monaco.duckdb` is in your folder.
+`monaco.osm.pbf` and `monaco.geojson` are beside it, so `kept.rebuild(...)` and `kept.edit()` still work. `kept.saved`
+is `True`.
+
+> **Warning:** a network that you do not save stays in the work folder only until you clean it with
+> `duckosm.clear_work`. Save each network that you want to keep.""")
+
+ch.md("""### Write the network to a file at once: `path=`
+
+When you know the file name before the build, give it as `path`. The network then goes there directly, not to the
+work folder.""")
+ch.code("""direct = duckosm.network(osm_id=2220322, modes=["driving"], path="monaco_driving.duckdb",
+                         features=False, levels=False)
+direct.saved""")
+
+ch.md("""### Keep the OSM data of an area: `area.save`
+
+`area.save(folder)` copies the two files of an `Area` (the cut OSM file and the boundary) into a folder of yours.""")
+ch.code("""casino.save("casino_area")""")
+
+ch.md("""### Open a saved file again: `duckosm.open`
+
+The saved file stays on disk. `duckosm.open` gives its `Network` in a new session, without a build.""")
+ch.code("""again = duckosm.open("monaco.duckdb")
 again.summary()""")
 
-ch.md("""## Where the files go
+ch.md("""### The work folder
 
-| File | Where | Set it with |
+| Files | Where | Set it with |
 |---|---|---|
-| the `.duckdb` file | `<out>/<name>.duckdb` (default `data/<name>.duckdb`) | `out=`, `name=`, or `output=` in `build` |
-| the cut OSM file and the boundary | `<out>/<name>.osm.pbf`, `<out>/<name>.geojson` | `out=`, `name=` |
-| the Geofabrik extracts | the cache: `~/.cache/duckosm` | the setting `DUCKOSM_CACHE` |""")
+| networks and areas that you did not save | the work folder: `duckosm.work_dir()` | `DUCKOSM_CACHE` (the work folder is `<cache>/work`) |
+| your saved networks | where you save them | `net.save(path)`, `path=`, `area.save(folder)` |
+| the Geofabrik extracts | the cache: `~/.cache/duckosm` | `DUCKOSM_CACHE` |
+
+`duckosm.clear_work()` deletes the work folder; `duckosm.clear_work(days=7)` deletes only the parts older than seven
+days. Your saved files are not in it, so they stay.""")
+ch.code("""print(duckosm.work_dir())
+duckosm.clear_work(days=7)""")
 
 ch.md("""## Try it yourself
 
@@ -308,7 +341,10 @@ ch.md("""## Summary
 | `area.build(modes=...)` | builds an `Area` |
 | `duckosm.build(pbf=..., boundary=...)` | builds from files |
 | `duckosm.AreaPicker()` | chooses an area on a map |
-| `duckosm.open(path)` | opens a file that you built before |
+| `net.save(path)`, `area.save(folder)` | keeps a network or an area where you choose |
+| `duckosm.network(..., path=...)` | builds straight into a file of yours |
+| `duckosm.open(path)` | opens a file that you saved before |
+| `duckosm.work_dir()`, `duckosm.clear_work()` | the work folder, and its cleaning |
 | `net.summary()`, `net.modes`, `net.walking` | the modes of a file |
 
 The reference: [Python SDK, Core](../reference/python.md). **Next:** [2. Look inside the file](02_inspect.md), the
