@@ -73,19 +73,35 @@ ch.code("""r = net.driving.route("Boulevard Albert 1er", "Avenue Princesse Grace
 r                                                                        # the card: edges, length, time""")
 ch.md("""The route by car from Boulevard Albert 1er to Avenue Princesse Grace has 33 edges, 1,350 m and 122 s (2.0 minutes). Each name became a point (with `geocode`), so the route starts and ends at the points on the two streets, not at the ends of whole edges.""")
 
-ch.md("""### The members of a Route
+ch.md("""### What a Route stores, and what it reads from the file
 
-| Member | Gives |
+A `Route` is small. It keeps only the result of the search, and two links to the network:
+
+| Stored in the Route | In this example |
 |---|---|
-| `r.edge_ids` | the edge ids, in the order of the route |
-| `r.edges` | a GeoDataFrame of the edges in the order of the route: `seq`, `edge_id` and the columns of `<mode>.edges` |
-| `r.length_m`, `r.time_s` | the sums of `length_m` and `cost_s` of the edges |
-| `r.geometry` | one shapely line (a `MultiLineString` where the edges do not join) |
-| `r.directions()` | the turn-by-turn steps |
-| `r.map()` | the route on the roadstyle map of the network |
+| the edge ids, in the order of the route (`r["edges"]`) | 33 edge ids |
+| the time and the length (`r["time_s"]`, `r["length_m"]`) | 122 s, 1,350 m |
+| the start and the end (`r["start"]`, `r["end"]`): the point, the nearest road point, its `edge_id`, how far along the edge (`fraction`), and the walk to the road (`access_m`, `access_s`) | the end is 12 m from its road |
+| the steps of the search (`r["path"]`) | 33 steps |
+| the network file, and the mode (hidden: `r._db`, `r._mode`) | `monaco.duckdb`, `driving` |
 
-`r.edges` has all the columns of the edges table, so you can count the road classes of a route or sum the length of
-its tunnels.""")
+The `Route` does not store the columns of the edges. When you ask for them, it opens its network file again and
+reads the 33 edges with a query (`SELECT ... FROM driving.edges WHERE edge_id IN (...)`), in the order of the route.
+
+| Member | Gives | From |
+|---|---|---|
+| `r.edge_ids` | the edge ids, in the order of the route | the Route |
+| `r.length_m`, `r.time_s` | the sums of `length_m` and `cost_s` of the edges | the Route |
+| `r.edges` | a GeoDataFrame of the edges in the order of the route: `seq`, `edge_id` and all the columns of `<mode>.edges` (`name`, `highway` ...) | the file, at each call |
+| `r.geometry` | one shapely line (a `MultiLineString` where the edges do not join) | the file, at each call |
+| `r.directions()` | the turn-by-turn steps | the file, at each call |
+| `r.map()` | the route on the roadstyle map of the network | the file, at each call |
+
+So you can keep thousands of routes in memory, and `r.edges` gives all the columns of the edges table: you can count
+the road classes of a route or sum the length of its tunnels.
+
+> **Warning:** `r.edges`, `r.geometry`, `r.directions()` and `r.map()` need the network file. If you move or delete
+> `monaco.duckdb`, they fail. `r["edges"]`, `r.time_s` and `r.length_m` still work.""")
 ch.code("""print(len(r.edge_ids), "edges,", round(r.length_m), "m,", round(r.time_s), "s")    # the sums
 r.edges[["seq", "edge_id", "name", "highway", "length_m", "cost_s"]].head()          # the first edges, in order""")
 ch.code("""r.edges.groupby("highway").length_m.sum().round().sort_values(ascending=False)    # the metres of each road class""")
@@ -105,8 +121,8 @@ ch.code("""r.map()    # the route on the map""")
 
 ch.md("""### A Route is also a dict
 
-A `Route` is a Python `dict` too: `r["edges"]` is the list of edge ids, `r["time_s"]` and `r["length_m"]` are the
-sums. The code that used the dict of older duckOSM versions works without a change, and `net.map(routes=r)` takes a
+A `Route` is a Python `dict` too, with the keys of the table above: `edges`, `time_s`, `length_m`, `start`, `end`
+and `path`. The code that used the dict of older duckOSM versions works without a change, and `net.map(routes=r)` takes a
 `Route`.""")
 ch.code("""sorted(r.keys()), r["edges"][:3]    # the keys of the dict, and the first edge ids""")
 
