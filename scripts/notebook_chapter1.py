@@ -1,106 +1,20 @@
-"""Write docs/notebooks/01_area_to_network.ipynb: chapter 1 of the notebook manual, "Get and build an area"."""
+"""Write docs/notebooks/01_area_to_network.ipynb: chapter 1 of the notebook manual, "Get and build an area".
+The style comes from scripts/notebook_book.py (rules: docs/design/notebook_book.md).
+
+    python scripts/notebook_chapter1.py docs/notebooks/01_area_to_network.ipynb"""
+import os
 import sys
 
-import nbformat
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from notebook_book import Chapter  # noqa: E402
 
-out = sys.argv[1]
-md = nbformat.v4.new_markdown_cell
-code = nbformat.v4.new_code_cell
-NB = "https://colab.research.google.com/github/Khoshkhah/duckOSM/blob/main/docs/notebooks/01_area_to_network.ipynb"
-DL = "https://khoshkhah.github.io/duckOSM/notebooks/01_area_to_network.ipynb"
-cells = []
+ch = Chapter(1, "01_area_to_network", "Get and build an area",
+             "From a place, a box, a polygon or your own OSM file to one network file",
+             learn="the parts of a duckOSM build; seven ways to choose an area; the modes; your own PBF file; the build options and `config=`; where the files go",
+             time="about 3 minutes (the first download included)", extras="widget,viz",
+             next_=("02_inspect", "2. Look inside the file", "the tables, the columns and SQL"))
 
-# ---- the look: Colab removes inline CSS, so the look is made of what Colab draws: a picture (the band), a Markdown
-# table (the card) and quote blocks with a colored icon (the boxes). The manual colors each kind of box (extra.css).
-import html as _html
-import os as _os
-import re as _re
-import textwrap as _textwrap
-
-IMAGES = "https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/docs/notebooks/images"
-BOX = {"output": "What the output shows", "tip": "Tip", "warning": "Warning", "key": "Key idea"}
-
-
-def box(kind, text):
-    """A quote block with the icon and the title of its kind: Colab draws it, the manual colors it."""
-    text = " ".join(text.split())
-    text = text[:1].upper() + text[1:]
-    icon = f'<img src="{IMAGES}/icon-{kind}.svg" width="18" height="18" alt="">'
-    return f"> {icon} **{BOX[kind]}**\n>\n> {text}"
-
-
-def styled(source):
-    """The boxes of one Markdown cell: a paragraph that starts with **What the output shows.**, and a quote that
-    starts with **Tip:** or **Warning:**."""
-    out = []
-    for par in source.split("\n\n"):
-        s = par.strip()
-        if s.startswith("**What the output shows.**"):
-            out.append(box("output", s[len("**What the output shows.**"):]))
-        elif s.startswith(("> **Tip:**", "> **Warning:**", "> **Key idea:**")):
-            body = " ".join(line[1:].strip() for line in s.splitlines())
-            kind = next(k for start, k in (("**Tip:**", "tip"), ("**Warning:**", "warning"), ("**Key idea:**", "key"))
-                        if body.startswith(start))
-            out.append(box(kind, body.split(":**", 1)[1]))
-        else:
-            out.append(par)
-    return "\n\n".join(out)
-
-
-CHAPTERS = 14
-
-
-def banner(number, title, line):
-    """The band of a chapter as an SVG picture in docs/notebooks/images/ (a light card, a thin blue line on the left,
-    dark text); returns its address."""
-    svg = ('<svg xmlns="http://www.w3.org/2000/svg" width="900" height="132" viewBox="0 0 900 132" '
-           'font-family="Segoe UI, Helvetica, Arial, sans-serif">'
-           '<rect x="1" y="1" width="898" height="130" rx="12" fill="#f6f8fa" stroke="#d0d7de"/>'
-           '<rect x="1" y="1" width="7" height="130" rx="3" fill="#1f6feb"/>'
-           f'<text x="32" y="38" font-size="13" font-weight="600" letter-spacing="1.4" fill="#1f6feb">'
-           f'DUCKOSM NOTEBOOK MANUAL · CHAPTER {number} OF {CHAPTERS}</text>'
-           f'<text x="32" y="78" font-size="30" font-weight="700" fill="#1f2328">{_html.escape(title)}</text>'
-           f'<text x="32" y="108" font-size="17" fill="#57606a">{_html.escape(line)}</text></svg>')
-    folder = _os.path.join(_os.path.dirname(_os.path.abspath(out)), "images")
-    _os.makedirs(folder, exist_ok=True)
-    with open(_os.path.join(folder, f"banner-{number}.svg"), "w", encoding="utf-8") as f:
-        f.write(svg)
-    return f"{IMAGES}/banner-{number}.svg"
-
-
-def header(number, title, line, card):
-    """The top of a chapter: the title (a Markdown heading, for the tables of contents), the band and the card."""
-    rows = [f"| **{k}** | {v} |" for k, v in card]
-    rows = "\n".join([rows[0], "|---|---|", *rows[1:]])          # the first row is the header row of the table
-    return (f"# {number}. {title}\n\n"
-            f'[![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)]({NB}) '
-            f'<a href="{DL}" download><img src="https://img.shields.io/badge/Download-notebook-F37626?logo=jupyter&logoColor=white" alt="Download the notebook"></a>\n\n'
-            f'<img src="{banner(number, title, line)}" alt="duckOSM notebook manual, chapter {number}: {_html.escape(title)}" width="100%">\n\n'
-            f"{rows}")
-
-
-cells.append(md(header(1, "Get and build an area",
-    "From a place, a box, a polygon or your own OSM file to one network file",
-    [("You learn", "the parts of a duckOSM build; seven ways to choose an area; the modes; your own PBF file; the build options and `config=`; where the files go"),
-     ("Time", "about 3 minutes (the first download included)"),
-     ("Extras", "`duckosm[widget,viz]` (the install cell installs them)"),
-     ("Next", "[2. Look inside the file](02_inspect.md): the tables, the columns and SQL")])))
-
-cells.append(code("""# Install duckOSM when it is not installed (for example in Colab). It takes approximately 1 minute.
-# Until duckOSM 0.9.0 is on PyPI, the SDK of these notebooks is in the nightly wheel of main (the GitHub pre-release "nightly").
-import importlib.util, json, urllib.request
-def nightly_wheel():       # the address of the newest nightly wheel
-    release = json.load(urllib.request.urlopen("https://api.github.com/repos/Khoshkhah/duckOSM/releases/tags/nightly"))
-    return next(a["browser_download_url"] for a in release["assets"] if a["name"].endswith(".whl"))
-if importlib.util.find_spec("duckosm") is None:      # not installed: install it with the extras of this notebook
-    %pip install -q "duckosm[widget,viz] @ {nightly_wheel()}"
-import duckosm             # the SDK
-if not hasattr(duckosm, "network"):                    # an old duckOSM (0.8.0 or older), without the SDK
-    %pip install -q --force-reinstall --no-deps "duckosm @ {nightly_wheel()}"
-    raise SystemExit("duckOSM is updated: restart the session (in Colab: Runtime > Restart session), then run this cell again")
-print("duckosm", duckosm.__version__)    # the version"""))
-
-cells.append(md("""## The parts of a build
+ch.md("""## The parts of a build
 
 A duckOSM build has three steps. Each step has its own call, and `duckosm.network` does all three in one call.
 
@@ -120,33 +34,33 @@ own data can join to it (chapter 5).
 > are in the same `.duckdb` file, and `edge_id` connects them to your own data.
 
 > **Tip:** you can open the file with any DuckDB tool (the `duckdb` program, DBeaver, Python's `duckdb`), not only
-> with duckOSM."""))
+> with duckOSM.""")
 
-cells.append(md("""## Quick start: one call
+ch.md("""## Quick start: one call
 
 `duckosm.network` gets the area and builds it. Here the area is the city of Monaco, OSM relation 2220322. The
-argument `modes` chooses the networks: driving and walking."""))
-cells.append(code("""net = duckosm.network(osm_id=2220322, modes=["driving", "walking"], name="monaco")    # get and build Monaco
-net                                                                                 # the card of the network"""))
-cells.append(md("""**What the output shows.** The progress lines name each step: the boundary from Nominatim, the extract and the
+argument `modes` chooses the networks: driving and walking.""")
+ch.code("""net = duckosm.network(osm_id=2220322, modes=["driving", "walking"], name="monaco")    # get and build Monaco
+net                                                                                 # the card of the network""")
+ch.md("""**What the output shows.** The progress lines name each step: the boundary from Nominatim, the extract and the
 cut, then the build. The card at the end shows the file and, for each mode, the number of edges and nodes and the
 length in km. A `Network` is also the path of its file, so `str(net)` gives `data/monaco.duckdb`.
 
 > **Warning:** the name "Monaco" finds the *country* of Monaco, whose boundary includes a large part of the sea. That
 > is why this chapter uses the OSM id of the city. When a name gives the wrong area, find its OSM id on
-> [openstreetmap.org](https://www.openstreetmap.org) (search, then the "Relation" number) and use `osm_id=`."""))
+> [openstreetmap.org](https://www.openstreetmap.org) (search, then the "Relation" number) and use `osm_id=`.""")
 
-cells.append(md("""## The summary of each mode
+ch.md("""## The summary of each mode
 
 `net.summary()` gives one row for each mode: the edges, the nodes, the length in km and the length of the one-way
-roads. `net.modes` lists the modes of the file."""))
-cells.append(code("""print(net.modes)       # the modes in the file
-net.summary()          # one row for each mode"""))
-cells.append(md("""**What the output shows.** The walking network is much larger than the driving network: it has the footways,
+roads. `net.modes` lists the modes of the file.""")
+ch.code("""print(net.modes)       # the modes in the file
+net.summary()          # one row for each mode""")
+ch.md("""**What the output shows.** The walking network is much larger than the driving network: it has the footways,
 the steps and the paths, and both sides of the streets where OSM draws the sidewalks. A two-way road is two edges,
-one for each direction."""))
+one for each direction.""")
 
-cells.append(md("""## The modes
+ch.md("""## The modes
 
 A mode is one network. Each mode keeps the roads that it can use, with its own rules.
 
@@ -164,10 +78,10 @@ has the steps and footways of the old town; driving has the tunnel loop in the w
 > **Key idea:** a road can be in more than one mode. A street with sidewalks is in all three, with the same
 > `edge_id` in each mode. So you join your data once, and it is correct in every mode.
 
-`net.walking` (or `net["walking"]`) is the view of one mode: the same calls, without `mode=`."""))
-cells.append(code("""net.walking            # the card of one mode"""))
+`net.walking` (or `net["walking"]`) is the view of one mode: the same calls, without `mode=`.""")
+ch.code("""net.walking            # the card of one mode""")
 
-cells.append(md("""## Seven ways to choose an area
+ch.md("""## Seven ways to choose an area
 
 `duckosm.get` does steps 1 and 2 and gives an `Area`: the cut OSM file and its boundary. It does not build. Use it
 to look at an area before the build, or to build it later with other options. Each way below is one argument.
@@ -182,77 +96,77 @@ to look at an area before the build, or to build it later with other options. Ea
 | `boundary` | your own polygon: a GeoJSON file, a GeoJSON dict, or a shapely or GeoPandas object | `duckosm.get(boundary="district.geojson")` |
 | `pbf` (in `network`) | an OSM file that you have | see "Your own PBF file" below |
 
-The extract stays in the cache, so each next area in Monaco needs no download."""))
+The extract stays in the cache, so each next area in Monaco needs no download.""")
 
-cells.append(md("""### A box around a point
+ch.md("""### A box around a point
 
-`point` with `dist_m` is the same as OSMnx's `graph_from_point`: a box of 2 × 500 m around the casino square."""))
-cells.append(code("""casino = duckosm.get(point=(7.4280, 43.7393), dist_m=500, name="casino", out="data")   # an Area: the file and the boundary
-casino                                                                                  # the card of the area"""))
-cells.append(md("""**What the output shows.** The progress line counts the nodes, ways and relations of the cut. The card names the
-two files: the cut OSM file and the boundary. The box is a small part of the extract."""))
+`point` with `dist_m` is the same as OSMnx's `graph_from_point`: a box of 2 × 500 m around the casino square.""")
+ch.code("""casino = duckosm.get(point=(7.4280, 43.7393), dist_m=500, name="casino", out="data")   # an Area: the file and the boundary
+casino                                                                                  # the card of the area""")
+ch.md("""**What the output shows.** The progress line counts the nodes, ways and relations of the cut. The card names the
+two files: the cut OSM file and the boundary. The box is a small part of the extract.""")
 
-cells.append(md("""### A box in degrees
+ch.md("""### A box in degrees
 
-`bbox` takes west, south, east and north, in this order (the order of GeoJSON and of OSMnx 2)."""))
-cells.append(code("""harbour = duckosm.get(bbox=(7.418, 43.730, 7.430, 43.738), name="harbour", out="data")   # the harbour of Monaco
-harbour"""))
+`bbox` takes west, south, east and north, in this order (the order of GeoJSON and of OSMnx 2).""")
+ch.code("""harbour = duckosm.get(bbox=(7.418, 43.730, 7.430, 43.738), name="harbour", out="data")   # the harbour of Monaco
+harbour""")
 
-cells.append(md("""### Your own polygon
+ch.md("""### Your own polygon
 
 `boundary` takes a polygon. Here it is a shapely polygon; a GeoJSON file or a GeoPandas object work the same way.
-duckOSM writes it to `<out>/<name>.geojson`."""))
-cells.append(code("""from shapely.geometry import Polygon                       # any object with __geo_interface__ works
+duckOSM writes it to `<out>/<name>.geojson`.""")
+ch.code("""from shapely.geometry import Polygon                       # any object with __geo_interface__ works
 monte_carlo = Polygon([(7.420, 43.737), (7.432, 43.737), (7.432, 43.745), (7.420, 43.745)])
 mc = duckosm.get(boundary=monte_carlo, name="monte_carlo", out="data")
-mc"""))
+mc""")
 
-cells.append(md("""### Look before you get: `dry_run`
+ch.md("""### Look before you get: `dry_run`
 
 `dry_run=True` downloads and writes nothing. It tells you which extract the area needs, its size, and whether it is
-in the cache already. Use it before a large area."""))
-cells.append(code("""plan = duckosm.get(osm_id=2220322, dry_run=True)        # no download, no file
-{k: plan["extract"][k] for k in ("name", "km2", "bytes", "cached")}"""))
+in the cache already. Use it before a large area.""")
+ch.code("""plan = duckosm.get(osm_id=2220322, dry_run=True)        # no download, no file
+{k: plan["extract"][k] for k in ("name", "km2", "bytes", "cached")}""")
 
-cells.append(md("""## Build an area
+ch.md("""## Build an area
 
 `area.build` does step 3 for an `Area`. Its arguments are the same as those of `duckosm.network`: `modes`, `output`,
-`fixes` and the build options (below)."""))
-cells.append(code("""casino_net = casino.build(modes=["walking"])      # the walking network of the box around the casino
-casino_net.summary()"""))
+`fixes` and the build options (below).""")
+ch.code("""casino_net = casino.build(modes=["walking"])      # the walking network of the box around the casino
+casino_net.summary()""")
 
-cells.append(md("""## Choose the area on a map
+ch.md("""## Choose the area on a map
 
 `duckosm.AreaPicker` is a map in the notebook. Choose an area with one of the tabs (Search, OSM id, Box, H3 cell,
 File); the line under the map shows the extract and its size. Click **Get**, or call `picker.get()`. You can also set
 the area from Python with `picker.area`: the widget then shows its tab and its value.
 
-![The AreaPicker widget: the OSM id 2220322 gives the city of Monaco](https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/docs/images/area-picker.png)"""))
-cells.append(code("""picker = duckosm.AreaPicker(out="data")                 # the files go into the folder data/
+![The AreaPicker widget: the OSM id 2220322 gives the city of Monaco](https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/docs/images/area-picker.png)""")
+ch.code("""picker = duckosm.AreaPicker(out="data")                 # the files go into the folder data/
 picker.area = {"mode": "osm_id", "osm_id": 2220322}      # the area when you choose none on the map
-picker                                                    # the map"""))
-cells.append(code("""area = picker.result or picker.get()    # the result of Get, or get it now
-area"""))
+picker                                                    # the map""")
+ch.code("""area = picker.result or picker.get()    # the result of Get, or get it now
+area""")
 
-cells.append(md("""## Your own PBF file
+ch.md("""## Your own PBF file
 
 `pbf=` takes an `.osm.pbf` file that you already have: from Geofabrik, from BBBike, from your own OSM editor, or a
 file that you cut with osmium. Without `boundary=`, the whole file is the area. With it, duckOSM cuts the file to
-the boundary before the build. Here the file is a Monaco extract (0.6 MB)."""))
-cells.append(code("""import urllib.request                                                           # your own file: here, a download
+the boundary before the build. Here the file is a Monaco extract (0.6 MB).""")
+ch.code("""import urllib.request                                                           # your own file: here, a download
 mine = "data/my_monaco.osm.pbf"
 urllib.request.urlretrieve("https://github.com/Khoshkhah/duckOSM/raw/main/tests/data/monaco.osm.pbf", mine)
 whole = duckosm.network(pbf=mine, name="monaco_whole", modes=["driving"])        # the whole file
-whole.summary()"""))
-cells.append(code("""cut = duckosm.network(pbf=mine, boundary="data/monte_carlo.geojson", name="monte_carlo_cut", modes=["driving"])
-cut.summary()                                                                     # only the roads in Monte Carlo"""))
-cells.append(md("""**What the output shows.** The cut to the Monte Carlo polygon (from "Your own polygon" above) keeps about a
+whole.summary()""")
+ch.code("""cut = duckosm.network(pbf=mine, boundary="data/monte_carlo.geojson", name="monte_carlo_cut", modes=["driving"])
+cut.summary()                                                                     # only the roads in Monte Carlo""")
+ch.md("""**What the output shows.** The cut to the Monte Carlo polygon (from "Your own polygon" above) keeps about a
 quarter of the driving edges of the whole file (779 of 2844).
 
 > **Tip:** if the download of an extract fails on your machine (some cloud networks block Geofabrik), get the file
-> another way and use `pbf=`."""))
+> another way and use `pbf=`.""")
 
-cells.append(md("""## The build options
+ch.md("""## The build options
 
 These keywords work in `duckosm.network`, `area.build` and `duckosm.build`. Each one sets one key of the config file.
 
@@ -268,46 +182,46 @@ These keywords work in `duckosm.network`, `area.build` and `duckosm.build`. Each
 | `levels` | `True` | `False`: no drawing order of the roads (bridges over tunnels) |
 | `dem` | none | a DEM file (GeoTIFF): the heights of the nodes and of the edges, after the build |
 
-A smaller build is faster. Here the build has no bus routes, no base map and no drawing order."""))
-cells.append(code("""small = duckosm.network(osm_id=2220322, name="monaco_small", modes=["driving"],
+A smaller build is faster. Here the build has no bus routes, no base map and no drawing order.""")
+ch.code("""small = duckosm.network(osm_id=2220322, name="monaco_small", modes=["driving"],
                         bus_routes=False, features=False, levels=False)       # three options off
-sorted({t.split(".")[0] for t in small.tables()})                           # the schemas of the file"""))
-cells.append(md("""**What the output shows.** The file has only `driving` and `main`: no `bus` (no bus routes), no `features` and
+sorted({t.split(".")[0] for t in small.tables()})                           # the schemas of the file""")
+ch.md("""**What the output shows.** The file has only `driving` and `main`: no `bus` (no bus routes), no `features` and
 `raw` (no base map) and no `visualization` (no drawing order). Compare it with the schemas of `net` from the quick
-start."""))
-cells.append(code("""sorted({t.split(".")[0] for t in net.tables()})          # the schemas of a build with the defaults"""))
+start.""")
+ch.code("""sorted({t.split(".")[0] for t in net.tables()})          # the schemas of a build with the defaults""")
 
-cells.append(md("""### Every other option: `config=`
+ch.md("""### Every other option: `config=`
 
 The config file has many more keys (`config/template.yaml` in the repository lists them all). `config=` takes such a
 file (YAML or JSON) or a Python dict. A keyword wins over the same key of the config.
 
 > **Warning:** a wrong keyword stops the call with the nearest name, for example
-> `network has no argument 'bus_route': did you mean 'bus_routes'?`."""))
-cells.append(code("""cfg = {"options": {"bus_routes": False}, "clip": {"connect_snap_m": 5}}      # two keys of the config file
+> `network has no argument 'bus_route': did you mean 'bus_routes'?`.""")
+ch.code("""cfg = {"options": {"bus_routes": False}, "clip": {"connect_snap_m": 5}}      # two keys of the config file
 tuned = duckosm.network(osm_id=2220322, name="monaco_tuned", modes=["walking"], config=cfg,
                         features=False, levels=False)
-tuned.summary()"""))
-cells.append(code("""try:
+tuned.summary()""")
+ch.code("""try:
     duckosm.network(osm_id=2220322, name="x", modes=["driving"], bus_route=False)    # a wrong name
 except duckosm.DuckOSMError as e:
-    print(e)"""))
+    print(e)""")
 
-cells.append(md("""## Open the file again
+ch.md("""## Open the file again
 
-The file stays on disk. `duckosm.open` gives its `Network` in a new session, without a build."""))
-cells.append(code("""again = duckosm.open("data/monaco.duckdb")      # the file of the quick start
-again.summary()"""))
+The file stays on disk. `duckosm.open` gives its `Network` in a new session, without a build.""")
+ch.code("""again = duckosm.open("data/monaco.duckdb")      # the file of the quick start
+again.summary()""")
 
-cells.append(md("""## Where the files go
+ch.md("""## Where the files go
 
 | File | Where | Set it with |
 |---|---|---|
 | the `.duckdb` file | `<out>/<name>.duckdb` (default `data/<name>.duckdb`) | `out=`, `name=`, or `output=` in `build` |
 | the cut OSM file and the boundary | `<out>/<name>.osm.pbf`, `<out>/<name>.geojson` | `out=`, `name=` |
-| the Geofabrik extracts | the cache: `~/.cache/duckosm` | the setting `DUCKOSM_CACHE` |"""))
+| the Geofabrik extracts | the cache: `~/.cache/duckosm` | the setting `DUCKOSM_CACHE` |""")
 
-cells.append(md("""## Try it yourself
+ch.md("""## Try it yourself
 
 **1.** Get the walking network of 1 km around a place that you know, with `point=` and `dist_m=1000`.
 
@@ -337,9 +251,9 @@ set(net.columns("driving.edges").column_name) - set(fast.columns("driving.edges"
 plan = duckosm.get("Tartu", dry_run=True)     # any city name
 plan["extract"]["name"], round(plan["extract"]["bytes"] / 1e6, 1), "MB"
 ```
-</details>"""))
+</details>""")
 
-cells.append(md("""## Words in this chapter
+ch.md("""## Words in this chapter
 
 | Word | Meaning |
 |---|---|
@@ -351,9 +265,9 @@ cells.append(md("""## Words in this chapter
 | mode | one network: driving, walking or cycling |
 | edge | one direction of a road between two nodes: a row of `<mode>.edges` |
 | node | a point where edges meet: a row of `<mode>.nodes` |
-| `edge_id` | the number of an edge; it stays the same when you build the area again |"""))
+| `edge_id` | the number of an edge; it stays the same when you build the area again |""")
 
-cells.append(md("""## Summary
+ch.md("""## Summary
 
 | Call | Does |
 |---|---|
@@ -366,13 +280,6 @@ cells.append(md("""## Summary
 | `net.summary()`, `net.modes`, `net.walking` | the modes of a file |
 
 The reference: [Python SDK, Core](../reference/python.md). **Next:** [2. Look inside the file](02_inspect.md), the
-tables, the columns and SQL."""))
+tables, the columns and SQL.""")
 
-for c in cells[1:]:
-    if c.cell_type == "markdown":
-        c.source = styled(c.source)
-nb = nbformat.v4.new_notebook()
-nb.cells = cells
-nb.metadata["kernelspec"] = {"name": "python3", "display_name": "Python 3", "language": "python"}
-nbformat.write(nb, out)
-print(len(cells), "cells")
+ch.write(sys.argv[1])
