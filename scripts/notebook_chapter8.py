@@ -289,28 +289,63 @@ ch.md("""Each polygon follows the streets and the steps, not a circle: the hills
 
 ch.md("""## Accessibility: `accessibility`
 
-`accessibility(origins, targets, minutes)` answers: how many targets can I reach from each origin, and which target is
-the nearest? The targets can be bus stops, schools, shops, pharmacies or parks. The result is a DataFrame with one row for each
-origin and these columns:
+### What accessibility is
 
-| Column | What it is |
+Accessibility answers two questions for each place where people start, for example each street where people live:
+
+- How many targets can I reach within 5 or 10 minutes?
+- Which target is the nearest, and how far is it?
+
+The targets are the places that people go to: bus stops, schools, shops, pharmacies or parks.
+
+### How duckOSM finds it
+
+1. It searches the roads from each start place, up to the largest time (one search for each start, in parallel).
+2. It counts the targets that it reaches within each time.
+3. It keeps the nearest target and its time.
+
+### The call
+
+`net.walking.accessibility(origins, targets, minutes)` gives a DataFrame with one row for each start place.
+
+| Argument | What it is |
 |---|---|
-| `n_<m>min` | the number of targets within `m` minutes, one column for each time |
-| `nearest` | the nearest target (its label, or its number in the list) |
+| `origins` | the start places: edge ids, `(lon, lat)` points or names, in a list or a dict `{name: place}` |
+| `targets` | the places to reach, in the same forms. With a dict, the names appear in the result |
+| `minutes` | the times: one number or a list |
+
+| Column of the result | What it is |
+|---|---|
+| `n_5min`, `n_10min` ... | the number of targets within each time |
+| `nearest` | the nearest target: its name in the dict |
 | `nearest_s` | the time to the nearest target, in seconds |
 
-The call uses `matrix` with `max_cost` at the largest time, so a target farther than that has no time, and an origin
-with no target in the time has `None` and `NaN`. Here each walking edge is an origin, and the targets are three
-points.""")
-ch.code("""stops = [(7.4155, 43.7285), (7.4246, 43.7384), (7.4335, 43.7468)]    # three targets: Fontvieille, the port, Larvotto
-homes = net.walking.edges().edge_id.tolist()                         # each walking edge is an origin
-t = time.perf_counter()                                              # start the clock
-acc = net.walking.accessibility(homes, stops, minutes=[5, 10])       # the targets within 5 and 10 minutes
-print(f"{len(homes):,} origins in {time.perf_counter() - t:.2f} s")  # the time
-acc.head()                                                           # a row for each origin edge""")
-ch.code("""acc[["n_5min", "n_10min"]].apply(lambda c: c.value_counts().sort_index()).fillna(0).astype(int)    # origins for each count of targets""")
-ch.md("""**What the output shows.** The call found the targets of all 11,938 walking edges in about half a second. With 5 minutes, 3,217 edges reach one stop, and 8,721 edges reach none. With 10 minutes, 8,194 edges reach one stop, 328 edges reach two, and 3,416 edges reach none. An edge with no stop in 10 minutes has `None` in `nearest` and `NaN` in `nearest_s`, and it stays gray on the map. The dark edges around the three stops are the nearest. The yellow edges are about 9 minutes away.""")
-ch.code("""net.map("walking", color_by=acc["nearest_s"] / 60, cmap="viridis")    # each edge colored by the minutes to its nearest target""")
+A start place with no target within the largest time has `None` in `nearest` and `NaN` in `nearest_s`.
+
+Here the start places are all the walking edges of Monaco, and the targets are three places with names.""")
+ch.code("""targets = {"Fontvieille": (7.4155, 43.7285),                     # three targets, with their names
+           "the port": (7.4246, 43.7384),
+           "Larvotto": (7.4335, 43.7468)}
+homes = net.walking.edges().edge_id                               # each walking edge is a start place
+acc = net.walking.accessibility(homes, targets, minutes=[5, 10])  # the targets within 5 and 10 minutes
+acc.head()                                                        # one row for each start edge""")
+ch.md("""Each row is one walking edge: the number of targets within 5 and 10 minutes, the nearest target and its time
+in seconds. The fourth edge reaches no target within 10 minutes, so its `nearest` is `None`.
+
+### Count the results
+
+`value_counts` counts the edges for each number of targets.""")
+ch.code("""acc.n_10min.value_counts().sort_index()      # how many edges reach 0, 1 or 2 targets within 10 minutes""")
+ch.code("""acc.nearest.value_counts(dropna=False)       # how many edges have each target as the nearest""")
+ch.md("""Within 10 minutes, 8,194 edges reach one target, 328 edges reach two, and 3,416 edges reach none. Fontvieille is
+the nearest target of 3,517 edges, the port of 3,039 and Larvotto of 1,966.
+
+### Draw it on the map
+
+The map colors each walking edge by the minutes to its nearest target. An edge with no target within 10 minutes
+stays gray.""")
+ch.code("""net.map("walking", color_by=acc["nearest_s"] / 60, cmap="viridis")    # the minutes to the nearest target""")
+ch.md("""The dark edges are near a target, and the yellow edges are about 9 minutes away.""")
 
 ch.md("""## The graph of all calls: `routed_graph`
 

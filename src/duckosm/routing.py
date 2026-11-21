@@ -167,6 +167,15 @@ def _labels(places):
     return places if all(isinstance(p, (int, str)) for p in places) else list(range(len(places)))
 
 
+def _named(places):
+    """The places and their labels: a dict ``{label: place}`` gives its keys as the labels; a list gives the places
+    themselves (edge ids, names) or their numbers (points)."""
+    if isinstance(places, dict):
+        return list(places.values()), list(places.keys())
+    places = list(places)
+    return places, _labels(places)
+
+
 def _router(db, mode, weight):
     from duckosm import _api
     if weight not in WEIGHTS:
@@ -266,12 +275,15 @@ def matrix(net, origins, destinations=None, mode=None, weight="time", max_cost=N
     destination edge. NaN: not connected, more than ``max_cost``, or an edge that is not in the graph of the mode. One Dijkstra search for each origin, in parallel
     (Rust); ``max_cost`` stops each search early.
 
+    Origins and destinations are lists of places (edge ids, ``(lon, lat)`` points, names), or a dict
+    ``{label: place}``: then the labels name the rows and the columns.
+
     >>> m = duckosm.routing.matrix(net.driving, edge_ids[:100])"""
     import numpy as np
     import pandas as pd
     db, mode = resolve(net, mode)
-    origins = list(origins)
-    destinations = origins if destinations is None else list(destinations)
+    origins, o_labels = _named(origins)
+    destinations, d_labels = (origins, o_labels) if destinations is None else _named(destinations)
     ids = _edge_ids(db, mode, origins + destinations)
     o, d = ids[:len(origins)], ids[len(origins):]
     own = _own_weight(db, mode, weight, d)
@@ -279,7 +291,7 @@ def matrix(net, origins, destinations=None, mode=None, weight="time", max_cost=N
     cost = np.array(_router(db, mode, weight).costs(o, d, limit), dtype=float).reshape(len(o), len(d))
     cost = cost + np.array([own.get(e, 0.0) for e in d])
     cost[cost > limit] = np.nan
-    return pd.DataFrame(cost, index=_labels(origins), columns=_labels(destinations))
+    return pd.DataFrame(cost, index=o_labels, columns=d_labels)
 
 
 def isochrones(net, origins, minutes=(5, 10, 15), mode=None, buffer_m=25.0):
@@ -293,7 +305,7 @@ def isochrones(net, origins, minutes=(5, 10, 15), mode=None, buffer_m=25.0):
     import pandas as pd
     from shapely import Polygon, union_all
     db, mode = resolve(net, mode)
-    origins, minutes = list(origins), sorted(float(m) for m in ([minutes] if isinstance(minutes, (int, float)) else minutes))
+    (origins, labels), minutes = _named(origins), sorted(float(m) for m in ([minutes] if isinstance(minutes, (int, float)) else minutes))
     ids = _edge_ids(db, mode, origins)
     reach = _router(db, mode, "time").reach(ids, max(minutes) * 60)
     every = sorted({e for hit, _ in reach for e in hit})
@@ -301,7 +313,7 @@ def isochrones(net, origins, minutes=(5, 10, 15), mode=None, buffer_m=25.0):
     edges = Network(_file(db)).edges(mode, where=f"edge_id IN ({','.join(map(str, every)) or 'NULL'})", crs="utm")
     geom = dict(zip(edges["edge_id"].astype(int), edges.buffer(buffer_m, resolution=4)))
     rows = []
-    for label, (hit, cost) in zip(_labels(origins), reach):
+    for label, (hit, cost) in zip(labels, reach):
         total = pd.Series(cost, index=hit) + pd.Series([own[e] for e in hit], index=hit)
         poly, done = None, 0.0
         for m in minutes:                   # each polygon: the one before, and the edges of the next minutes
