@@ -536,7 +536,10 @@ The steps of the first cell:
    their block, so they get no street space.
 2. Make the street space: each other road with its width, less the buildings. A street never goes through a building.
 3. Take the outline of the street space: the two edges of each street.
-4. Take the street space out of the extra areas (the parks and the sea), so that they do not fill the streets.""")
+4. Take the street space out of the extra areas (the parks and the sea), so that they do not fill the streets.
+5. Give momepy each building and area 10 cm smaller. Where a building touches a street edge, momepy otherwise puts
+   the street strip into the block of that building. This changes only the input: the blocks are made of momepy's
+   cells, so their shapes do not change.""")
 ch.code("""half = streets["width"] / 2                                                     # half of the width, in metres
 inside = streets.sjoin(blocks[["geometry"]], predicate="within").index.unique()  # 1. the roads that stop inside a block
 between = streets.drop(inside)                                                  # the roads between the blocks
@@ -547,6 +550,8 @@ cut = gpd.GeoDataFrame(geometry=cut, crs=crs).reset_index(drop=True)
 extra2 = extra.difference(space).explode(index_parts=False)                      # 4. the extra areas less the streets
 extra2 = extra2[extra2.geom_type.eq("Polygon") & (extra2.area > 20)]
 things2 = gpd.GeoDataFrame(geometry=pd.concat([buildings.geometry, extra2]), crs=crs).reset_index(drop=True)
+things2 = gpd.GeoDataFrame(geometry=things2.buffer(-0.1), crs=crs)               # 5. 10 cm smaller: they touch no street
+things2 = things2[~things2.is_empty].reset_index(drop=True)
 len(inside), round(space.intersection(land).area / 1e6, 2)                      # roads inside a block, km² of street space""")
 ch.md("""1,871 roads stop inside a block on the first map, so they get no street space. The street space of the other
 roads covers 0.30 km² of the land of Monaco.""")
@@ -558,7 +563,7 @@ blocks2, _ = momepy.generate_blocks(cells2, cut, things2)                       
 blocks2 = gpd.GeoDataFrame(geometry=blocks2.intersection(land), crs=crs).explode(index_parts=False)    # only the land
 blocks2 = blocks2[blocks2.area > 1].reset_index(drop=True)
 len(blocks2), round(blocks2.area.sum() / 1e6, 2)                                # blocks, km²""")
-ch.md("""momepy makes 441 blocks on the land, and they cover 1.78 km². There are more blocks than on the first map,
+ch.md("""momepy makes 447 blocks on the land, and they cover 1.70 km². No block covers the street space. There are more blocks than on the first map,
 because the street edges cut the land into more pieces.""")
 ch.code("""block_map(blocks2, space)                                                        # momepy's blocks with the street edges""")
 ch.md("""The street space is white between the blocks. Each block is a block of momepy: momepy made it with the street
