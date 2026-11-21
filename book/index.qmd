@@ -1,0 +1,34 @@
+# Preface {.unnumbered}
+
+This book teaches duckOSM from the Python SDK. Each chapter is one Jupyter notebook: you read it here, and you can
+run the same notebook in Colab with the button at the top of the chapter.
+
+duckOSM builds the road network of an area from OpenStreetMap into one DuckDB file: the networks of each mode
+(driving, walking, cycling), the nodes, the turns and the base map. Each road has an `edge_id` that stays the same
+when you build the area again, so your own data can join to it.
+
+## How to read this book
+
+| Part | Chapters |
+|---|---|
+| The core | 1. Get and build an area · 2. Look inside the file · 3. Draw the network · 4. Exports · 5. Join your data by `edge_id` |
+| The modules | analysis, GIS, routing, simulation, planning, mobility, HD maps, graph machine learning, OSM fixes |
+
+Each chapter starts with what you learn and how long it takes, and ends with exercises, the words of the chapter
+and a summary. The boxes in the text have one job each:
+
+::: {.callout-note .output-note title="What the output shows"}
+After an output: what the numbers and the card mean.
+:::
+
+::: {.callout-important .key-idea title="Key idea"}
+One idea of a section that you must keep.
+:::
+
+::: {.callout-tip title="Tip"}
+A good way to do something, or a short way.
+:::
+
+::: {.callout-warning title="Warning"}
+A trap, and how to avoid it.
+:::

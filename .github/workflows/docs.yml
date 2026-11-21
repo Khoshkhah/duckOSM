@@ -3,7 +3,7 @@ name: Docs
 on:
   push:
     branches: [main]
-    paths: ["docs/**", "mkdocs.yml", ".github/workflows/docs.yml"]
+    paths: ["docs/**", "book/**", "mkdocs.yml", ".github/workflows/docs.yml"]
   workflow_dispatch:
 
 permissions:
@@ -33,6 +33,14 @@ jobs:
       - run: python scripts/notebook_pages.py
       - run: rm -rf docs/design docs/rust docs/proposals docs/development.md docs/lane_map.md
       - run: zensical build
+      # the notebook book (book/, Quarto): its chapters come from docs/notebooks with their saved outputs; it goes to
+      # site/book/, next to the manual. Quarto needs no Jupyter kernel here (execute: enabled: false).
+      - uses: quarto-dev/quarto-actions/setup@v2
+        with:
+          version: 1.11.9
+      - run: python book/make_book.py
+      - run: quarto render book
+      - run: cp -r book/_book site/book
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site

@@ -1,5 +1,9 @@
 # Notebooks
 
+**Read the chapters as a book:** [the duckOSM notebook book](https://khoshkhah.github.io/duckOSM/book/) has the
+chapters in the book style, with numbered sections, boxes and a light and a dark theme. Each chapter has a button to
+run it in Colab.
+
 The Jupyter notebooks show duckOSM from Python. Each notebook uses Monaco, installs duckOSM when it is not installed,
 and runs in less than 2 minutes. The pages show the outputs of a run on Monaco. A map on a page is a picture; when you
 run the notebook, you get the live map.
