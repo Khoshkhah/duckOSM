@@ -185,6 +185,19 @@ and the plain arrays serve any other library.
 neural networks. `duckosm.ml.to_pyg` takes the same arguments as `graph_arrays` and gives a
 `torch_geometric.data.Data` object. The `ml` extra installs `torch` and `torch_geometric`.
 
+A `Data` object holds one whole graph in a few tensors (the arrays of PyTorch):
+
+- **the nodes and their features**, as a matrix with one row for each node and one column for each feature (`x`);
+- **the arcs**, as a list of pairs (from node, to node), kept as two rows of numbers (`edge_index`). For example, the
+  column `[5, 9]` of `edge_index` is an arc from node 5 to node 9. A graph neural network reads this list to know
+  which nodes are neighbors;
+- **the arc features**, with one row for each arc (`edge_attr`);
+- **the ids of duckOSM**, so that each row goes back to its road (`edge_id`, `node_id`).
+
+The table lists the attributes of the `Data` object that `to_pyg` gives. In the shape column, "nodes", "arcs" and
+"features" are the numbers of nodes, arcs and feature columns of the graph: for the junction graph of Monaco,
+1,768 nodes and 2,840 arcs.
+
 | Attribute | Type | Shape, junction graph | Shape, turn graph | What it is |
 |---|---|---|---|---|
 | `edge_index` | tensor `int64` | (2, arcs) | (2, arcs) | row 0 is `src`, row 1 is `dst` |
