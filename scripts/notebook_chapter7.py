@@ -60,7 +60,9 @@ The routing calls of this chapter search graphs that are tables of the network f
 
 | Graph | Table | Made by default? | Rows in Monaco |
 |---|---|---|---|
-| **one mode**: the turns of the mode | `driving.edge_graph`, `walking.edge_graph`, `cycling.edge_graph` | **yes**, for each mode that you build | 6,754 turns (driving) |
+| **one mode**: the turns of driving | `driving.edge_graph` | **yes**, for each mode that you build | 6,754 turns |
+| **one mode**: the turns of walking | `walking.edge_graph` | **yes**, for each mode that you build | 35,074 turns |
+| **one mode**: the turns of cycling | `cycling.edge_graph` | **yes**, for each mode that you build | 31,366 turns |
 | **multimodal**: the edges of all modes | `mm.edges` | **no**, see below | 26,083 edges |
 | **multimodal**: the changes of mode | `mm.transfers` | **no**, see below | 12,140 changes |
 
