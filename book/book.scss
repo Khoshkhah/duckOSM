@@ -410,3 +410,9 @@ body.quarto-dark div.sourceCode code { color: #9cdcfe !important; }
 #TOC a.nav-link .header-section-number { display: inline-block; width: 2.2rem; text-indent: 0; }
 #TOC ul ul a.nav-link { padding-left: 3.55rem !important; text-indent: -3.05rem; font-size: .8rem; }
 #TOC ul ul a.nav-link .header-section-number { width: 2.8rem; }
+// the sidebar: smaller chapter links, a thin scroll bar, and no line under the title
+.sidebar-navigation .sidebar-item-container .sidebar-link { font-size: .82rem; }
+.sidebar-header, .sidebar-header-item { border-bottom: none !important; }
+#quarto-sidebar, #quarto-sidebar .sidebar-menu-container { scrollbar-width: thin; scrollbar-color: var(--bk-line) transparent; }
+#quarto-sidebar ::-webkit-scrollbar, #quarto-sidebar::-webkit-scrollbar { width: 6px; }
+#quarto-sidebar ::-webkit-scrollbar-thumb, #quarto-sidebar::-webkit-scrollbar-thumb { background: var(--bk-line); border-radius: 3px; }
