@@ -406,7 +406,16 @@ from its kind, and remove the street space from the blocks:
 | street | the other roads for cars | 8 m |
 | footway, steps | `footway`, `steps`, `pedestrian`, `path`, `cycleway`, `corridor` | 2 m |
 
-OSM gives the width of few streets, so these are typical widths, not measured widths.""")
+OSM gives the width of few streets, so these are typical widths, not measured widths.
+
+Some roads go into a block and stop there: a garden path, steps or a driveway. momepy does not cut the block on such
+a road, so the road is a part of the block. The cell keeps these roads in the block and makes the street space only
+from the roads between the blocks. So each block stays one polygon.
+
+Two blocks can also touch with no road between them. The cell draws each block 1.5 m smaller, so a thin gap shows between
+all blocks: `buffer(-2)` makes it 2 m smaller, and `buffer(0.5)` makes it 0.5 m larger again. The two steps also remove
+the thin pieces (less than 4 m wide) that the street space leaves. This is only for the map: the areas of the blocks in the table above are the areas
+of momepy.""")
 ch.code("""main = ["motorway", "trunk", "primary", "secondary", "tertiary"]
 paths = ["footway", "steps", "pedestrian", "path", "cycleway", "corridor"]
 kind = pd.Series("street", index=streets.index)                                 # each road is a street, but:
@@ -416,15 +425,19 @@ kind.value_counts()                                                             
 ch.md("""The map has 4,184 footways and steps, 1,210 streets and 721 main roads. Most lines are footways and steps:
 Monaco has many of them between its streets, on the slopes.""")
 ch.code("""half = kind.map({"main road": 6.0, "street": 4.0, "footway, steps": 1.0})       # half of the width, in metres
-space = streets.buffer(half).union_all()                                        # the street space: each street with its width
+inside = streets.sjoin(blocks[["geometry"]], predicate="within").index.unique()  # the roads that stop inside one block
+between = streets.drop(inside)                                                  # the roads between the blocks
+space = between.buffer(half.drop(inside)).union_all()                           # the street space: each road with its width
 shown = blocks.copy()
-shown["geometry"] = blocks.difference(space)                                    # the blocks without the street space
-round(space.intersection(land.union_all()).area / 1e6, 2), round(shown.area.sum() / 1e6, 2)    # km² of streets, km² of blocks""")
-ch.md("""The street space covers 0.57 km² of the land of Monaco. The blocks without the street space cover 1.39 km².""")
+shown["geometry"] = blocks.difference(space).buffer(-2).buffer(0.5)            # without the street space, 1.5 m smaller
+shown = shown[~shown.is_empty]
+len(inside), round(space.intersection(land.union_all()).area / 1e6, 2), round(shown.area.sum() / 1e6, 2)    # roads inside, km²""")
+ch.md("""1,203 roads stop inside a block, so they stay in their block. The street space of the other roads covers
+0.42 km² of the land of Monaco. The blocks on the map cover 1.37 km².""")
 
 ch.md("""### The map of the blocks
 
-On the map, each block is a half-transparent polygon with a strong border, on top of the buildings. The street
+On the map, each block is a half-transparent polygon with a border inside it, on top of the buildings. The street
 space is white between the blocks. Two blocks that touch never have the same color: `mapclassify.greedy` gives each
 block one of six colors in this way. The size of the blocks is in the table above, not on the map. The plain gray
 areas in the middle are the two ports.
@@ -436,7 +449,7 @@ The map has four layers, from the bottom to the top:
 | The street space | white |
 | The footways and the steps | brown dashed lines |
 | The buildings | gray |
-| The blocks | half-transparent, with a border in the same color; two blocks that touch never have the same color |""")
+| The blocks | half-transparent, 1.5 m smaller, with a border of 1 m inside, in the same color; two neighbors never have the same color |""")
 ch.code("""import io
 
 import geopandas as gpd
@@ -453,9 +466,10 @@ ax.set_facecolor("#e8e8e8")                                # the background in l
 gpd.GeoSeries([space], crs=streets.crs).plot(ax=ax, color="white")             # the street space
 streets[kind == "footway, steps"].plot(ax=ax, color="#8b4513", linewidth=0.5, linestyle="--")    # the footways
 buildings.plot(ax=ax, color="#9e9e9e", edgecolor="#6e6e6e", linewidth=0.2)      # the buildings
-shown.plot(ax=ax, column="color", cmap=six, alpha=0.35)                         # each block: a half-transparent polygon
-shown.boundary.plot(ax=ax, color=[six(c) for c in shown.color], linewidth=1.3)  # and its border, in its color
-legend = [Patch(facecolor=(0.11, 0.62, 0.47, 0.35), edgecolor="#1b9e77", linewidth=1.3, label="block (six colors)"),
+shown.plot(ax=ax, column="color", cmap=six, alpha=0.45)                         # each block: a half-transparent polygon
+border = shown.difference(shown.buffer(-1))                                     # a band of 1 m inside each block
+gpd.GeoDataFrame(geometry=border, crs=shown.crs).plot(ax=ax, color=[six(c) for c in shown.color])    # its border
+legend = [Patch(facecolor=(0.11, 0.62, 0.47, 0.45), edgecolor="#1b9e77", linewidth=1.5, label="block (six colors)"),
           Patch(facecolor="#9e9e9e", edgecolor="#6e6e6e", label="building"),
           Patch(facecolor="white", edgecolor="#bbbbbb", label="street space"),
           Line2D([], [], color="#8b4513", linewidth=0.8, linestyle="--", label="footway, steps")]
