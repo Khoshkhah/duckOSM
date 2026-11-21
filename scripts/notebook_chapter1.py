@@ -36,6 +36,8 @@ A duckOSM build has three steps.
 
 <img src="https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/docs/notebooks/images/build-flow.svg" alt="The flow of a build: your area, the boundary, the extract, the cut, the network" width="100%">
 
+The table gives each step of a build, what happens in it, and the file that it makes.
+
 | Step | What happens | The result |
 |---|---|---|
 | 1. The boundary | The area becomes a polygon: from a name or an OSM id (Nominatim, the search service of OSM), a box, a point, an H3 cell or your own GeoJSON | `<name>.geojson` |
@@ -317,6 +319,8 @@ ch.code("""again = duckosm.open("monaco.duckdb")
 again.summary()""")
 
 ch.md("""### The work folder
+
+The table says where duckOSM puts its files, and how you change the place.
 
 | Files | Where | Set it with |
 |---|---|---|

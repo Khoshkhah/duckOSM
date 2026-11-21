@@ -290,6 +290,8 @@ of the edge: the OSM way (`osm_id`) and the two nodes (`source`, `target`).
 
 <img src="IMAGES/edge-id.svg" alt="A two-way road is two edges: each direction has its own edge_ref and edge_id" width="100%">
 
+The `edge_id` has three properties. The table says why each one is important for your data.
+
 | Property | Why it is important |
 |---|---|
 | It comes from the OSM data, not from the row number | a new build of the same OSM data gives the same `edge_id` to each edge |

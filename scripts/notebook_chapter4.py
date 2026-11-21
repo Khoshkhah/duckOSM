@@ -188,6 +188,8 @@ below shows it after a click on Boulevard du Larvotto:
 
 <img src="https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/docs/notebooks/images/dashboard-counts.png" alt="The dashboard of the counts: the colored map, and the card of Boulevard du Larvotto in the panel, with vehicles_per_hour 1151" width="100%">
 
+The table names each part of the picture.
+
 | Part | What it shows |
 |---|---|
 | the map | each counted road in the color of its count: light for a low count, dark for a high count. The gray roads have no count |

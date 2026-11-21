@@ -38,6 +38,8 @@ exception: it can also read the network file directly.
 
 <img src="{IMAGES}/hdmap-flow.svg" alt="The flow: the network, the GMNS lanes, then CommonRoad, Lanelet2, the lane graph and OpenDRIVE" width="100%">
 
+The table lists the formats of this chapter, the tools that read them, and the call that writes each one.
+
 | Format | Used by | The call |
 |---|---|---|
 | CommonRoad (`.xml`) | motion planning research, the CommonRoad benchmarks and tools (commonroad-io) | `duckosm.hdmap.to_commonroad` |
