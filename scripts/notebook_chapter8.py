@@ -23,9 +23,8 @@ between all pairs of 100 places, the area that you reach in 10 minutes on foot, 
 
 All these calls search **the same graph**: the edge graph of the mode (the table `<mode>.edge_graph`). In this graph a
 **node is an edge** of the road network, and an **arc is a legal turn** from one edge to the next. A turn that a turn
-restriction forbids has no arc. An arc costs the time (`cost_s`) or the length (`length_m`) of its from-edge.
-
-<img src="{IMAGES}/edge-graph.svg" alt="Four road edges at a junction, and the edge graph: each edge is a node, each legal turn is an arc" width="100%">
+restriction forbids has no arc. An arc costs the time (`cost_s`) or the length (`length_m`) of its from-edge. The
+picture of the turn graph is in [7. Routing](07_routing.md), section "How duckOSM finds a route".
 
 The search runs in Rust. Each call opens the database file, reads the graph once, and searches it with Dijkstra's
 algorithm.
@@ -59,10 +58,10 @@ can be one of three things.
 
 An edge id is the fastest place: it needs no search for the nearest edge.""")
 
-ch.md("""## Build Monaco with two modes
+ch.md("""## Open the network of chapter 1
 
-The chapter uses the driving network and the walking network of the city of Monaco.""")
-ch.code("""net = duckosm.network(osm_id=2220322, modes=["driving", "walking"], name="monaco")    # get and build Monaco
+Chapter 1 builds Monaco with three modes (driving, walking and cycling) and saves it as `monaco.duckdb`. This chapter opens that file with `duckosm.open`: it builds nothing. The routes use the driving network and the walking network.""")
+ch.code("""net = duckosm.open("monaco.duckdb")    # the network of chapter 1: Monaco, three modes
 net                                                                                 # the card of the network""")
 
 ch.md("""## The Route object
@@ -73,19 +72,35 @@ ch.code("""r = net.driving.route("Boulevard Albert 1er", "Avenue Princesse Grace
 r                                                                        # the card: edges, length, time""")
 ch.md("""The route by car from Boulevard Albert 1er to Avenue Princesse Grace has 33 edges, 1,350 m and 122 s (2.0 minutes). Each name became a point (with `geocode`), so the route starts and ends at the points on the two streets, not at the ends of whole edges.""")
 
-ch.md("""### The members of a Route
+ch.md("""### What a Route stores, and what it reads from the file
 
-| Member | Gives |
+A `Route` is small. It keeps only the result of the search, and two links to the network:
+
+| Stored in the Route | In this example |
 |---|---|
-| `r.edge_ids` | the edge ids, in the order of the route |
-| `r.edges` | a GeoDataFrame of the edges in the order of the route: `seq`, `edge_id` and the columns of `<mode>.edges` |
-| `r.length_m`, `r.time_s` | the sums of `length_m` and `cost_s` of the edges |
-| `r.geometry` | one shapely line (a `MultiLineString` where the edges do not join) |
-| `r.directions()` | the turn-by-turn steps |
-| `r.map()` | the route on the roadstyle map of the network |
+| the edge ids, in the order of the route (`r["edges"]`) | 33 edge ids |
+| the time and the length (`r["time_s"]`, `r["length_m"]`) | 122 s, 1,350 m |
+| the start and the end (`r["start"]`, `r["end"]`): the point, the nearest road point, its `edge_id`, how far along the edge (`fraction`), and the walk to the road (`access_m`, `access_s`) | the end is 12 m from its road |
+| the steps of the search (`r["path"]`) | 33 steps |
+| the network file, and the mode (hidden: `r._db`, `r._mode`) | `monaco.duckdb`, `driving` |
 
-`r.edges` has all the columns of the edges table, so you can count the road classes of a route or sum the length of
-its tunnels.""")
+The `Route` does not store the columns of the edges. When you ask for them, it opens its network file again and
+reads the 33 edges with a query (`SELECT ... FROM driving.edges WHERE edge_id IN (...)`), in the order of the route.
+
+| Member | Gives | From |
+|---|---|---|
+| `r.edge_ids` | the edge ids, in the order of the route | the Route |
+| `r.length_m`, `r.time_s` | the sums of `length_m` and `cost_s` of the edges | the Route |
+| `r.edges` | a GeoDataFrame of the edges in the order of the route: `seq`, `edge_id` and all the columns of `<mode>.edges` (`name`, `highway` ...) | the file, at each call |
+| `r.geometry` | one shapely line (a `MultiLineString` where the edges do not join) | the file, at each call |
+| `r.directions()` | the turn-by-turn steps | the file, at each call |
+| `r.map()` | the route on the roadstyle map of the network | the file, at each call |
+
+So you can keep thousands of routes in memory, and `r.edges` gives all the columns of the edges table: you can count
+the road classes of a route or sum the length of its tunnels.
+
+> **Warning:** `r.edges`, `r.geometry`, `r.directions()` and `r.map()` need the network file. If you move or delete
+> `monaco.duckdb`, they fail. `r["edges"]`, `r.time_s` and `r.length_m` still work.""")
 ch.code("""print(len(r.edge_ids), "edges,", round(r.length_m), "m,", round(r.time_s), "s")    # the sums
 r.edges[["seq", "edge_id", "name", "highway", "length_m", "cost_s"]].head()          # the first edges, in order""")
 ch.code("""r.edges.groupby("highway").length_m.sum().round().sort_values(ascending=False)    # the metres of each road class""")
@@ -105,8 +120,8 @@ ch.code("""r.map()    # the route on the map""")
 
 ch.md("""### A Route is also a dict
 
-A `Route` is a Python `dict` too: `r["edges"]` is the list of edge ids, `r["time_s"]` and `r["length_m"]` are the
-sums. The code that used the dict of older duckOSM versions works without a change, and `net.map(routes=r)` takes a
+A `Route` is a Python `dict` too, with the keys of the table above: `edges`, `time_s`, `length_m`, `start`, `end`
+and `path`. The code that used the dict of older duckOSM versions works without a change, and `net.map(routes=r)` takes a
 `Route`.""")
 ch.code("""sorted(r.keys()), r["edges"][:3]    # the keys of the dict, and the first edge ids""")
 
@@ -225,67 +240,148 @@ ch.md("""The rows and the columns have the three names. With `weight="length"` t
 
 ch.md("""## Isochrones: `isochrones`
 
-An **isochrone** is the area that you reach from a place within a time. `isochrones(origins, minutes)` gives one
-polygon for each origin and each time, as a GeoDataFrame with the columns `origin`, `minutes`, `n_edges` and
-`geometry`.
+### What an isochrone is
 
-An edge is in the isochrone of `m` minutes when you reach the end of the whole edge within `m` minutes. Each reached
-edge gets a buffer of `buffer_m` metres (default 25 m), and the polygon is the union of the buffers. The polygon is
-not a hull around the edges: a park or a block with no road stays out of it.
+An **isochrone** answers one question: how far can I go from here in 10 minutes? It is the area that you reach from a
+place within a time, on the roads of one mode. It is not a circle, because the roads, the hills and the sea limit
+where you can go.
+
+### How duckOSM makes it
+
+1. It searches the roads from the start place, up to the largest time.
+2. It keeps each edge that you reach to its end within the time.
+3. It draws a band of 25 m around each kept edge, and joins the bands into one polygon.
+
+So a park or a block with no road stays out of the polygon.
+
+### The call
+
+`net.walking.isochrones(origins, minutes)` gives one polygon for each start place and each time.
 
 | Argument | Default | What it does |
 |---|---|---|
-| `origins` | | the start places, one polygon set for each |
-| `minutes` | `(5, 10, 15)` | the times: a number or a list |
-| `buffer_m` | `25.0` | the width of the buffer around each reached edge, in metres |
+| `origins` | | a list of start places: `(lon, lat)` points, edge ids or place names |
+| `minutes` | `(5, 10, 15)` | the times: one number or a list |
+| `buffer_m` | `25.0` | the width of the band around each reached edge, in metres |
 
-Here the origin is the casino square, on foot.""")
-ch.code("""casino = (7.4280, 43.7393)                                           # Place du Casino (lon, lat)
-iso = net.walking.isochrones([casino], minutes=[5, 10, 15])          # three walking times
-iso[["minutes", "n_edges"]].assign(km2=iso.to_crs(iso.estimate_utm_crs()).area / 1e6).round(3)    # edges and area""")
-ch.md("""From the casino square, 1,525 walking edges are within 5 minutes, 3,483 within 10 minutes and 5,983 within 15 minutes. The areas are 0.24 km², 0.65 km² and 1.15 km². In the picture each polygon follows the streets and the steps, not a circle: the hills and the sea limit the walk.""")
-ch.code("""fig, ax = plt.subplots(figsize=(7, 7))                                           # one picture
-iso.iloc[::-1].plot(ax=ax, column="minutes", categorical=True, cmap="plasma", alpha=0.7, legend=True,
-                    legend_kwds={"title": "minutes on foot"})                    # the polygons, the largest below
-net.walking.edges().plot(ax=ax, color="#555555", linewidth=0.3)                  # the walking roads, thin and gray
-ax.plot(*casino, "k*", markersize=14); ax.set_axis_off(); plt.show()             # the start""")
-ch.md("""> **Tip:** the walking speed comes from `cost_s` of the walking edges. For more than one origin, give a list:
-> each origin gets its own polygons, with its place in the column `origin`.""")
+Here the start is the casino square, on foot, for 5, 10 and 15 minutes.""")
+ch.code("""casino = (7.4280, 43.7393)                                       # Place du Casino (lon, lat)
+iso = net.walking.isochrones([casino], minutes=[5, 10, 15])      # one polygon for each time
+iso[["minutes", "n_edges", "area_km2"]]                          # the reached edges and the area of each polygon""")
+ch.md("""Each row is one polygon. From the casino square, 1,525 walking edges are within 5 minutes, 3,483 within 10
+minutes and 5,983 within 15 minutes. The areas are 0.24 km², 0.65 km² and 1.15 km².
+
+### Draw the isochrones
+
+The cell draws the walking roads in gray, then the three polygons over them. It draws the largest polygon first,
+so the smaller ones stay on top of it.""")
+ch.code("""fig, ax = plt.subplots(figsize=(7, 7))                                          # one picture
+net.walking.edges().plot(ax=ax, color="lightgray", linewidth=0.5)               # the walking roads, in gray
+iso[::-1].plot(ax=ax, column="minutes", categorical=True, cmap="autumn", alpha=0.6,
+               legend=True, legend_kwds={"title": "minutes"})                  # the polygons: 15, 10, then 5 minutes
+ax.set_axis_off()                                                               # no degrees on the sides
+plt.show()""")
+ch.md("""Each polygon follows the streets and the steps, not a circle: the hills and the sea limit the walk.
+
+> **Tip:** the walking speed comes from `cost_s` of the walking edges. For more than one start place, give a list:
+> each place gets its own polygons, with its place in the column `origin`.""")
 
 ch.md("""## Accessibility: `accessibility`
 
-`accessibility(origins, targets, minutes)` answers: how many targets can I reach from each origin, and which target is
-the nearest? The targets can be bus stops, schools, shops or sensors. The result is a DataFrame with one row for each
-origin and these columns:
+### What accessibility is
 
-| Column | What it is |
+Accessibility answers two questions for each place where people start, for example each street where people live:
+
+- How many targets can I reach within 5 or 10 minutes?
+- Which target is the nearest, and how far is it?
+
+The targets are the places that people go to: bus stops, schools, shops, pharmacies or parks.
+
+### How duckOSM finds it
+
+1. It searches the roads from each start place, up to the largest time (one search for each start, in parallel).
+2. It counts the targets that it reaches within each time.
+3. It keeps the nearest target and its time.
+
+### The call
+
+`net.walking.accessibility(origins, targets, minutes)` gives a DataFrame with one row for each start place.
+
+| Argument | What it is |
 |---|---|
-| `n_<m>min` | the number of targets within `m` minutes, one column for each time |
-| `nearest` | the nearest target (its label, or its number in the list) |
+| `origins` | the start places: edge ids, `(lon, lat)` points or names, in a list or a dict `{name: place}` |
+| `targets` | the places to reach, in the same forms. With a dict, the names appear in the result |
+| `minutes` | the times: one number or a list |
+
+| Column of the result | What it is |
+|---|---|
+| `n_5min`, `n_10min` ... | the number of targets within each time |
+| `nearest` | the nearest target: its name in the dict |
 | `nearest_s` | the time to the nearest target, in seconds |
 
-The call uses `matrix` with `max_cost` at the largest time, so a target farther than that has no time, and an origin
-with no target in the time has `None` and `NaN`. Here each walking edge is an origin, and the targets are three
-points.""")
-ch.code("""stops = [(7.4155, 43.7285), (7.4246, 43.7384), (7.4335, 43.7468)]    # three targets: Fontvieille, the port, Larvotto
-homes = net.walking.edges().edge_id.tolist()                         # each walking edge is an origin
-t = time.perf_counter()                                              # start the clock
-acc = net.walking.accessibility(homes, stops, minutes=[5, 10])       # the targets within 5 and 10 minutes
-print(f"{len(homes):,} origins in {time.perf_counter() - t:.2f} s")  # the time
-acc.head()                                                           # a row for each origin edge""")
-ch.code("""acc[["n_5min", "n_10min"]].apply(lambda c: c.value_counts().sort_index()).fillna(0).astype(int)    # origins for each count of targets""")
-ch.md("""**What the output shows.** The call found the targets of all 11,938 walking edges in about half a second. With 5 minutes, 3,217 edges reach one stop, and 8,721 edges reach none. With 10 minutes, 8,194 edges reach one stop, 328 edges reach two, and 3,416 edges reach none. An edge with no stop in 10 minutes has `None` in `nearest` and `NaN` in `nearest_s`, and it stays gray on the map. The dark edges around the three stops are the nearest. The yellow edges are about 9 minutes away.""")
-ch.code("""net.map("walking", color_by=acc["nearest_s"] / 60, cmap="viridis")    # each edge colored by the minutes to its nearest target""")
+A start place with no target within the largest time has `None` in `nearest` and `NaN` in `nearest_s`.
+
+Here the start places are all the walking edges of Monaco, and the targets are three places with names.""")
+ch.code("""targets = {"Fontvieille": (7.4155, 43.7285),                     # three targets, with their names
+           "the port": (7.4246, 43.7384),
+           "Larvotto": (7.4335, 43.7468)}
+homes = net.walking.edges().edge_id                               # each walking edge is a start place
+acc = net.walking.accessibility(homes, targets, minutes=[5, 10])  # the targets within 5 and 10 minutes
+acc.head()                                                        # one row for each start edge""")
+ch.md("""Each row is one walking edge: the number of targets within 5 and 10 minutes, the nearest target and its time
+in seconds. The fourth edge reaches no target within 10 minutes, so its `nearest` is `None`.
+
+### Count the results
+
+`value_counts` counts the edges for each number of targets.""")
+ch.code("""acc.n_10min.value_counts().sort_index()      # how many edges reach 0, 1 or 2 targets within 10 minutes""")
+ch.code("""acc.nearest.value_counts(dropna=False)       # how many edges have each target as the nearest""")
+ch.md("""Within 10 minutes, 8,194 edges reach one target, 328 edges reach two, and 3,416 edges reach none. Fontvieille is
+the nearest target of 3,517 edges, the port of 3,039 and Larvotto of 1,966.
+
+### Draw it on the map
+
+The map colors each walking edge by the minutes to its nearest target. An edge with no target within 10 minutes
+stays gray.""")
+ch.code("""net.map("walking", color_by=acc["nearest_s"] / 60, cmap="viridis")    # the minutes to the nearest target""")
+ch.md("""The dark edges are near a target, and the yellow edges are about 9 minutes away.""")
 
 ch.md("""## The graph of all calls: `routed_graph`
 
-`duckosm.routing.routed_graph` gives the SQL relation of the arcs that a mode routes on: the rows of
-`<mode>.edge_graph` for that mode. Use it in your own SQL, for example to count the arcs or to find the edges where a
-route can start.""")
-ch.code("""g = duckosm.routing.routed_graph(net.driving)                     # an SQL relation, as text
-print(g)
-net.sql(f"SELECT count(*) AS arcs, count(DISTINCT from_edge) AS edges FROM {g}")    # the size of the graph""")
-ch.md("""The driving graph is the rows of `driving.edge_graph` with `uses = 'car'`. It has 5,082 arcs (legal turns) that start on 2,814 edges. The network has 2,840 driving edges, so 26 edges have no turn out: a route can end on them, but it cannot start there.""")
+### The turns that a mode can use
+
+All the routing calls of this chapter search one graph: the turns of the mode, in the table `<mode>.edge_graph`
+(chapter 7). But not every row of that table is for the mode. The column `uses` says who can make each turn. The
+cell counts the rows of `driving.edge_graph` by `uses`.""")
+ch.code('''net.sql("""SELECT uses, count(*) AS turns
+           FROM driving.edge_graph GROUP BY uses ORDER BY turns DESC""")    # who can make each turn''')
+ch.md("""The table has 6,754 turns. A car can make 5,082 of them (`car`). The others go onto or from an edge that is not
+open to all cars: a pedestrian street (`pedestrian`), a private road (`private`) or a bus lane (`bus`). A car route
+uses only the `car` turns.
+
+### `routed_graph`: those turns, for your own SQL
+
+`duckosm.routing.routed_graph(view)` gives the turns that the mode routes on. It gives them as a piece of SQL text, so
+you can put it into your own query, in place of a table name.""")
+ch.code("""g = duckosm.routing.routed_graph(net.driving)     # the turns that a car route uses, as SQL text
+print(g)""")
+ch.md("""The text selects the rows of `driving.edge_graph` with `uses = 'car'`. The next cell puts it into a query, after
+`FROM`, and counts the turns and the edges where a car route can start: an edge with at least one turn to a next
+edge.""")
+ch.code("""net.sql(f"SELECT count(*) AS turns, count(DISTINCT from_edge) AS start_edges FROM {g}")""")
+ch.md("""A car can make 5,082 turns, and a car route can start on 2,814 edges.
+
+### The edges where a route cannot start
+
+Monaco has 2,840 driving edges, so 26 edges have no turn to a next edge. The cell finds them and counts their road
+classes.""")
+ch.code('''net.sql(f"""SELECT highway, count(*) AS edges FROM driving.edges
+           WHERE edge_id NOT IN (SELECT from_edge FROM {g})
+           GROUP BY highway ORDER BY edges DESC""")                 # the 26 edges with no turn out''')
+ch.md("""13 of the 26 edges are service roads and 8 are residential streets: the end of a dead-end street, or a garage
+exit. The 5 main roads end at the boundary of the area: the road goes on in OSM, but the cut file stops there. A route
+cannot leave such an edge, so `route` gives `None` for a route that starts on it, as in "Many routes in parallel"
+above.""")
 
 ch.md("""## Try it yourself
 

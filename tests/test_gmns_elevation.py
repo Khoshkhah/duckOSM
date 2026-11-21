@@ -54,3 +54,21 @@ def test_without_heights_both_stay_empty(tmp_path):
     assert c.execute("SELECT count(z_coord) FROM gmns_driving.node").fetchone()[0] == 0
     assert c.execute("SELECT count(grade) FROM gmns_driving.link").fetchone()[0] == 0
     assert c.execute("SELECT count(z_coord) FROM gmns_driving.location").fetchone()[0] == 0
+
+
+def test_heights_on_the_edges_only_and_a_bus_only_edge(tmp_path):
+    """`duckosm elevation` writes z_from and z_to on <mode>.edges, not on private_edges: a bus-only edge then has no
+    heights, and its link has no grade (the GMNS export stopped with "no column named z_to")."""
+    src = tmp_path / "src.duckdb"
+    _source(src)
+    con = duckdb.connect(str(src))
+    con.execute(f"CREATE TABLE driving.private_edges AS SELECT * REPLACE (edge_id + 1000 AS edge_id), 'bus' AS access "
+                f"FROM driving.edges WHERE edge_id = {B}")
+    con.execute("ALTER TABLE driving.edges ADD COLUMN z_from DOUBLE; ALTER TABLE driving.edges ADD COLUMN z_to DOUBLE")
+    con.execute(f"UPDATE driving.edges SET z_from = 10, z_to = 20 WHERE edge_id = {A}")
+    con.close()
+    out = tmp_path / "out.duckdb"
+    to_gmns(str(src), str(out))
+    c = duckdb.connect(str(out), read_only=True)
+    grade = dict(c.execute("SELECT link_id, grade FROM gmns_driving.link").fetchall())
+    assert grade[B + 1000] is None and grade[A] is not None

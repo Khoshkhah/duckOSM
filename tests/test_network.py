@@ -148,3 +148,18 @@ def test_map_picture(net, tmp_path):
     pytest.importorskip("playwright")
     pic = net.map(show="picture", path=tmp_path / "monaco.png")                  # a PNG of the live roadstyle map
     assert pic._repr_png_()[:8] == b"\x89PNG\r\n\x1a\n" and Path(pic).stat().st_size > 20_000
+
+
+def test_add_multimodal_needs_no_new_build(net, one, tmp_path):
+    import shutil
+    copy = duckosm.open(shutil.copy(net.path, tmp_path / "mm_copy.duckdb"))
+    assert not copy.has_elevation() and not copy.has_fixes() and copy.has_raw()
+    assert all(isinstance(f(), bool) for f in (copy.has_features, copy.has_levels, copy.has_bus_routes, copy.has_admin))
+    assert not copy.has_features("no_such_layer")
+    assert not copy.has_multimodal() and copy.has_mode("driving", "walking") and not copy.has_mode("cycling")
+    assert copy.add_multimodal(transfer_s=90) is copy and copy.has_multimodal()
+    n = copy.sql("SELECT (SELECT count(*) FROM mm.edges) AS e, (SELECT count(*) FROM mm.transfers) AS t, "
+                 "(SELECT min(cost_s) FROM mm.transfers) AS c")
+    assert n.e[0] > 0 and n.t[0] > 0 and n.c[0] == 90
+    with pytest.raises(duckosm.DuckOSMError, match="needs walking and one more mode"):
+        one.add_multimodal()

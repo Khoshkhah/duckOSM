@@ -61,12 +61,12 @@ again at that point. The turn restrictions do not apply in the match.
 > **Tip:** the reference page [duckosm.mobility](../reference/sdk/mobility.md) gives the accuracy of `match` on
 > Monaco for 3 m and 5 m of GPS noise.""")
 
-ch.md("""## Build the network
+ch.md("""## Open the network of chapter 1
 
-The chapter uses the driving network of Monaco. `drive` is the view of the driving mode: the calls of
+Chapter 1 builds Monaco with three modes (driving, walking and cycling) and saves it as `monaco.duckdb`. This chapter opens that file with `duckosm.open`: it builds nothing. The calls use the driving network. `drive` is the view of the driving mode: the calls of
 `duckosm.mobility` take it as their first argument.""")
 ch.code("""from duckosm import mobility as mob                                         # the module of this chapter
-net = duckosm.network(osm_id=2220322, modes=["driving"], name="monaco")     # get and build the driving network of Monaco
+net = duckosm.open("monaco.duckdb")    # the network of chapter 1: Monaco, three modes
 drive = net.driving                                                         # the driving mode
 drive                                                                       # the card""")
 ch.md("""The driving network of Monaco has 2840 edges and 1768 nodes, 96.2 km of roads.""")
@@ -91,7 +91,7 @@ import pandas as pd
 from shapely.ops import linemerge
 
 def gps(route, trace_id, seed):                                        # made-up GPS points along a route
-    roads = net.edges(crs="utm").set_index("edge_id").loc[route["edges"]]    # the edges of the route, in metres
+    roads = net.driving.edges(crs="utm").set_index("edge_id").loc[route["edges"]]    # the edges of the route, in metres
     line = linemerge(list(roads.geometry))                             # one line
     rng = np.random.default_rng(seed)                                  # noise that does not change
     d = np.arange(0, line.length, 15.0)                                # a point every 15 m
@@ -150,7 +150,7 @@ ch.md("""### The route of each trace
 `m.edges` is the route of each trace, edge by edge. `seq` counts the edges of one trace from 0. With
 `net.edges(where=...)` you get the names and the lengths of the edges of the route.""")
 ch.code("""route = m.edges[m.edges.trace_id == "there"]                              # the route of one trace
-names = net.edges(where=f"edge_id IN ({','.join(map(str, route.edge_id))})").set_index("edge_id")
+names = net.driving.edges(where=f"edge_id IN ({','.join(map(str, route.edge_id))})").set_index("edge_id")
 route = route.join(names[["name", "length_m"]], on="edge_id")             # the name and the length of each edge
 print(round(route.length_m.sum()), "m matched;", round(there["length_m"]), "m true")    # the two lengths
 route.head(8)""")
@@ -165,7 +165,7 @@ points.""")
 ch.code("""import matplotlib.pyplot as plt
 
 ax = plt.subplots(figsize=(7, 7))[1]                                       # a new picture
-net.plot(highlight=m.edges.edge_id, ax=ax)                                 # the matched edges in orange
+net.driving.plot(highlight=m.edges.edge_id, ax=ax)                                 # the matched edges in orange
 ax.scatter(traces.x, traces.y, s=1, color="black", alpha=0.5, zorder=3); plt.show()    # the GPS points""")
 ch.md("""The orange route follows the black GPS points from one end to the other. The two
 traces drive on the same roads in most places, so one orange line shows both.""")
@@ -249,7 +249,7 @@ print(len(on_map), "edges with data;", len(mob.join(drive, by_edge, how="left"))
 on_map[["edge_id", "name", "count"]].nlargest(3, "count")                 # the three edges with the most points""")
 ch.md("""119 edges have data, of the 2840 edges of the network. The Boulevard du Larvotto has the
 most points (21), then the Tunnel Dorsale (17) and the Tunnel Rocher Palais (14). A long edge gets more points, because the traces put one point every 15 m.""")
-ch.code("""net.plot(color_by=by_edge, cmap="magma_r")                                 # the map, colored by the count""")
+ch.code("""net.driving.plot(color_by=by_edge, cmap="magma_r")                                 # the map, colored by the count""")
 ch.md("""The colors show the number of points on each edge. The long edges of the route
 (the boulevard along the sea and the tunnels) are the darkest.""")
 

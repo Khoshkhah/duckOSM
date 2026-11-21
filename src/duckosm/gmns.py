@@ -133,8 +133,15 @@ def _edge_view(con, mode, has_raw):
     if _exists(con, "s", "cycling", "edges"):
         bike.append("p.edge_id IN (SELECT edge_id FROM s.cycling.edges)")
     raw_join = "LEFT JOIN s.raw.ways w ON w.osm_id = abs(p.osm_id)" if has_raw else ""
+    # the columns of driving.edges that private_edges does not have (for example z_from and z_to after
+    # `duckosm elevation`, which writes only the edges) are NULL on a bus-only edge, so one query reads both
+    cols = lambda t: [r[0] for r in con.execute(
+        "SELECT column_name FROM duckdb_columns() WHERE database_name = 's' AND schema_name = 'driving' AND table_name = ?",
+        [t]).fetchall()]
+    have = set(cols("private_edges"))
+    missing = "".join(f', NULL AS "{n}"' for n in cols("edges") if n not in have)
     con.execute(f"""CREATE OR REPLACE TEMP VIEW _edges_bus AS
-      SELECT p.*, true AS _bus, COALESCE({' OR '.join(bike) or 'false'}, false) AS _bike
+      SELECT p.*{missing}, true AS _bus, COALESCE({' OR '.join(bike) or 'false'}, false) AS _bike
       FROM s.driving.private_edges p {raw_join} WHERE p.access = 'bus'""")
     con.execute("CREATE OR REPLACE TEMP VIEW _edges AS SELECT * FROM _edges_car UNION ALL BY NAME SELECT * FROM _edges_bus")
 

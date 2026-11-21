@@ -122,3 +122,14 @@ def test_accessibility(net, ids):
             assert nearest is None
         else:
             assert nearest_s == pytest.approx(within.min()) and m.loc[origin, nearest] == pytest.approx(within.min())
+
+
+def test_a_dict_of_places_names_the_rows_and_columns(net, ids):
+    """matrix, accessibility and isochrones take {label: place}: the labels name the result."""
+    o, t = {"a": ids[0], "b": ids[1]}, {"x": ids[2], "y": ids[3]}
+    m = net.driving.matrix(o, t)
+    assert list(m.index) == ["a", "b"] and list(m.columns) == ["x", "y"]
+    acc = net.driving.accessibility(o, t, minutes=60)
+    assert list(acc.index) == ["a", "b"] and set(acc.nearest.dropna()) <= {"x", "y"}
+    iso = net.driving.isochrones({"here": ids[0]}, minutes=2)
+    assert list(iso.origin) == ["here"] and iso.area_km2.iloc[0] >= 0

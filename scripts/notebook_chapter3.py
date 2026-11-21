@@ -66,10 +66,10 @@ To give one default for all maps of a session, set the variable in Python:
 > **Tip:** use `"link"` in a notebook that you share: the notebook stays small, and the HTML file opens in each
 > browser without a server. Use `"picture"` when you want the look of the live map in a saved notebook.""")
 
-ch.md("""## Build the network of this chapter
+ch.md("""## Open the network of chapter 1
 
-The chapter uses the three modes of Monaco, so that the map can show which modes can use each road.""")
-ch.code("""net = duckosm.network(osm_id=2220322, modes=["driving", "walking", "cycling"], name="monaco")    # three modes
+Chapter 1 builds Monaco with three modes (driving, walking and cycling) and saves it as `monaco.duckdb`. This chapter opens that file with `duckosm.open`: it builds nothing. The map shows which modes can use each road.""")
+ch.code("""net = duckosm.open("monaco.duckdb")    # the network of chapter 1: Monaco, three modes
 net.summary()""")
 
 ch.md("""### Each value of `show`
