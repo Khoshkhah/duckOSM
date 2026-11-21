@@ -1,5 +1,14 @@
 """One progress line for get, build and the exports: it updates in place in a notebook, and is quiet elsewhere."""
+import os
 import time
+
+
+def shown(text) -> str:
+    """A path or a line for the eyes of a person: the home folder as ``~``, so that a shared notebook or a page does
+    not show the name of the user."""
+    home = os.path.expanduser("~")
+    s = str(text)
+    return s.replace(home, "~") if home and home != "~" else s
 
 
 def in_notebook():
@@ -28,6 +37,7 @@ class Line:
         self.handle = None
 
     def __call__(self, text):
+        text = shown(text)
         if in_notebook():
             from IPython.display import display
             if self.handle is None:

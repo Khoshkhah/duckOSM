@@ -45,3 +45,14 @@ def test_area_save_and_clear_work(work):
     duckosm.network(pbf=PBF, boundary=BOUNDARY, **FAST)
     assert duckosm.clear_work(days=1) == 0                               # a new folder is younger than one day
     assert duckosm.clear_work() == 1 and not any(duckosm.work_dir().iterdir())
+
+
+def test_cards_show_the_home_folder_as_tilde(work, monkeypatch):
+    monkeypatch.setenv("HOME", str(work))                      # the work folder is now under the home folder
+    monkeypatch.setenv("DUCKOSM_CACHE", str(work / ".cache" / "duckosm"))
+    net = duckosm.network(pbf=PBF, boundary=BOUNDARY, **FAST)
+    assert str(work) not in repr(net) and str(work) not in net._repr_html_() and "~/.cache/duckosm/work/" in repr(net)
+    lines = []
+    duckosm.network(pbf=PBF, boundary=BOUNDARY, **{**FAST, "progress": lines.append})
+    from duckosm._progress import shown
+    assert shown(str(work / "x.duckdb")) == "~/x.duckdb"

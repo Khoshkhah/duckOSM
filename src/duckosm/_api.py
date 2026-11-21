@@ -22,6 +22,8 @@ import json
 import os
 from pathlib import Path
 
+from duckosm._progress import shown
+
 
 def _rust():
     from duckosm import _rust
@@ -430,7 +432,7 @@ class Area:
         self.pbf, self.boundary = Path(pbf), Path(boundary)
 
     def __repr__(self):
-        return f"Area(pbf={str(self.pbf)!r}, boundary={str(self.boundary)!r})"
+        return f"Area(pbf={shown(self.pbf)!r}, boundary={shown(self.boundary)!r})"
 
     def save(self, folder, name=None):
         """Copy the two files of the area (the cut ``.osm.pbf`` and the ``.geojson``) into ``folder``, as
@@ -459,7 +461,7 @@ class Area:
     def _repr_html_(self):
         """The card of the area in a notebook: its name and its two files with their sizes."""
         from html import escape
-        rows = "".join(f"<tr><td>{k}</td><td><code>{escape(str(p))}</code></td><td>{_size(p)}</td></tr>"
+        rows = "".join(f"<tr><td>{k}</td><td><code>{escape(shown(p))}</code></td><td>{_size(p)}</td></tr>"
                        for k, p in (("OSM file", self.pbf), ("boundary", self.boundary)))
         return (f"<div><b>Area {escape(self.pbf.name.split('.')[0])}</b>"
                 f"<table><tr><th></th><th>file</th><th>size</th></tr>{rows}</table></div>")
