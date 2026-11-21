@@ -70,6 +70,34 @@ You need only the keys that you use. A file with one rule of `overrides` is a co
 that is not in the area does nothing, so one file can hold the fixes of all your areas. The editing page adds
 `changed`, the time of the change, to each record. The build does not read it.
 
+### The rules of the file
+
+- **Each key comes one time.** The file has one `overrides:`, one `new_ways:`, one `turn_restrictions:` and one
+  `extra:`. Do not write a second `overrides:` for a new record: YAML keeps only the last one, and the records of the
+  first one are lost.
+- **Each key holds a list.** Each record is one item of the list, and an item starts with `- ` (a dash and a space).
+- **To add a record, add an item under its key.** For example, a second fix of a way is a new item in `overrides`:
+
+  ```yaml
+  overrides:
+    - osm_id: 4230891          # the first rule
+      tags: {maxspeed: "10"}
+    - osm_id: 4230100          # a new rule: one more item, under the same key
+      oneway: true
+  ```
+
+- **One way has one rule.** To change more on the same way, add fields to its rule. Do not add a second item with
+  the same `osm_id`.
+- **A record has two forms, with the same meaning.** The long form has one field on each line. The short form is on
+  one line, in braces: `- {osm_id: 4230100, oneway: true}`. The example file uses both.
+- **Spaces matter.** Indent with spaces, never with tabs. The items are two spaces under their key, and the fields of
+  an item are under its first field.
+- **Write the value of a tag in quotes**, for example `maxspeed: "10"`, because an OSM tag is text.
+- **The order of the keys and of the records does not matter.** Keys that you do not use can stay out of the file.
+
+`Fixes` and the editing page follow these rules for you: they add each record to the correct list, and they change
+the rule of a way that already has one.
+
 ### `overrides`: change an OSM way
 
 A rule of `overrides` names one OSM way by its `osm_id` and says what to change. The build sees the way as if OSM had
@@ -125,30 +153,6 @@ net = area.build(modes=["driving"])                               # the driving 
 net                                                               # the card""")
 ch.md("""The card shows the file `data/monaco.duckdb` and the driving network: the number of
 edges and nodes and the length in km. This is the network before the fix.""")
-
-
-ch.md("""## Find the road to fix
-
-In this chapter, the error is a speed limit. The task: road works close a lane of one road, and the speed limit there
-becomes 10 km/h. To see the effect, take a route by car across Monaco, from Fontvieille in the west to Larvotto in the
-east, and fix a road that the route uses.""")
-ch.code("""a, b = (7.4155, 43.7285), (7.4335, 43.7468)    # Fontvieille and Larvotto, as (lon, lat)
-before = net.route(a, b)                       # the fastest route by car
-round(before.time_s), round(before.length_m)   # the time in seconds and the length in metres""")
-ch.md("""A route is a list of edges. Each edge comes from one OSM way, and the column `osm_id` of `driving.edges` names
-it. The SQL below groups the edges of the route by their way and gives the three longest ways. The fix goes on the
-first one.""")
-ch.code('''ways = net.sql("""SELECT osm_id, any_value(name) AS name, any_value(maxspeed_kmh) AS maxspeed_kmh,
-                         round(sum(length_m)) AS length_m
-                  FROM driving.edges WHERE list_contains($ids, edge_id)
-                  GROUP BY osm_id ORDER BY length_m DESC LIMIT 3""", {"ids": before.edge_ids})    # the three longest ways of the route
-ways''')
-ch.md("""**What the output shows.** The route is 2,939 m long and takes 229 s by car. Its three longest ways are
-Boulevard Louis II (way 4230891, 356 m of the route), Avenue Princesse Grace (223 m) and Boulevard Albert 1er
-(216 m). All three have a speed limit of 50 km/h. The fix goes on Boulevard Louis II.
-
-> **Tip:** to find the OSM id of a road in your own area, click the road on [openstreetmap.org](https://www.openstreetmap.org)
-> (the "Query features" tool), or look at the column `osm_id` of `net.edges()`, or click the road on `net.map()`.""")
 
 
 ch.md("""## Make the file and add records
@@ -220,7 +224,9 @@ rule writes the file at once, so the file on disk is always the same as the obje
 `fixes.set(way, **fields)` adds a rule for the way, or changes its rule. A keyword that is a field of a rule (`oneway`,
 `lanes`, `layer`, `note` ...) goes into the rule. Each other keyword is an OSM tag: `maxspeed=10` sets the tag
 `maxspeed` to `"10"`. The build then reads the tag as OSM data, so the speed and the travel time of the road change.""")
-ch.code("""way = int(ways.osm_id[0])                              # the OSM id of the way to fix
+ch.md("""The fix of this chapter: road works on Boulevard Louis II, the OSM way 4230891, lower its speed limit to
+10 km/h.""")
+ch.code("""way = 4230891                                          # Boulevard Louis II: the OSM way to fix
 fixes = duckosm.fixes.Fixes("osm_fixes.yaml")          # open or make the fixes file
 fixes.set(way=way, maxspeed=10, note="road works")     # one rule: the tag maxspeed of the way, and a note
 fixes                                                  # the card: a table of the rules""")
@@ -249,9 +255,9 @@ can chain the calls.
 | `fixes.drop(way)` | deletes the rule of the way, so the way is as in OSM again | the rule is gone |
 | `fixes.rules()` | gives the rules as a DataFrame | |
 
-The cell below tries each call on a second file, `practice.yaml`, so the file of the chapter keeps its one rule. The
-second and third ways of the route get a rule each.""")
-ch.code("""w2, w3 = int(ways.osm_id[1]), int(ways.osm_id[2])          # the second and third ways of the route
+The cell below tries each call on a second file, `practice.yaml`, so the file of the chapter keeps its one rule. Two
+other roads of Monaco get a rule each.""")
+ch.code("""w2, w3 = 503633031, 166399479                              # Avenue Princesse Grace and Boulevard Albert 1er
 practice = duckosm.fixes.Fixes("practice.yaml")              # a second fixes file
 practice.set(way=w2, oneway=True, lanes=2)                   # two fields of a rule: one-way, two lanes
 practice.set(way=w2, highway="residential")                  # an OSM tag; the rule of w2 keeps its fields
@@ -301,8 +307,11 @@ ch.md("""### Build again: `net.rebuild`
 
 `net.rebuild(fixes=...)` builds the area again, with the same modes, from the OSM file and the boundary beside the
 database. It takes a `Fixes` or the path of a fixes file. The new network goes to `<name>_fixed.duckdb` beside the old
-one (`out=` sets another file), so the old network stays and you can compare the two.""")
+one (`out=` sets another file), so the old network stays and you can compare the two. To see the effect of the
+fix, the cell compares one route by car across Monaco, from Fontvieille to Larvotto, before and after the fix.""")
 ch.code("""fixed = net.rebuild(fixes=fixes)                     # the same build, with the fixes file: data/monaco_fixed.duckdb
+a, b = (7.4155, 43.7285), (7.4335, 43.7468)          # Fontvieille and Larvotto, as (lon, lat)
+before = net.route(a, b)                             # a route by car across Monaco, before the fix
 after = fixed.route(a, b)                            # the same route on the fixed network
 round(before.time_s), round(after.time_s)            # the seconds before and after the fix""")
 ch.md("""The route now takes 252 s, not 229 s. It does not use Boulevard Louis II now: it
@@ -439,7 +448,7 @@ ch.exercises([
 oneway = net.rebuild(fixes=fixes, out="data/monaco_oneway.duckdb")
 d = net.diff(oneway)
 (d.change == "removed").sum()                                 # the edges of the other direction"""),
-    ("Close the second way of the route to cars only, and find the new time of the route.",
+    ("Close Avenue Princesse Grace (`w2`) to cars only, and find the new time of the route.",
      """closed2 = duckosm.fixes.Fixes("closed2.yaml").exclude(way=w2, modes="driving")
 net.rebuild(fixes=closed2, out="data/monaco_closed2.duckdb").route(a, b).time_s"""),
     ("Delete the rule of the fixed way, so that the way is as in OSM again, and look at the file.",
