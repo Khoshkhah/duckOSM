@@ -74,7 +74,7 @@ them. A fix needs these two files, because the build with the fix starts again f
 ch.code("""area = duckosm.get(osm_id=2220322, name="monaco", out="data")    # the OSM file of Monaco and its boundary
 net = area.build(modes=["driving"])                               # the driving network, with no fixes file
 net                                                               # the card""")
-ch.md("""**What the output shows.** The card shows the file `data/monaco.duckdb` and the driving network: the number of
+ch.md("""The card shows the file `data/monaco.duckdb` and the driving network: the number of
 edges and nodes and the length in km. This is the network before the fix.""")
 
 ch.md("""## Find the road to fix
@@ -112,12 +112,12 @@ ch.code("""way = int(ways.osm_id[0])                              # the OSM id o
 fixes = duckosm.fixes.Fixes("osm_fixes.yaml")          # open or make the fixes file
 fixes.set(way=way, maxspeed=10, note="road works")     # one rule: the tag maxspeed of the way, and a note
 fixes                                                  # the card: a table of the rules""")
-ch.md("""**What the output shows.** The card names the file and the number of rules (1). The table has one row for
+ch.md("""The card names the file and the number of rules (1). The table has one row for
 each way: `osm_id`, the OSM `tags` of the rule (`maxspeed` is the text `'10'`) and the `note`.
 
 The file is ordinary YAML. You can read it, keep it in git with your project, and give it to a colleague.""")
 ch.code("""print(open("osm_fixes.yaml").read())    # the fixes file on disk""")
-ch.md("""**What the output shows.** The rule is one item of `overrides`: the `osm_id`, the `tags` with `maxspeed` and
+ch.md("""The rule is one item of `overrides`: the `osm_id`, the `tags` with `maxspeed` and
 the `note`. This is the format that the map editor writes, so the two tools can share one file.
 
 > **Warning:** `Fixes` writes the whole file again at each change. Comments that you wrote in the file by hand are
@@ -150,7 +150,7 @@ only `exclude_modes`.""")
 ch.code("""practice.remove(way=w3)        # remove w3 from the whole build
 practice.drop(way=w2)          # w2 is as in OSM again
 practice, len(practice)        # the file now has one rule""")
-ch.md("""**What the output shows.** After `drop`, the file has one rule: the rule of `w3`, with `exclude_modes` and now
+ch.md("""After `drop`, the file has one rule: the rule of `w3`, with `exclude_modes` and now
 also `remove: true`. `len(fixes)` is the number of rules.
 
 > **Tip:** `remove` and `exclude` are the two ways to take a road out. Use `exclude` for a road that some modes can
@@ -165,7 +165,7 @@ one (`out=` sets another file), so the old network stays and you can compare the
 ch.code("""fixed = net.rebuild(fixes=fixes)                     # the same build, with the fixes file: data/monaco_fixed.duckdb
 after = fixed.route(a, b)                            # the same route on the fixed network
 round(before.time_s), round(after.time_s)            # the seconds before and after the fix""")
-ch.md("""**What the output shows.** The route now takes 252 s, not 229 s. It does not use Boulevard Louis II now: it
+ch.md("""The route now takes 252 s, not 229 s. It does not use Boulevard Louis II now: it
 takes other streets around it. The new route is longer (3,302 m, not 2,939 m), but at 10 km/h the old way is slower.
 
 The new network remembers its fixes file. `fixed.fixes` gives the `Fixes` of the build. `net.fixes` is `None`,
@@ -199,7 +199,7 @@ before the fix, the route after the fix, and the fixed way (its edges, as a rout
 you can zoom, and click a road to see its columns. The manual page shows a picture of the map.""")
 ch.code("""way_edges = {"edges": list(fixed.edges(where=f"osm_id = {way}").edge_id)}                   # the edges of the fixed way, as a route to draw
 fixed.map(routes={"before the fix": before, "after the fix": after, "the fixed way": way_edges})    # the three as lines, each in its own color""")
-ch.md("""**What the output shows.** The route after the fix leaves the fixed way. It takes other streets around the slow
+ch.md("""The route after the fix leaves the fixed way. It takes other streets around the slow
 part, because they are now faster.""")
 
 ch.md("""## The edge ids do not change
@@ -208,7 +208,7 @@ An `edge_id` is a hash of the OSM way and of the two nodes at the ends of the ed
 `lanes`, `name`) does not change the way or its nodes. So each edge keeps its `edge_id`, and your own data that you
 joined on the ids (chapter 4) stays correct after the fix.""")
 ch.code("""set(net.edges().edge_id) == set(fixed.edges().edge_id)    # the same edge ids before and after the fix""")
-ch.md("""**What the output shows.** `True`: the two networks have the same set of edge ids.
+ch.md("""`True`: the two networks have the same set of edge ids.
 
 > **Key idea:** a fix of the tags keeps every `edge_id`. A fix that removes a road (`remove`, `exclude`) removes the
 > edges of that road only. All the other edges keep their ids.""")
@@ -221,7 +221,7 @@ ch.code("""closed = duckosm.fixes.Fixes("closed.yaml").exclude(way=way, modes=["
 shut = net.rebuild(fixes=closed, out="data/monaco_closed.duckdb")                   # a third network
 gone = net.diff(shut)                                                               # the edges that are different
 gone.change.value_counts(), set(fixed.edges(where=f"osm_id = {way}").edge_id) == set(gone.edge_id[gone.change == "removed"])""")
-ch.md("""**What the output shows.** The diff has eight removed edges and no other change. The second value is `True`: the
+ch.md("""The diff has eight removed edges and no other change. The second value is `True`: the
 removed edges are the eight edges of the fixed way. All the other edges of the network keep their ids.""")
 
 ch.md("""## Every output takes the fix

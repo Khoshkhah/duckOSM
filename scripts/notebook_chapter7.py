@@ -60,7 +60,7 @@ config says so, so the cell gives `config=` with `multimodal: {enabled: true}` (
 ch.code("""net = duckosm.network(osm_id=2220322, modes=["driving", "walking", "cycling"], name="monaco",
                       config={"multimodal": {"enabled": True}})       # three modes and the multimodal graph
 net.summary()                                                         # one row for each mode""")
-ch.md("""**What the output shows.** The file has three networks: 2,840 driving edges, 11,938 walking edges and 11,305
+ch.md("""The file has three networks: 2,840 driving edges, 11,938 walking edges and 11,305
 cycling edges. The `mm` tables are not in the summary, because they join the three modes and are not a mode.
 
 > **Tip:** the same build from a config file: write the keys to `monaco.yaml` (`modes: [driving, walking, cycling]`,
@@ -90,7 +90,7 @@ start = int(net.sql(q, ["Boulevard du Larvotto"]).edge_id[0])    # one edge of B
 end = int(net.sql(q, ["Avenue Princesse Grace"]).edge_id[0])     # one edge of Avenue Princesse Grace
 r = net.driving.route(start, end)                                # the fastest route from edge to edge
 r                                                                # a Route: the card shows the edges, the length and the time""")
-ch.md("""**What the output shows.** The route from Boulevard du Larvotto to Avenue Princesse Grace has 29 edges, 1,513 m,
+ch.md("""The route from Boulevard du Larvotto to Avenue Princesse Grace has 29 edges, 1,513 m,
 and takes 1.9 minutes (114 s). The card gives the time in minutes.
 
 The result is a `Route`. `r.edge_ids` is its list of edges, `r.time_s` and `r.length_m` are its sums. Chapter 8 shows
@@ -108,7 +108,7 @@ ch.code("""a, b = (7.4155, 43.7285), (7.4335, 43.7468)    # Fontvieille and Larv
 drive = net.driving.route(a, b)                # by car
 walk = net.walking.route(a, b)                 # on foot
 round(drive.time_s / 60, 1), round(walk.time_s / 60, 1)          # the two times in minutes""")
-ch.md("""**What the output shows.** The car takes 3.8 minutes and the walk takes 36.4 minutes. Each time includes the
+ch.md("""The car takes 3.8 minutes and the walk takes 36.4 minutes. Each time includes the
 short walk from the point to its nearest road.""")
 
 ch.md("""### `route_points`: the options of the join
@@ -136,7 +136,7 @@ Nominatim (the search of OpenStreetMap, on the internet) for a place in the box 
 ch.code("""duckosm.routing.geocode(net.driving, "Boulevard Albert 1er")    # the (lon, lat) of a street name""")
 ch.code("""by_name = net.driving.route("Boulevard Albert 1er", "Avenue Princesse Grace")    # from street to street
 by_name""")
-ch.md("""**What the output shows.** The point of Boulevard Albert 1er is (7.4211, 43.7359), in the middle of the longest
+ch.md("""The point of Boulevard Albert 1er is (7.4211, 43.7359), in the middle of the longest
 edge of the street. The route by name has 33 edges, 1,350 m, and takes 122 s.
 
 > **Warning:** a name gives one point. A long street has many points, and the route starts at the middle of its
@@ -163,7 +163,7 @@ ch.md("""## Draw routes on the map
 of the legend, and each route gets its own color. Run the cell to see the live map: you can zoom, and click a road
 to see its columns. The manual page shows a picture of the map.""")
 ch.code("""net.map(routes={"by car": drive, "on foot": walk})    # the two routes as lines on the map""")
-ch.md("""**What the output shows.** The car route uses the tunnels and the large boulevards along the coast. The walking
+ch.md("""The car route uses the tunnels and the large boulevards along the coast. The walking
 route is more direct: it uses the steps and footways that a car cannot use.""")
 
 ch.md("""## Turn-by-turn steps
@@ -192,7 +192,7 @@ The table `<mode>.edge_graph` can hold arcs that the mode does not use, for exam
 on the same graph as the routes.""")
 ch.code("""g_sql = duckosm.routing.routed_graph(net.driving)             # the arcs that a car route can use
 net.sql(f"SELECT (SELECT count(*) FROM driving.edge_graph) AS all_arcs, (SELECT count(*) FROM {g_sql}) AS car_arcs")""")
-ch.md("""**What the output shows.** `driving.edge_graph` has 6,754 arcs, but a car can use only 5,082 of them. The other
+ch.md("""`driving.edge_graph` has 6,754 arcs, but a car can use only 5,082 of them. The other
 arcs are turns for buses and other vehicles. Every routing call of the driving mode uses the 5,082 arcs.""")
 
 ch.md("""## Across modes
@@ -223,7 +223,7 @@ ch.md("""`allowed_modes` limits the trip to some modes. A trip between two point
 has no car: it can walk and cycle.""")
 ch.code("""bike = net.route_multimodal_points(a, b, allowed_modes=["walking", "cycling"])     # a trip without a car
 [(leg["mode"], len(leg["edges"]), round(leg["time_s"])) for leg in bike["legs"]], round(bike["time_s"])""")
-ch.md("""**What the output shows.** The trip without a car cycles on 76 edges for 705 s. The total is 830 s (13.8 minutes),
+ch.md("""The trip without a car cycles on 76 edges for 705 s. The total is 830 s (13.8 minutes),
 with the two transfers of the bicycle. The walk alone takes 36.4 minutes, so the bicycle is much faster.""")
 
 ch.md("""### Between two junctions
@@ -234,7 +234,7 @@ ch.md("""### Between two junctions
 ch.code("""ends = net.sql("SELECT min(node_id) AS a, max(node_id) AS b FROM walking.nodes WHERE node_id > 0")    # two OSM junctions
 j = duckosm.routing.route_multimodal(net, int(ends.a[0]), int(ends.b[0]))                          # from junction to junction
 [(leg["mode"], round(leg["time_s"])) for leg in j["legs"]], [t["kind"] for t in j["transfers"]]""")
-ch.md("""**What the output shows.** The trip has two legs: a drive (195 s) and a walk (38 s), with two transfers, `park`
+ch.md("""The trip has two legs: a drive (195 s) and a walk (38 s), with two transfers, `park`
 and `retrieve`. The trip starts at a junction where a car can wait, so it changes to the car at once, with no walking
 leg before it.""")
 
@@ -253,7 +253,7 @@ ch.code("""import networkx as nx
 
 g = net.driving.to_networkx()                                      # the turn graph of the driving network
 g.number_of_nodes(), g.number_of_edges(), nx.shortest_path(g, start, end, weight="weight") == r.edge_ids    # the same path as the route""")
-ch.md("""**What the output shows.** The networkx graph has 2,840 nodes (one for each driving edge) and 5,082 arcs (the turns
+ch.md("""The networkx graph has 2,840 nodes (one for each driving edge) and 5,082 arcs (the turns
 that a car can make). Its shortest path between the two edges is the path of the route: `True`.""")
 ch.code("""import rustworkx as rx
 
@@ -262,7 +262,7 @@ ix = h.attrs["index"]                                              # the node in
 graph_s = rx.dijkstra_shortest_path_lengths(h, ix[start], edge_cost_fn=float, goal=ix[end])[ix[end]]    # the shortest time in the graph
 last_s = float(net.sql("SELECT cost_s FROM driving.edges WHERE edge_id = ?", [end]).cost_s[0])        # the time of the last edge
 round(graph_s, 1), round(graph_s + last_s, 1), round(r.time_s, 1)                                    # graph, graph + last edge, route""")
-ch.md("""**What the output shows.** The shortest time in the rustworkx graph is 113.2 s. With the time of the last edge, it
+ch.md("""The shortest time in the rustworkx graph is 113.2 s. With the time of the last edge, it
 is 114.1 s, the time of the route.
 
 > **Tip:** use networkx for its many algorithms on a small area, and rustworkx for speed on a large area. For many

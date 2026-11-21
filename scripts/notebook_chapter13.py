@@ -58,7 +58,7 @@ The chapter uses the driving network of Monaco. The extra `sim` installs SUMO, b
 and the movements from SUMO's `netconvert`. The extra `planning` installs path4gmns.""")
 ch.code("""net = duckosm.network(osm_id=2220322, modes=["driving"], name="monaco")    # get and build the driving network of Monaco
 net.driving                                                                # the card of the driving mode""")
-ch.md("""**What the output shows.** The driving network of Monaco has 2840 edges and 1768 nodes, 96.2 km of roads.""")
+ch.md("""The driving network of Monaco has 2840 edges and 1768 nodes, 96.2 km of roads.""")
 
 ch.md("""## The GMNS tables: `to_gmns`
 
@@ -97,7 +97,7 @@ gmns.sql(\"\"\"SELECT 'link' AS table_name, count(*) AS rows FROM gmns_driving.l
             UNION ALL SELECT 'node', count(*) FROM gmns_driving.node
             UNION ALL SELECT 'lane', count(*) FROM gmns_driving.lane
             UNION ALL SELECT 'movement', count(*) FROM gmns_driving.movement\"\"\").df()    # the rows of the main tables""")
-ch.md("""**What the output shows.** 2840 links allow `auto`: they are the driving edges. 10 links allow only `bus`, and 8
+ch.md("""2840 links allow `auto`: they are the driving edges. 10 links allow only `bus`, and 8
 allow `bus,bike`. The four main tables have 2858 links, 1772 nodes, 3318 lanes and 3755 movements.""")
 ch.code("""kinds = gmns.sql(\"\"\"SELECT type, count(*) AS movements FROM gmns_driving.movement GROUP BY 1 ORDER BY 2 DESC\"\"\").df()   # the kinds of turn
 gmns.close()                                                 # close the file: the next calls write to it
@@ -116,7 +116,7 @@ Most planning tools read GMNS as CSV files. `to_csv=` writes one CSV file for ea
 ch.code("""import os
 net.driving.to_gmns("out/gmns_csv.duckdb", to_csv="out/gmns_csv")    # the DuckDB file and the CSV files
 sorted(os.listdir("out/gmns_csv"))                                 # the CSV files""")
-ch.md("""**What the output shows.** The folder has 12 CSV files, one for each GMNS table, for example `link.csv`,
+ch.md("""The folder has 12 CSV files, one for each GMNS table, for example `link.csv`,
 `node.csv`, `lane.csv` and `movement.csv`.""")
 
 ch.md("""## Check the tables: `check_gmns`
@@ -128,7 +128,7 @@ modes.""")
 ch.code("""checks = duckosm.planning.check_gmns("out/gmns.duckdb")      # (schema, check, bad rows, rows) for each check
 print(len(checks), "checks;", [c for c in checks if c[2] > 0], "with bad rows")
 checks[:5]                                                   # the first checks""")
-ch.md("""**What the output shows.** `check_gmns` runs 17 checks, and no check has a bad row. Each tuple tells the check
+ch.md("""`check_gmns` runs 17 checks, and no check has a bad row. Each tuple tells the check
 and its numbers: for example, all 2858 links start at their `from_node`.
 
 > **Tip:** run `check_gmns` after each change to the GMNS tables, and before you give them to a planning tool.""")
@@ -140,7 +140,7 @@ file. It has two kinds of link: a **normal** link for each macro link, and a **m
 The ids stay the same in each build: `M<edge_id>` for a normal link, `X<from>-<to>` for a movement. `macro_link_id`
 is the `edge_id` of the macro link. `trim_m` (default 6 m) cuts each link at its ends, to make room for the turns.""")
 ch.code("""duckosm.planning.to_meso("out/gmns.duckdb")                  # meso_driving.meso_node and meso_link""")
-ch.md("""**What the output shows.** The meso network has 6613 links: 2858 normal links (one for each macro link) and 3755
+ch.md("""The meso network has 6613 links: 2858 normal links (one for each macro link) and 3755
 movement links (one for each movement). It has 5716 nodes, two for each normal link (2 × 2858).""")
 
 ch.md("""## The micro network: `to_micro`
@@ -150,7 +150,7 @@ ch.md("""## The micro network: `to_micro`
 and the **movements** from the end of a lane to the start of a lane of the next link. `macro_link_id` and `lane_no`
 tell the macro link and the lane of each cell.""")
 ch.code("""duckosm.planning.to_micro("out/gmns.duckdb")                 # micro_driving.micro_node and micro_link""")
-ch.md("""**What the output shows.** The micro network has 22369 links: 15083 cells, 3163 lane changes and 4123 movements
+ch.md("""The micro network has 22369 links: 15083 cells, 3163 lane changes and 4123 movements
 (one for each lane connector of netconvert). It has 18401 nodes.""")
 
 ch.md("""## path4gmns: `to_path4gmns`
@@ -160,7 +160,7 @@ path4gmns is a Python tool for shortest paths, traffic assignment and DTALite (d
 them with path4gmns, with the lengths in metres and the speeds in km/h. `out_dir` is the folder of the two files
 (default: a folder `path4gmns` next to the GMNS file). The result is the path4gmns network.""")
 ch.code("""pnet = duckosm.planning.to_path4gmns("out/gmns.duckdb")    # the network in path4gmns""")
-ch.md("""**What the output shows.** path4gmns reads 1772 nodes and 2858 links, the numbers of the GMNS tables. All the
+ch.md("""Path4gmns reads 1772 nodes and 2858 links, the numbers of the GMNS tables. All the
 nodes are in one zone, zone 1.""")
 
 ch.md("""### The same shortest path in two tools
@@ -178,7 +178,7 @@ ch.md("""**What the output shows.** The two tools find the same edges (`True`). 
 22 m from the two points to the road. The edges alone are 2916 m long, and path4gmns gives 2918 m for the same links,
 from the lengths of the GMNS links.""")
 ch.code("""net.map(routes={"duckOSM": route, "path4gmns": {"edges": links}})    # the two routes on the map""")
-ch.md("""**What the output shows.** The two routes are on the same edges, so the map shows one line from the south-west
+ch.md("""The two routes are on the same edges, so the map shows one line from the south-west
 to the north-east of Monaco.""")
 
 ch.md("""## AequilibraE: `to_aequilibrae`
@@ -207,7 +207,7 @@ if importlib.util.find_spec("aequilibrae"):                               # Aequ
     print(duckosm.planning.to_aequilibrae(net.driving, "out/aequilibrae"))   # the project: path, links, nodes
 else:
     print("AequilibraE is not installed: pip install aequilibrae, and SpatiaLite")""")
-ch.md("""**What the output shows.** AequilibraE is not installed here, so the cell prints the line to install it. With
+ch.md("""AequilibraE is not installed here, so the cell prints the line to install it. With
 AequilibraE, the call prints the folder of the project, its links (one for each edge) and its nodes.""")
 
 ch.exercises([

@@ -56,7 +56,7 @@ ch.md("""## Build Monaco
 The lane maps need the driving network. The build is the same as in chapter 1.""")
 ch.code("""net = duckosm.network(osm_id=2220322, modes=["driving"], name="monaco")    # get and build the driving network of Monaco
 net                                                                         # the card""")
-ch.md("""**What the output shows.** The progress lines name the cut and the build. The card shows the driving network:
+ch.md("""The progress lines name the cut and the build. The card shows the driving network:
 the edges, the nodes and the length.""")
 
 ch.md("""## The lanes: `to_gmns`
@@ -67,7 +67,7 @@ lane (`lane`), one for each lane connector through a junction (`lane_connector`)
 tells more about GMNS. This chapter uses only its lanes.""")
 ch.code("""gmns = net.driving.to_gmns("out/gmns.duckdb")         # the lanes and the lane connectors (GMNS)
 gmns["modes"]                                         # the rows of the GMNS tables""")
-ch.md("""**What the output shows.** The driving network of Monaco has 2858 links and 3318 lanes: most roads have one
+ch.md("""The driving network of Monaco has 2858 links and 3318 lanes: most roads have one
 lane in each direction, and some have two or three. The 3755 movements are the legal turns from one link to another.""")
 
 ch.md("""### Look at the lanes
@@ -108,7 +108,7 @@ the longitude of that center. The call needs commonroad-io (the `hdmap` extra).
 | `author`, `affiliation` | `"duckOSM"`, `""` | the author data of the file |""")
 ch.code("""cr = duckosm.hdmap.to_commonroad("out/gmns.duckdb", "out/monaco_commonroad.xml")    # the CommonRoad map
 {k: v for k, v in cr.items() if k != "ids"}                                          # the numbers""")
-ch.md("""**What the output shows.** The map has 7209 lanelets, from 3318 lanes and 4123 lane connectors. That is less
+ch.md("""The map has 7209 lanelets, from 3318 lanes and 4123 lane connectors. That is less
 than 3318 + 4123 = 7441: a lane or a connector whose border cannot be drawn (for example a very short or sharp line)
 has no lanelet.""")
 
@@ -118,7 +118,7 @@ The result has `ids`, a DataFrame with one row for each lane and each connector:
 `edge_id` of its road. For a connector, the `edge_id` is the road that the connector comes from. Use `ids` to put a
 result of CommonRoad (for example a planned path) back on the network, or your own data on the lanelets.""")
 ch.code("""cr["ids"].head()    # each lanelet_id, its GMNS lane or connector, and its edge_id""")
-ch.md("""**What the output shows.** The first lanelets are lanes: their GMNS id is `<edge_id>_1`, lane 1 of the road.""")
+ch.md("""The first lanelets are lanes: their GMNS id is `<edge_id>_1`, lane 1 of the road.""")
 
 ch.md("""### Read the map with commonroad-io
 
@@ -148,7 +148,7 @@ ax = shapes.plot(color="#adb5bd", edgecolor="#495057", linewidth=0.3, figsize=(9
 ax.set_xlim(-250, 50)                                                    # a part of the center, in metres
 ax.set_ylim(-500, -200)
 ax.set_aspect("equal")""")
-ch.md("""**What the output shows.** The axes are metres from the center of Monaco. Each gray shape is one lanelet. Where
+ch.md("""The axes are metres from the center of Monaco. Each gray shape is one lanelet. Where
 a road has two lanes, two lanelets lie side by side. In the junctions, short curved lanelets join the lanes: these are
 the connectors, one for each lane that a lane can turn into.""")
 
@@ -161,7 +161,7 @@ ch.code("""duckosm.hdmap.to_commonroad("out/gmns.duckdb", "out/monaco_fra.xml", 
                             author="My name", affiliation="My lab")             # the same map, other file data
 scenario2, _ = CommonRoadFileReader("out/monaco_fra.xml").open()
 str(scenario2.scenario_id), scenario2.author, scenario2.affiliation, scenario2.source""")
-ch.md("""**What the output shows.** The scenario id is now `FRA_Monaco-1`. The author data are in the file, and the
+ch.md("""The scenario id is now `FRA_Monaco-1`. The author data are in the file, and the
 source is `duckOSM`.
 
 > **Tip:** `map_name` keeps only the letters and digits of the name, at most 32. CommonRoad uses `_` and `-` to split
@@ -184,7 +184,7 @@ is OSM XML: nodes with a latitude and a longitude, ways for the borders, and one
 `snap_m` (default 0.01) joins two border points closer than this distance, in metres, into one node.""")
 ch.code("""l2 = duckosm.hdmap.to_lanelet2("out/gmns.duckdb", "out/monaco_lanelet2.osm")    # the Lanelet2 map
 l2                                                                                # the numbers""")
-ch.md("""**What the output shows.** The map has 3318 lanelets, one for each lane. Each lanelet has two borders, so the
+ch.md("""The map has 3318 lanelets, one for each lane. Each lanelet has two borders, so the
 file has 6636 ways. The 86498 nodes are the points of the borders.""")
 
 ch.md("""### Read the map with `lanelet2`
@@ -232,7 +232,7 @@ ch.code("""duckosm.hdmap.lane_graph("out/gmns.duckdb")             # the lane gr
 ch.code("""with duckdb.connect("out/gmns.duckdb", read_only=True) as con:          # the links of each kind
     kinds = con.sql("SELECT kind, count(*) AS links FROM lane_driving.lane_edges GROUP BY kind ORDER BY links DESC").df()
 kinds""")
-ch.md("""**What the output shows.** The graph has 3318 lanes and 4932 links: 4096 turns and 836 lane changes. Most
+ch.md("""The graph has 3318 lanes and 4932 links: 4096 turns and 836 lane changes. Most
 turns go straight on (`thru`, 2370). There are 219 U-turns, mostly at the ends of the roads with a turning place.""")
 
 ch.md("""### A route: `route_lanes`
@@ -279,7 +279,7 @@ ch.code("""import xml.etree.ElementTree as ET                                   
 
 odr = net.driving.to_opendrive("out/monaco.xodr")                        # the OpenDRIVE file, roads only
 odr, len(ET.parse("out/monaco.xodr").findall("road"))                    # the numbers, and the roads in the file""")
-ch.md("""**What the output shows.** The file has 2840 roads, one for each driving edge, in `EPSG:32632` (UTM zone
+ch.md("""The file has 2840 roads, one for each driving edge, in `EPSG:32632` (UTM zone
 32 N, the zone of Monaco).""")
 
 ch.md("""### The junctions: `junctions=True`
@@ -291,7 +291,7 @@ ch.code("""odr_j = duckosm.hdmap.to_opendrive("out/gmns.duckdb", "out/monaco_jun
                                    junctions=True)                        # roads, connecting roads and junctions
 root = ET.parse("out/monaco_junctions.xodr").getroot()
 odr_j, len(root.findall("road")), len(root.findall("junction"))""")
-ch.md("""**What the output shows.** The file has 2858 roads (the GMNS links), 1880 connecting roads and 491 junctions.
+ch.md("""The file has 2858 roads (the GMNS links), 1880 connecting roads and 491 junctions.
 The roads and the connecting roads together are the 4738 `road` elements of the file.
 
 > **Warning:** a network file without the GMNS tables cannot give the junctions. The call then stops with

@@ -78,14 +78,14 @@ ch.md("""### All buildings
 The first call takes each feature with the tag `building`.""")
 ch.code("""buildings = duckosm.gis.features(net, tags={"building": True})    # each feature with the tag building
 len(buildings), buildings.geom_type.value_counts().to_dict()       # the number of buildings, by geometry type""")
-ch.md("""**What the output shows.** Monaco has 1,258 buildings in OSM, and all are polygons. In OSM a building is a closed way or a multipolygon relation, so `features` gives it as an area, not as a point.""")
+ch.md("""Monaco has 1,258 buildings in OSM, and all are polygons. In OSM a building is a closed way or a multipolygon relation, so `features` gives it as an area, not as a point.""")
 
 ch.md("""### Three values of one tag
 
 A list takes each of its values. Here: the cafes, the restaurants and the bars.""")
 ch.code("""food = duckosm.gis.features(net, tags={"amenity": ["cafe", "restaurant", "bar"]})    # three values of one tag
 food.amenity.value_counts()                                                          # the features of each value""")
-ch.md("""**What the output shows.** The city has 124 restaurants, 27 cafes and 21 bars: 172 features. The column `amenity` has the value of the tag for each feature. The map puts them on the gray buildings: most are in La Condamine around the port, in Monte-Carlo and in Fontvieille.""")
+ch.md("""The city has 124 restaurants, 27 cafes and 21 bars: 172 features. The column `amenity` has the value of the tag for each feature. The map puts them on the gray buildings: most are in La Condamine around the port, in Monte-Carlo and in Fontvieille.""")
 ch.code("""ax = buildings.plot(color="#adb5bd", figsize=(8, 8))                  # the buildings in gray
 food.plot(ax=ax, column="amenity", legend=True, markersize=8)         # the cafes, restaurants and bars on them
 ax.set_axis_off()                                                     # no axes""")
@@ -97,7 +97,7 @@ feature, so you can read a tag that you did not ask for.""")
 ch.code("""food[["feature_id", "amenity", "geometry"]].head()    # the first rows: feature_id, the tag column and the geometry""")
 ch.code("""named = food[food.tags.map(lambda t: "cuisine" in t)]                        # the features with the tag cuisine
 named.tags.map(lambda t: t["cuisine"]).value_counts().head()                  # the most common kinds of food""")
-ch.md("""**What the output shows.** Each `feature_id` starts with the OSM type: these five places are OSM nodes, so their geometry is a point. The tag `cuisine` is in the column `tags`, not in its own column. The most common kind of food is Italian (18), then pizza (5).""")
+ch.md("""Each `feature_id` starts with the OSM type: these five places are OSM nodes, so their geometry is a point. The tag `cuisine` is in the column `tags`, not in its own column. The most common kind of food is Italian (18), then pizza (5).""")
 
 ch.md("""### Two keys: OR
 
@@ -107,7 +107,7 @@ ch.code("""green = duckosm.gis.features(net, tags={"leisure": ["park", "garden"]
 green = green[green.geom_type.isin(["Polygon", "MultiPolygon"])]                                       # the areas only
 print(len(green), "green areas,", round(green.to_crs(green.estimate_utm_crs()).area.sum() / 1e4, 1), "ha")
 green.groupby(["leisure", "landuse"], dropna=False).size()                                              # the features of each value""")
-ch.md("""**What the output shows.** The two keys give 148 green polygons with 21.8 ha. 36 are gardens and 14 are parks (`leisure`), 94 are grass and 4 are woods (`landuse`). A feature that has only one of the two keys has `NaN` in the other column.""")
+ch.md("""The two keys give 148 green polygons with 21.8 ha. 36 are gardens and 14 are parks (`leisure`), 94 are grass and 4 are woods (`landuse`). A feature that has only one of the two keys has `NaN` in the other column.""")
 
 ch.md("""### From an OSM file
 
@@ -117,7 +117,7 @@ ch.code("""pbf = net.path.with_name("monaco.osm.pbf")              # the cut OSM
 every = duckosm.gis.features(pbf)                        # all features, no tag rule
 print(len(every), "features")
 every.feature_id.str.split("/").str[0].value_counts()    # the features of each OSM type""")
-ch.md("""**What the output shows.** Without `tags`, the call gives all 9,659 features of the file that have tags: 5,606 ways, 3,994 nodes and 59 relations. A node without tags (a point of a road or a building) is not a feature: it is a part of the geometry of a way.
+ch.md("""Without `tags`, the call gives all 9,659 features of the file that have tags: 5,606 ways, 3,994 nodes and 59 relations. A node without tags (a point of a road or a building) is not a feature: it is a part of the geometry of a way.
 
 > **Tip:** `features(..., fixes="osm_fixes.yaml")` applies an OSM fixes file before it reads the features. Use the
 > same fixes file as the build, and the features and the network agree.
@@ -176,7 +176,7 @@ mid = edges.set_geometry(edges.geometry.representative_point())                 
 q = quarters[["name", "geometry"]].rename(columns={"name": "quarter"})            # the quarters, with the column quarter
 inq = gpd.sjoin(mid, q, predicate="within")                                       # the quarter of each middle point
 inq.groupby("quarter").length_m.sum().div(1000).round(1).sort_values(ascending=False)   # km of driving edges in each quarter""")
-ch.md("""**What the output shows.** Monte-Carlo has the most driving roads: 20.0 km of edges. La Condamine has 15.6 km and Fontvieille 11.2 km. Ravin de Sainte-Dévote, the smallest quarter, has 1.1 km. An edge outside all quarters has no row.""")
+ch.md("""Monte-Carlo has the most driving roads: 20.0 km of edges. La Condamine has 15.6 km and Fontvieille 11.2 km. Ravin de Sainte-Dévote, the smallest quarter, has 1.1 km. An edge outside all quarters has no row.""")
 
 ch.md("""### The table in the file: `admin`
 

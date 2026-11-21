@@ -69,7 +69,7 @@ ch.code("""from duckosm import mobility as mob                                  
 net = duckosm.network(osm_id=2220322, modes=["driving"], name="monaco")     # get and build the driving network of Monaco
 drive = net.driving                                                         # the driving mode
 drive                                                                       # the card""")
-ch.md("""**What the output shows.** The driving network of Monaco has 2840 edges and 1768 nodes, 96.2 km of roads.""")
+ch.md("""The driving network of Monaco has 2840 edges and 1768 nodes, 96.2 km of roads.""")
 
 ch.md("""## Make GPS traces
 
@@ -105,7 +105,7 @@ there, back = drive.route(A, B), drive.route(B, A)                     # the tru
 traces = pd.concat([gps(there, "there", 1), gps(back, "back", 2)], ignore_index=True)    # the GPS file
 print(len(traces), "points;", traces.groupby("trace_id").size().to_dict())    # the points of each trace
 traces.head()                                                          # the first points""")
-ch.md("""**What the output shows.** The two traces have 396 points: 196 for "there" and 200 for "back". The points of each trace are 1.875 s apart
+ch.md("""The two traces have 396 points: 196 for "there" and 200 for "back". The points of each trace are 1.875 s apart
 (15 m at 8 m/s). The trace "there" drives from the south-west of Monaco to the north-east, and "back" drives the
 other way.""")
 
@@ -141,7 +141,7 @@ ch.md("""### The points
 | `distance_m` | the distance from the GPS point to the edge, in metres |
 | `snap_x`, `snap_y` | the point on the edge (lon, lat) |""")
 ch.code("""m.points[["trace_id", "time", "edge_id", "fraction", "distance_m"]].head()    # the points on the edges""")
-ch.md("""**What the output shows.** The first rows are the trace "back": `match` sorts the points by `trace_id`, then by
+ch.md("""The first rows are the trace "back": `match` sorts the points by `trace_id`, then by
 `time`. Each point is a few metres from its edge, as the noise of the traces. Two points can share one edge, with a
 larger `fraction` for the later point.""")
 
@@ -167,7 +167,7 @@ ch.code("""import matplotlib.pyplot as plt
 ax = plt.subplots(figsize=(7, 7))[1]                                       # a new picture
 net.plot(highlight=m.edges.edge_id, ax=ax)                                 # the matched edges in orange
 ax.scatter(traces.x, traces.y, s=1, color="black", alpha=0.5, zorder=3); plt.show()    # the GPS points""")
-ch.md("""**What the output shows.** The orange route follows the black GPS points from one end to the other. The two
+ch.md("""The orange route follows the black GPS points from one end to the other. The two
 traces drive on the same roads in most places, so one orange line shows both.""")
 
 ch.md("""### The options of the match
@@ -195,7 +195,7 @@ a trace: for GPS traces, `match` is more correct.
 ch.code("""sensors = pd.DataFrame({"sensor": ["s1", "s2", "s3"], "x": [7.4206, 7.4262, 7.4301], "y": [43.7316, 43.7397, 43.7427]})
 snapped = mob.snap(drive, sensors, radius_m=30)                            # edge_id, fraction, distance_m, snap_x, snap_y
 snapped""")
-ch.md("""**What the output shows.** Each sensor gets one edge. The sensors are 6 to 14 m from their edges. Sensor s1 is
+ch.md("""Each sensor gets one edge. The sensors are 6 to 14 m from their edges. Sensor s1 is
 near the end of its edge (`fraction` 0.92), and s2 is near the middle (0.52). `snap_x` and `snap_y` are the points
 on the edges: draw them to check the snap.""")
 
@@ -204,7 +204,7 @@ ch.md("""### Other kinds of points
 `points` can be a DataFrame with lon and lat columns (`x=` and `y=` give other names), a GeoDataFrame in any CRS, or
 a list of `(lon, lat)`. Here it is a list.""")
 ch.code("""mob.snap(drive, [(7.4246, 43.7384), (7.4100, 43.7300)], radius_m=30)    # a list of (lon, lat)""")
-ch.md("""**What the output shows.** A list gives a DataFrame with the columns `x` and `y`, and the columns of the snap.
+ch.md("""A list gives a DataFrame with the columns `x` and `y`, and the columns of the snap.
 The second point is 0.07 m from its edge: it is almost on the road.""")
 
 ch.md("""## Count on each edge: `aggregate`
@@ -223,7 +223,7 @@ The result has the columns `edge_id`, `time` (the start of the bin), `count`, an
 ch.code("""counts = mob.aggregate(drive, m.points, time="hour")                     # edge_id, time, count
 print(len(counts), "rows;", counts["count"].sum(), "points")              # every point is in one row
 counts.head()""")
-ch.md("""**What the output shows.** The 396 points are on 119 edges, so the table has 119 rows. All the points are between 08:00 and 09:00, so each edge has one row
+ch.md("""The 396 points are on 119 edges, so the table has 119 rows. All the points are between 08:00 and 09:00, so each edge has one row
 for the hour 08:00.""")
 
 ch.md("""### Smaller time bins and a mean value
@@ -247,10 +247,10 @@ ch.code("""by_edge = counts.groupby("edge_id")["count"].sum()                   
 on_map = mob.join(drive, by_edge)                                          # the edges with data
 print(len(on_map), "edges with data;", len(mob.join(drive, by_edge, how="left")), "edges in all")
 on_map[["edge_id", "name", "count"]].nlargest(3, "count")                 # the three edges with the most points""")
-ch.md("""**What the output shows.** 119 edges have data, of the 2840 edges of the network. The Boulevard du Larvotto has the
+ch.md("""119 edges have data, of the 2840 edges of the network. The Boulevard du Larvotto has the
 most points (21), then the Tunnel Dorsale (17) and the Tunnel Rocher Palais (14). A long edge gets more points, because the traces put one point every 15 m.""")
 ch.code("""net.plot(color_by=by_edge, cmap="magma_r")                                 # the map, colored by the count""")
-ch.md("""**What the output shows.** The colors show the number of points on each edge. The long edges of the route
+ch.md("""The colors show the number of points on each edge. The long edges of the route
 (the boulevard along the sea and the tunnels) are the darkest.""")
 
 ch.md("""## Keep your data after a rebuild: `edge_id_map`
@@ -272,7 +272,7 @@ new = duckosm.network(osm_id=2220322, modes=["driving"], fixes="fix.yaml", name=
 ids = mob.edge_id_map(drive, new.driving)                                # old edge_id -> new edge_id, share
 print(len(ids), "rows;", (ids.old_edge_id == ids.new_edge_id).sum(), "edges keep their id")
 ids[ids.old_edge_id != ids.new_edge_id]                                  # the edges that changed""")
-ch.md("""**What the output shows.** The old network has 2840 edges, and the map has 2838 rows. 2834 edges keep their id. The
+ch.md("""The old network has 2840 edges, and the map has 2838 rows. 2834 edges keep their id. The
 four changed rows are two old edges in each direction: each pair becomes one new edge. The two edges of the removed
 street have no row.""")
 
@@ -283,7 +283,7 @@ when an old edge is split, and added when old edges are joined.""")
 ch.code("""moved = counts.merge(ids, left_on="edge_id", right_on="old_edge_id")     # the counts on the new edges
 moved["count"] = moved["count"] * moved.share                            # a split edge shares its count
 print(counts["count"].sum(), "points before,", round(moved["count"].sum(), 1), "after")    # no count is lost""")
-ch.md("""**What the output shows.** The 396 points of the old edges are all on the new edges. No point was on the removed
+ch.md("""The 396 points of the old edges are all on the new edges. No point was on the removed
 street.
 
 > **Warning:** a mean (a speed, a distance) must not be multiplied by `share`. Multiply only values that you can add,

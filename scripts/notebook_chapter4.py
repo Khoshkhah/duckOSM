@@ -15,7 +15,18 @@ ch = Chapter(4, "04_join_by_edge_id", "Join your data by edge_id",
              time="about 2 minutes", extras="viz",
              next_=("05_osm_fixes", "5. Fix the OSM data once", "a fixes file that every build and every output takes"))
 
-ch.md("""## Your data and the edges
+ch.md("""## The goal of this chapter
+
+You have data about roads from another source, for example a file of traffic counts from the city: one number for
+each road and each direction. You want this data on the duckOSM network, so that you can sort the roads by it, query
+it with SQL and color the map by it. At the end of the chapter you can:
+
+1. give each row of your data its `edge_id`, the key of a duckOSM edge;
+2. join your data to the edges in pandas or in SQL;
+3. color the map and the dashboard by your data;
+4. build the network again and find your data on the same roads.
+
+## Your data and the edges
 
 Much data about roads has one value for each road and each direction: traffic counts, measured speeds, noise, the
 results of a model. To use it with a duckOSM network, each value needs the edge that it belongs to. The key of an
@@ -56,7 +67,7 @@ base = main.highway.map({"primary": 900, "secondary": 500, "tertiary": 250})   #
 rng = np.random.default_rng(1)                                                 # made-up numbers that do not change
 counts = main[["edge_id"]].assign(vehicles_per_hour=(base * rng.uniform(0.5, 1.5, len(main))).round().astype(int))
 counts.head()                                                                  # edge_id (int64) and the count""")
-ch.md("""**What the output shows.** Each row is one edge: one direction of one part of a road. The table has 1013 rows,
+ch.md("""Each row is one edge: one direction of one part of a road. The table has 1013 rows,
 one for each primary, secondary and tertiary edge.""")
 
 ch.md("""### The type of `edge_id`
@@ -66,7 +77,7 @@ changes most ids. The cell turns the ids into floats and back, and counts the id
 ch.code("""print(counts.dtypes)                                            # edge_id is int64
 broken = counts.edge_id.astype("float64").astype("int64")       # through a float, and back
 print((broken != counts.edge_id).sum(), "of", len(counts), "ids changed")""")
-ch.md("""**What the output shows.** 1007 of the 1013 ids changed: a join on them finds almost no edges. Only the 6
+ch.md("""1007 of the 1013 ids changed: a join on them finds almost no edges. Only the 6
 small ids stay the same.
 
 > **Warning:** keep `edge_id` as `int64` (`BIGINT` in SQL). A float column, a spreadsheet program or a JSON reader
@@ -83,7 +94,7 @@ ch.md("""**What the output shows.** The five largest counts (1307 to 1324) are o
 range (900 × 1.5 = 1350): the Boulevard du Larvotto, the tunnels Pasteur and Albert II, and two edges without a name. `gdf` is still a GeoDataFrame: it has the geometry of each edge.""")
 ch.code("""print(gdf.vehicles_per_hour.notna().sum(), "of", len(gdf), "edges have a count")
 gdf.groupby("highway").vehicles_per_hour.mean().dropna().round()       # the mean count of each road class""")
-ch.md("""**What the output shows.** 1013 of the 2840 driving edges have a count. The mean count of each class is near
+ch.md("""1013 of the 2840 driving edges have a count. The mean count of each class is near
 its base: approximately 900, 500 and 250.""")
 
 ch.md("""### Join in SQL
@@ -116,7 +127,7 @@ net.sql(\"\"\"
     WHERE e.name IS NOT NULL
     ORDER BY c.vehicles_per_hour DESC LIMIT 5
 \"\"\")                                                                         # the file, joined in SQL""")
-ch.md("""**What the output shows.** The five largest counts on named roads, from 1287 to 1312 vehicles per hour. DuckDB reads the Parquet file with the
+ch.md("""The five largest counts on named roads, from 1287 to 1312 vehicles per hour. DuckDB reads the Parquet file with the
 path in the query. The path is from the folder of the notebook.""")
 
 ch.md("""## Color the map by the counts
@@ -126,7 +137,7 @@ as its index is the short form. The edges without a count are gray. Run the cell
 and click a road to see its columns. This page shows the static picture of the map.""")
 ch.code("""by_edge = counts.set_index("edge_id").vehicles_per_hour    # the counts as a Series keyed by edge_id
 net.map(color_by=by_edge, cmap="magma_r")                  # a map, colored by the count""")
-ch.md("""**What the output shows.** The color bar is the count in vehicles per hour. The dark lines are the primary
+ch.md("""The color bar is the count in vehicles per hour. The dark lines are the primary
 roads with the largest counts. The thin gray lines are the edges without a count: the residential streets and the
 service roads.""")
 
@@ -138,7 +149,7 @@ ch.code("""net.map(color_by=counts, cmap="magma_r")      # a DataFrame: edge_id 
 ch.code("""busy = counts[counts.vehicles_per_hour > 1000].edge_id      # the edges with more than 1000 vehicles per hour
 print(len(busy), "busy edges")                              # the number of busy edges
 net.map(highlight=busy)                                     # in orange, the rest gray""")
-ch.md("""**What the output shows.** The DataFrame gives the same map as the Series. 65 edges are busy, all on primary
+ch.md("""The DataFrame gives the same map as the Series. 65 edges are busy, all on primary
 roads, because only a primary road can have more than 1000 vehicles per hour here.""")
 
 ch.md("""### Save the map
@@ -147,11 +158,14 @@ ch.md("""### Save the map
 the file to a person who has no Python.""")
 ch.code("""net.save_map("out/counts.html", color_by=by_edge, cmap="magma_r")    # the same map as one HTML file""")
 
-ch.md("""## A dashboard
+ch.md("""## A dashboard of your data
 
-roadstyle's dashboard: the map, the card of the road that you click and the color menu (chapter 3, "The dashboard").
-Run the cell to see the live dashboard. This page shows the static picture of the map.""")
-ch.code("""net.dashboard()    # the dashboard page of the network""")
+The dashboard is the map with a panel at the left (chapter 3, "The dashboard"). With `color_by`, the roads have the
+colors of your counts, and when you click a road, its card in the panel shows its count in the row `vehicles_per_hour`,
+next to the OSM data of the road. Use it to look at single roads: which road has a high count, and what kind of road
+it is.""")
+ch.code("""net.dashboard(color_by=by_edge, cmap="magma_r")    # the dashboard, colored by the count; click a road for its card""")
+ch.md("""On this page the dashboard is a picture, so you cannot click it. Run the cell in your notebook to use the panel.""")
 
 ch.md("""## The same data in more modes
 
@@ -209,8 +223,8 @@ ch.summary([
     ("`net.sql(\"... JOIN 'file.parquet' USING (edge_id)\")`", "your data from a Parquet file, joined in SQL"),
     ("`net.map(color_by=series, cmap=...)`", "a map colored by your data"),
     ("`net.map(highlight=ids)`", "some edges in orange"),
+    ("`net.dashboard(color_by=series, cmap=...)`", "the dashboard colored by your data; the road card shows the value"),
     ("`net.save_map(path, color_by=...)`", "the map of your data as one HTML file"),
-    ("`net.dashboard()`", "the dashboard of the network"),
     ("`counts.edge_id.isin(other.edges().edge_id)`", "check that your data finds its edges in another file"),
 ], reference="[Python SDK, Maps](../reference/python.md#maps) and [Stable edge ids](../concepts/edge-ids.md)")
 

@@ -65,7 +65,7 @@ The chapter exports the driving network of Monaco. The summary gives the number 
 each export with it.""")
 ch.code("""net = duckosm.network(osm_id=2220322, modes=["driving"], name="monaco")    # get and build the driving network of Monaco
 net.summary()                                         # the number of edges, to compare with each export""")
-ch.md("""**What the output shows.** The driving network of Monaco has 2,840 edges and 1,768 nodes, 96.2 km of road.
+ch.md("""The driving network of Monaco has 2,840 edges and 1,768 nodes, 96.2 km of road.
 Each export below gives its own count, and the count must agree with these numbers.""")
 
 ch.md("""## SUMO
@@ -94,7 +94,7 @@ and gives the `edge_id` of each SUMO edge (netconvert can split an edge into par
 gives the `edge_id` of each part).""")
 ch.code("""ids = duckosm.sim.edge_map(sumo)                 # the SUMO id and the edge_id of each SUMO edge
 len(ids), ids.edge_id.nunique()                  # the rows, and the different edge ids in them""")
-ch.md("""**What the output shows.** SUMO's network has 2,840 edges, and they are 2,840 different edge ids: netconvert
+ch.md("""SUMO's network has 2,840 edges, and they are 2,840 different edge ids: netconvert
 kept each duckOSM edge, with its `edge_id` as its SUMO id.
 
 > **Warning:** without the extra `sim` (or a SUMO install), `to_sumo` stops with "netconvert not found". Install
@@ -119,15 +119,14 @@ ch.code("""gmns = net.to_gmns("out/gmns.duckdb", to_csv="out/gmns")         # th
 gmns["modes"]                                                     # the rows of each table""")
 ch.md("""**What the output shows.** The GMNS network of driving has 1,772 nodes, 2,858 links, 3,318 lanes and 3,755
 movements. It has 18 links more than `driving.edges`: for example the other direction of a one-way road that a bus
-route uses. The export also makes the lanes and the movements. It took more than 25 s here. Each other
-export of the chapter takes less than 1 s.
+route uses. The export also makes the lanes and the movements.
 
 The check: `duckosm.planning.check_gmns` runs the rules of the standard on the tables. Examples: each link starts at
 its `from_node`, each lane number is correct, each movement turns where its inbound link ends. It gives one row for
 each rule: the schema, the rule, the number of bad rows and the number of rows.""")
 ch.code("""checks = duckosm.planning.check_gmns("out/gmns.duckdb")             # (schema, check, bad rows, rows) for each check
 len(checks), [c for c in checks if c[2] > 0]                        # the number of checks, and the checks with bad rows""")
-ch.md("""**What the output shows.** `check_gmns` ran 17 checks, and no check found a bad row (the empty list).""")
+ch.md("""`check_gmns` ran 17 checks, and no check found a bad row (the empty list).""")
 
 ch.md("""## MATSim
 
@@ -144,7 +143,7 @@ import xml.etree.ElementTree as ET                                   # to read t
 
 matsim = net.to_matsim("out/matsim_network.xml.gz")                  # the MATSim network
 matsim, len(ET.parse(gzip.open("out/matsim_network.xml.gz")).findall(".//link"))    # its numbers, and the links in the file""")
-ch.md("""**What the output shows.** The MATSim network has 1,768 nodes and 2,840 links, in UTM zone 32N (`EPSG:32632`,
+ch.md("""The MATSim network has 1,768 nodes and 2,840 links, in UTM zone 32N (`EPSG:32632`,
 in metres). The XML file has 2,840 `<link>` elements: one link for each edge.""")
 
 ch.md("""## OpenDRIVE (experimental)
@@ -159,7 +158,7 @@ is experimental: it writes one road for each edge, and the junctions only with `
 | `junctions` | `False` | `True`: also the OpenDRIVE junctions |""")
 ch.code("""odr = net.to_opendrive("out/monaco.xodr")                    # the OpenDRIVE file
 odr, len(ET.parse("out/monaco.xodr").findall("road"))       # its numbers, and the roads in the file""")
-ch.md("""**What the output shows.** The OpenDRIVE file has 2,840 roads, in UTM zone 32N. The XML has 2,840 `<road>`
+ch.md("""The OpenDRIVE file has 2,840 roads, in UTM zone 32N. The XML has 2,840 `<road>`
 elements: one road for each edge.""")
 
 ch.md("""## GeoPackage, GeoParquet and shapefiles
@@ -180,7 +179,7 @@ con = duckdb.connect()                                       # DuckDB with the e
 con.load_extension("spatial")
 {layer: con.execute(f"SELECT count(*) FROM st_read('out/monaco.gpkg', layer='{layer}')").fetchone()[0]
  for layer in gis["layers"]}                                 # the rows of each layer, as DuckDB reads them""")
-ch.md("""**What the output shows.** The GeoPackage has three layers: 2,840 edges, 1,768 nodes and the boundary (1 row).
+ch.md("""The GeoPackage has three layers: 2,840 edges, 1,768 nodes and the boundary (1 row).
 DuckDB reads each layer with the same number of rows as the network.""")
 ch.md("""GeoParquet is a Parquet file with a geometry column. It is fast to read for DuckDB, GeoPandas and the cloud data
 tools. `fmt="geoparquet"` writes one file for each layer into a folder.""")
@@ -208,7 +207,7 @@ network, and gives all OSM features (nodes, ways, relations) with all their tags
 ch.code("""area = duckosm.get(osm_id=2220322, name="monaco", out="data")                                          # the OSM file (from the cache)
 quack = duckosm.gis.quack(area, out="out", name="monaco", formats=["geoparquet"])    # the QuackOSM table
 con.sql(f"SELECT split_part(feature_id, '/', 1) AS type, count(*) AS features FROM '{quack[0]}' GROUP BY 1 ORDER BY 1").df()    # the features by OSM type""")
-ch.md("""**What the output shows.** The QuackOSM table of Monaco has 3,994 nodes (points with tags: shops, stops,
+ch.md("""The QuackOSM table of Monaco has 3,994 nodes (points with tags: shops, stops,
 trees ...), 5,606 ways and 59 relations. This is all of the OSM data with tags, not only the roads: a building, a park
 and a bench are features too.
 
@@ -221,7 +220,7 @@ from pathlib import Path
 subprocess.run([sys.executable, "-m", "duckosm", "quack", str(area.pbf), "--pmtiles", "-o", "out", "--name", "monaco"],
                check=True)                                             # the command duckosm quack --pmtiles
 Path("out/monaco.pmtiles").stat().st_size, Path("out/monaco.pmtiles").read_bytes()[:7]    # the size; a PMTiles file starts with "PMTiles\"""")
-ch.md("""**What the output shows.** The command made 59 tiles of 9,659 features in 0.1 s. The file is 0.2 MB
+ch.md("""The command made 59 tiles of 9,659 features in 0.1 s. The file is 0.2 MB
 (219,713 bytes), and its first seven bytes are `PMTiles`.""")
 
 ch.md("""## The files of the chapter

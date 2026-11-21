@@ -55,7 +55,7 @@ ch.md("""## Build Monaco
 The graphs of this chapter use the driving network. The build is the same as in chapter 1.""")
 ch.code("""net = duckosm.network(osm_id=2220322, modes=["driving"], name="monaco")    # get and build the driving network of Monaco
 net                                                   # the card""")
-ch.md("""**What the output shows.** The driving network of Monaco has 2840 edges. Each edge is one node of the turn
+ch.md("""The driving network of Monaco has 2840 edges. Each edge is one node of the turn
 graph and one arc of the junction graph.""")
 
 ch.md("""## networkx
@@ -79,7 +79,7 @@ ch.code("""import networkx as nx                                     # the graph
 g = net.driving.to_networkx()                              # the turn graph: a node is an edge_id
 first = next(iter(g.nodes))                                # one edge
 g.number_of_nodes(), g.number_of_edges(), first, g.nodes[first]["highway"], list(g.out_edges(first, data=True))""")
-ch.md("""**What the output shows.** The turn graph has 2840 nodes, one for each edge, and 5082 arcs, one for each legal
+ch.md("""The turn graph has 2840 nodes, one for each edge, and 5082 arcs, one for each legal
 turn. The first edge has two turns. Both arcs have the same weight (5.3 s), because the weight is the time of the first
 edge.""")
 
@@ -90,7 +90,7 @@ The weight of the route is the time of each edge except the last one. Chapter 7 
 duckOSM. Here networkx finds the time from the first edge to edge 500 of the graph.""")
 ch.code("""target = list(g.nodes)[500]                                               # another edge
 nx.shortest_path_length(g, first, target, weight="weight")                # seconds, with the legal turns only""")
-ch.md("""**What the output shows.** The fastest legal route takes 266.4 seconds, not counting the time on the last
+ch.md("""The fastest legal route takes 266.4 seconds, not counting the time on the last
 edge.""")
 
 ch.md("""### The junction graph: `to_networkx_nodes`
@@ -158,12 +158,12 @@ example `highway`, becomes one 0/1 column for each value (`highway=primary`). A 
 ch.code("""arrays = duckosm.ml.graph_arrays(net.driving, features=["length_m", "maxspeed_kmh", "lanes", "highway"])  # the junction graph
 {k: getattr(v, "shape", v) for k, v in arrays.items() if not k.endswith("names")}                     # the size of each array""")
 ch.code("""arrays["edge_attr_names"]          # the names of the arc feature columns""")
-ch.md("""**What the output shows.** The junction graph has 1768 nodes and 2840 arcs. `x` has 2 columns (`lon`, `lat`).
+ch.md("""The junction graph has 1768 nodes and 2840 arcs. `x` has 2 columns (`lon`, `lat`).
 `edge_attr` has 13 columns: the three numbers, then one column for each of the 10 `highway` values of the driving
 roads of Monaco.""")
 ch.code("""turn_arrays = duckosm.ml.graph_arrays(net.driving, graph="turns", features=["length_m", "lanes", "highway"])
 {k: getattr(v, "shape", v) for k, v in turn_arrays.items() if not k.endswith("names")}, turn_arrays["edge_attr_names"]""")
-ch.md("""**What the output shows.** In the turn graph the 2840 edges are the nodes, with 12 feature columns (`length_m`,
+ch.md("""In the turn graph the 2840 edges are the nodes, with 12 feature columns (`length_m`,
 `lanes` and 10 `highway` columns). The 5082 arcs are the turns, with one feature, `cost`.""")
 
 ch.md("""## PyTorch Geometric
@@ -189,7 +189,7 @@ so each prediction goes back to its edge.""")
 ch.code("""data = duckosm.ml.to_pyg(net.driving, features=["length_m", "maxspeed_kmh", "lanes", "highway"])    # the junction graph
 data                                                                                                 # its tensors""")
 ch.code("""data.edge_attr_names[:6], data.edge_id[:3]    # the first feature columns, and the first edge ids""")
-ch.md("""**What the output shows.** The `Data` object has the sizes of `graph_arrays`: 1768 nodes with 2 features, 2840
+ch.md("""The `Data` object has the sizes of `graph_arrays`: 1768 nodes with 2 features, 2840
 arcs with 13 features. The first three `edge_id`s are the same numbers as in `driving.edges`.""")
 
 ch.md("""### The turn graph, and a model
@@ -210,7 +210,7 @@ speed = torch.tensor(net.sql("SELECT maxspeed_kmh FROM driving.edges ORDER BY ed
 x = (turns.x - turns.x.mean(0)) / (turns.x.std(0) + 1e-6)                       # the features, scaled
 test = torch.rand(turns.num_nodes, generator=torch.Generator().manual_seed(0)) < 0.2    # 20 % of the edges to check
 turns""")
-ch.md("""**What the output shows.** The turn graph has 2840 nodes with 12 features and 5082 arcs with 1 feature, the
+ch.md("""The turn graph has 2840 nodes with 12 features and 5082 arcs with 1 feature, the
 same sizes as `graph_arrays` gave.
 
 The model has two graph convolutions (GCN). Each convolution mixes the features of an edge with the features of the

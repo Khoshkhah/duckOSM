@@ -71,7 +71,7 @@ ch.md("""## The Route object
 the number of edges, the length and the time. Here the two places are street names.""")
 ch.code("""r = net.driving.route("Boulevard Albert 1er", "Avenue Princesse Grace")    # from street to street, by car
 r                                                                        # the card: edges, length, time""")
-ch.md("""**What the output shows.** The route by car from Boulevard Albert 1er to Avenue Princesse Grace has 33 edges, 1,350 m and 122 s (2.0 minutes). Each name became a point (with `geocode`), so the route starts and ends at the points on the two streets, not at the ends of whole edges.""")
+ch.md("""The route by car from Boulevard Albert 1er to Avenue Princesse Grace has 33 edges, 1,350 m and 122 s (2.0 minutes). Each name became a point (with `geocode`), so the route starts and ends at the points on the two streets, not at the ends of whole edges.""")
 
 ch.md("""### The members of a Route
 
@@ -117,7 +117,7 @@ longest edge with that name (the case of the letters does not count). When no ed
 only inside the box of the network. Nominatim needs the internet. `route` calls `geocode` for each name that you
 give.""")
 ch.code("""duckosm.routing.geocode(net.driving, "Boulevard Albert 1er")    # a street of the network: no internet""")
-ch.md("""**What the output shows.** The point is on Boulevard Albert 1er, the street along the port. The network had
+ch.md("""The point is on Boulevard Albert 1er, the street along the port. The network had
 the name, so the call did not use Nominatim.
 
 > **Warning:** a name that is not in the network goes to Nominatim. If Nominatim finds nothing in the box of the
@@ -134,7 +134,7 @@ fast = net.driving.route(ids[0], ids[6])                                  # the 
 short = net.driving.route(ids[0], ids[6], weight="length")                # the shortest route
 pd.DataFrame({"fastest": [fast.length_m, fast.time_s], "shortest": [short.length_m, short.time_s]},
              index=["length_m", "time_s"]).round()                              # the two routes side by side""")
-ch.md("""**What the output shows.** Between these two edges the fastest route is 2,049 m and 142 s. The shortest route is 1,784 m, 265 m shorter, but it takes 186 s, 44 s more: it uses slower streets. In a city of steep, narrow streets the two weights often give different routes.""")
+ch.md("""Between these two edges the fastest route is 2,049 m and 142 s. The shortest route is 1,784 m, 265 m shorter, but it takes 186 s, 44 s more: it uses slower streets. In a city of steep, narrow streets the two weights often give different routes.""")
 
 ch.md("""## The k best routes: `k_shortest_paths`
 
@@ -148,7 +148,7 @@ ch.code("""a, b = r.edge_ids[0], r.edge_ids[-1]                       # the firs
 best = net.driving.k_shortest_paths(a, b, k=3)              # the 3 fastest routes
 [(round(x.time_s), round(x.length_m), len(x.edge_ids)) for x in best]    # seconds, metres and edges of each""")
 ch.code("""best[0].edge_ids == net.driving.route(a, b).edge_ids    # the first route is the route of route()""")
-ch.md("""**What the output shows.** The three routes take 126 s, 127 s and 127 s, with 1,453 m, 1,459 m and 1,464 m. The second and the third route have 35 edges, two more than the first. The first route is the same as the route of `route` for the two edges (`True`). The times do not decrease from one route to the next.""")
+ch.md("""The three routes take 126 s, 127 s and 127 s, with 1,453 m, 1,459 m and 1,464 m. The second and the third route have 35 edges, two more than the first. The first route is the same as the route of `route` for the two edges (`True`). The times do not decrease from one route to the next.""")
 ch.code("""net.map("driving", routes={f"route {i + 1}": x for i, x in enumerate(best)})    # the 3 routes on the map""")
 
 ch.md("""## Many routes in parallel: `routes`
@@ -213,7 +213,7 @@ ch.md("""### A time limit: `max_cost`
 places count: the search then reads a small part of the graph.""")
 ch.code("""near = net.driving.matrix(ids[:100], max_cost=120)    # only the cells of 2 minutes or less
 print(f"{near.notna().to_numpy().mean():.0%} of the cells are 2 minutes or less")    # the share of cells with a value""")
-ch.md("""**What the output shows.** With `max_cost=120`, 27 % of the cells have a value. The other cells are `NaN`, because they cost more than 2 minutes or no route connects them.""")
+ch.md("""With `max_cost=120`, 27 % of the cells have a value. The other cells are `NaN`, because they cost more than 2 minutes or no route connects them.""")
 
 ch.md("""### Points and names as places
 
@@ -221,7 +221,7 @@ The origins and the destinations can be points and names too. The rows and the c
 `0, 1, 2 ...`. When all places are edge ids or names, the rows and the columns have the places as their labels.""")
 ch.code("""places = ["Boulevard Albert 1er", "Avenue Princesse Grace", "Boulevard de Suisse"]    # three streets
 (net.driving.matrix(places, weight="length") / 1000).round(2)                          # the distances in km""")
-ch.md("""**What the output shows.** The rows and the columns have the three names. With `weight="length"` the cells are metres, and the code divides them by 1,000. From Boulevard Albert 1er to Avenue Princesse Grace is 1.88 km, and the way back is 2.08 km. The diagonal is the length of the edge of the name (0.09 to 0.12 km).""")
+ch.md("""The rows and the columns have the three names. With `weight="length"` the cells are metres, and the code divides them by 1,000. From Boulevard Albert 1er to Avenue Princesse Grace is 1.88 km, and the way back is 2.08 km. The diagonal is the length of the edge of the name (0.09 to 0.12 km).""")
 
 ch.md("""## Isochrones: `isochrones`
 
@@ -243,7 +243,7 @@ Here the origin is the casino square, on foot.""")
 ch.code("""casino = (7.4280, 43.7393)                                           # Place du Casino (lon, lat)
 iso = net.walking.isochrones([casino], minutes=[5, 10, 15])          # three walking times
 iso[["minutes", "n_edges"]].assign(km2=iso.to_crs(iso.estimate_utm_crs()).area / 1e6).round(3)    # edges and area""")
-ch.md("""**What the output shows.** From the casino square, 1,525 walking edges are within 5 minutes, 3,483 within 10 minutes and 5,983 within 15 minutes. The areas are 0.24 km², 0.65 km² and 1.15 km². In the picture each polygon follows the streets and the steps, not a circle: the hills and the sea limit the walk.""")
+ch.md("""From the casino square, 1,525 walking edges are within 5 minutes, 3,483 within 10 minutes and 5,983 within 15 minutes. The areas are 0.24 km², 0.65 km² and 1.15 km². In the picture each polygon follows the streets and the steps, not a circle: the hills and the sea limit the walk.""")
 ch.code("""fig, ax = plt.subplots(figsize=(7, 7))                                           # one picture
 iso.iloc[::-1].plot(ax=ax, column="minutes", categorical=True, cmap="plasma", alpha=0.7, legend=True,
                     legend_kwds={"title": "minutes on foot"})                    # the polygons, the largest below
@@ -285,7 +285,7 @@ route can start.""")
 ch.code("""g = duckosm.routing.routed_graph(net.driving)                     # an SQL relation, as text
 print(g)
 net.sql(f"SELECT count(*) AS arcs, count(DISTINCT from_edge) AS edges FROM {g}")    # the size of the graph""")
-ch.md("""**What the output shows.** The driving graph is the rows of `driving.edge_graph` with `uses = 'car'`. It has 5,082 arcs (legal turns) that start on 2,814 edges. The network has 2,840 driving edges, so 26 edges have no turn out: a route can end on them, but it cannot start there.""")
+ch.md("""The driving graph is the rows of `driving.edge_graph` with `uses = 'car'`. It has 5,082 arcs (legal turns) that start on 2,814 edges. The network has 2,840 driving edges, so 26 edges have no turn out: a route can end on them, but it cannot start there.""")
 
 ch.md("""## Try it yourself
 
