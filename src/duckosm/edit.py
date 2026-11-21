@@ -86,15 +86,23 @@ def build_area(config: str, folder: str, db: str, fixes: str | None = None, on_s
     return f"{Path(db).name} in {time.time() - t0:.0f} s" + (f", with {Path(fixes).name}" if fixes else "")
 
 
-def serve(db, fixes=None, port: int = 8790, ask: bool = False):
-    """Serve the page of ``db`` on 127.0.0.1:``port`` until Ctrl+C. ``fixes``: the fixes file (default: osm_fixes.yaml beside ``db``).
-    ``ask``: ``duckosm ask`` (roadstyle's data dock and Ask in place of the editor; docs/design/ask_page.md)."""
+def serve(db, fixes=None, port: int = 8790, ask: bool = False, load=None, save=None):
+    """Serve the page of ``db`` on 127.0.0.1:``port`` until Ctrl+C. ``duckosm edit``: the page reads ``load`` and writes ``save`` (None: not
+    chosen; ``fixes`` is the old name of the two). ``ask``: ``duckosm ask`` (roadstyle's data dock and Ask in place of the editor;
+    docs/design/ask_page.md), with the fixes file ``fixes`` (default: osm_fixes.yaml beside ``db``)."""
     from duckosm import _rust
 
     db = Path(db).resolve()
-    fixes = Path(fixes).resolve() if fixes else db.with_name("osm_fixes.yaml")
-    url = (_rust.ask if ask else _rust.edit)(str(db), str(fixes), port, _Db(db))
-    print(f"duckosm {'ask' if ask else 'edit'}: {url}  (the fixes file: {fixes}; Ctrl+C stops)", flush=True)
+    path = lambda f: None if f is None else str(Path(f).resolve())  # noqa: E731
+    if ask:
+        fixes = Path(fixes).resolve() if fixes else db.with_name("osm_fixes.yaml")
+        url = _rust.ask(str(db), str(fixes), port, _Db(db))
+        print(f"duckosm ask: {url}  (the fixes file: {fixes}; Ctrl+C stops)", flush=True)
+    else:
+        if fixes is not None:
+            load = save = fixes
+        url = _rust.edit(str(db), path(load), path(save), port, _Db(db))
+        print(f"duckosm edit: {url}  (load: {path(load) or 'not chosen'}; save: {path(save) or 'not chosen'}; Ctrl+C stops)", flush=True)
     try:
         while True:
             time.sleep(1)

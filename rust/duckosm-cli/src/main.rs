@@ -905,14 +905,21 @@ fn fit_line(pts: &[(f64, f64)]) -> Option<(f64, f64, f64)> {
 }
 
 /// duckosm edit: a page on 127.0.0.1 that edits the OSM data of a database (docs/guides/edit-osm-data.md, "Edit on your computer").
-/// Each change goes into the fixes file at once. Build again builds the database again with the file.
+/// The page reads the --load file and writes each change into the --save file at once. With no --save, the first Save on the page asks for
+/// the file. Build again builds the database again with the save file.
 #[derive(Parser)]
 #[command(name = "duckosm edit", version)]
 struct EditCli {
     /// The database (<area>.duckdb) that duckosm build or duckosm wrote.
     db: PathBuf,
-    /// The fixes file (default: osm_fixes.yaml beside the database). It need not exist: the first change makes it.
+    /// A fixes file that the page reads into its list. The page does not write it, except when it is also the --save file.
     #[arg(long)]
+    load: Option<PathBuf>,
+    /// The fixes file that the page writes, each change at once. It can be the --load file. It need not exist: the first change makes it.
+    #[arg(long)]
+    save: Option<PathBuf>,
+    /// Old name: --load FILE --save FILE.
+    #[arg(long, conflicts_with_all = ["load", "save"])]
     fixes: Option<PathBuf>,
     /// The port of the page on 127.0.0.1.
     #[arg(long, default_value_t = 8790)]
@@ -1045,7 +1052,24 @@ fn studio(_: &[String]) -> Result<(), String> {
 #[cfg(feature = "duckdb")]
 fn edit(args: &[String]) -> Result<(), String> {
     let c = EditCli::parse_from(args);
-    serve_page(c.db, c.fixes, c.port, duckosm_edit::Mode::Edit)
+    let (load, save) = match c.fixes {
+        Some(f) => {
+            eprintln!("duckosm edit: --fixes FILE is an old name: use --load FILE --save FILE");
+            (Some(f.clone()), Some(f))
+        }
+        None => (c.load, c.save),
+    };
+    let abs = |f: Option<PathBuf>| f.map(|f| std::path::absolute(&f).map_err(|e| format!("{}: {e}", f.display()))).transpose();
+    let (load, save) = (abs(load)?, abs(save)?);
+    let db = std::fs::canonicalize(&c.db).map_err(|e| format!("{}: {e}", c.db.display()))?;
+    let listener = duckosm_edit::bind(c.port)?;
+    let port = listener.local_addr().map_err(|e| e.to_string())?.port();
+    let site = duckosm_edit::Site::new(Box::new(duckosm_edit::native::NativeDb::new(&db)), &db, std::path::Path::new(""), port)?;
+    site.set_files(load.clone(), save.clone());
+    let name = |f: &Option<PathBuf>| f.as_ref().map_or("not chosen".to_string(), |f| f.display().to_string());
+    eprintln!("duckosm edit: {}  (load: {}; save: {}; Ctrl+C stops)", site.url(), name(&load), name(&save));
+    duckosm_edit::serve(std::sync::Arc::new(site), listener);
+    Ok(())
 }
 
 /// duckosm ask (duckOSM `duckosm ask`, docs/design/ask_page.md): the same server, with roadstyle's data dock and Ask in place of the editor.

@@ -190,11 +190,19 @@ impl duckosm_edit::Db for PyDb {
 }
 
 /// `duckosm edit` (rust/duckosm-edit, docs/design/edit_page.md): serve the page of the database `db` on 127.0.0.1:`port` in a thread of its
-/// own, with the fixes file `fixes`; `backend` is the Python object of the database (duckosm/edit.py). Returns the address of the page at
-/// once; the server stops with the Python process.
+/// own. The page reads the fixes file `load` and writes the fixes file `save` (None: not chosen; the page asks for the save file at the first
+/// Save). `backend` is the Python object of the database (duckosm/edit.py). Returns the address of the page at once; the server stops with
+/// the Python process.
 #[pyfunction]
-fn edit(py: Python<'_>, db: PathBuf, fixes: PathBuf, port: u16, backend: Py<PyAny>) -> PyResult<String> {
-    serve_page(py, db, fixes, port, backend, duckosm_edit::Mode::Edit)
+#[pyo3(signature = (db, load, save, port, backend))]
+fn edit(py: Python<'_>, db: PathBuf, load: Option<PathBuf>, save: Option<PathBuf>, port: u16, backend: Py<PyAny>) -> PyResult<String> {
+    let listener = duckosm_edit::bind(port).map_err(PyValueError::new_err)?;
+    let port = listener.local_addr().map_err(|e| PyRuntimeError::new_err(e.to_string()))?.port();
+    let site = py.detach(|| duckosm_edit::Site::new(Box::new(PyDb(backend)), &db, std::path::Path::new(""), port)).map_err(PyRuntimeError::new_err)?;
+    site.set_files(load, save);
+    let url = site.url();
+    std::thread::spawn(move || duckosm_edit::serve(std::sync::Arc::new(site), listener));
+    Ok(url)
 }
 
 /// `duckosm ask` (docs/design/ask_page.md): the same server, with roadstyle's data dock and Ask in place of the editor. `fixes` is the file whose

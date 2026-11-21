@@ -58,10 +58,13 @@ def _free_port():
         return s.getsockname()[1]
 
 
-def _serve(db):
-    """Start `duckosm edit` on the database: (the process, the URL of the page)."""
+def _serve(db, files=None, cwd=None):
+    """Start `duckosm edit` on the database: (the process, the URL of the page). `files`: the options of the fixes files (default: osm_fixes.yaml
+    beside the database as the load file and the save file). `cwd`: the folder of the server."""
     port = _free_port()
-    proc = subprocess.Popen([sys.executable, "-c", "from duckosm.cli import main; main()", "edit", str(db), "--port", str(port)],
+    fixes = str(db.with_name("osm_fixes.yaml"))
+    files = ["--load", fixes, "--save", fixes] if files is None else files
+    proc = subprocess.Popen([sys.executable, "-c", "from duckosm.cli import main; main()", "edit", str(db), *files, "--port", str(port)], cwd=cwd,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     line = ""
     for _ in range(600):

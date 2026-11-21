@@ -2,11 +2,15 @@
 //! standard dashboard of the database (`page`), with duckOSM's fixes editor (web/fixes_editor/) in its panel. The server answers only on
 //! 127.0.0.1, with the rules of roadstyle-serve: a request must name this server in `Host` (no DNS rebinding), a write must come from this
 //! server's page (`Origin`) and have a `Content-Length`, a body is at most `MAX_BODY` bytes, and the request line and the headers at most
-//! `MAX_HEAD` bytes. The one file that the page writes is the fixes file. The editor's SQL runs on the database, read only and with no
-//! access to files (`LOCK`). Build again runs the build of the database again with the fixes file, and the page then has the new network.
+//! `MAX_HEAD` bytes. The page reads one fixes file (the load file) and writes one fixes file (the save file); the two can be one file. The
+//! person chooses both names: the server has no default name. The server writes only `.yaml` and `.yml` files. The editor's SQL runs on the
+//! database, read only and with no access to files (`LOCK`). Build again runs the build of the database again with the save file, and the
+//! page then has the new network.
 //!
 //! The routes: `GET /` the page; `GET /fixes_editor/<file>` the editor; `GET /ask/questions.js`, `GET /ask/schema.js` and `GET /ask/views.js` what Ask knows; `GET /api/info` the area, the tables and why Build again is off;
-//! `GET` and `PUT /api/fixes` the fixes file; `POST /api/query` the rows of one SELECT as JSON; `POST /api/build` Build again.
+//! `GET /api/fixes` the load file (the save file after this server wrote it); `PUT /api/fixes` write the save file; `POST /api/open` (a path) read
+//! another load file, and forget the save file; `POST /api/save-to` (a path) choose the save file; `POST /api/query` the rows of one SELECT as
+//! JSON; `POST /api/build` Build again.
 //!
 //! `duckosm ask` (docs/design/ask_page.md) is the same server with `Mode::Ask`: the page has roadstyle's data dock and Ask in place of the editor. It
 //! adds `GET /roadstyle/<file>` (roadstyle's dashboard modules, which the page imports), `POST /api/sql` (a SELECT with its columns and types, for the
@@ -114,23 +118,30 @@ pub enum Mode {
     Ask,
 }
 
-/// One server: the database, the fixes file, and the names that the server answers to.
+/// The fixes files of one server: the file that the page read (`load`) and the file that the page writes (`save`). None: not chosen yet.
+#[derive(Default)]
+struct Files {
+    load: Option<PathBuf>,
+    save: Option<PathBuf>,
+    /// This server wrote the save file: it has a `.bak` already, and `GET /api/fixes` gives it.
+    wrote: bool,
+}
+
+/// One server: the database, the fixes files, and the names that the server answers to.
 pub struct Site {
     pub db: PathBuf,
-    pub fixes: PathBuf,
+    files: Mutex<Files>,
     pub own: [String; 2],
     pub mode: Mode,
     state: Mutex<State>,
     /// What makes the page of the open database (`page::make`; the tests give a placeholder).
     pager: Pager,
-    /// The fixes file is copied to `<fixes>.bak` before the page writes it the first time.
-    backed_up: Mutex<bool>,
     /// A file that keeps the page of the database (`duckosm studio`: `<name>.map.html` in the folder of the area), or None.
     cache: Option<PathBuf>,
 }
 
 impl Site {
-    /// Open `db` and make the page. `fixes`: the fixes file (it need not exist); `port`: the port of the server.
+    /// Open `db` and make the page. `fixes`: the load file and the save file (it need not exist; `set_files` changes them); `port`: the port of the server.
     pub fn new(db: Box<dyn Db>, db_path: &Path, fixes: &Path, port: u16) -> Result<Site, String> {
         Site::with_mode(db, db_path, fixes, port, Mode::Edit)
     }
@@ -150,8 +161,20 @@ impl Site {
     /// again (Burnaby: 12 s and 45 MB to make). A database that changed (a build, Build again) makes the page and the file again.
     pub fn with_cache(mut db: Box<dyn Db>, db_path: &Path, fixes: &Path, port: u16, mode: Mode, pager: Pager, cache: Option<PathBuf>) -> Result<Site, String> {
         let (page, tables, source) = load(db.as_mut(), db_path, pager, cache.as_deref())?;
-        Ok(Site { db: db_path.to_path_buf(), fixes: fixes.to_path_buf(), own: [format!("127.0.0.1:{port}"), format!("localhost:{port}")], mode,
-                  state: Mutex::new(State { db, page, tables, source }), pager, backed_up: Mutex::new(false), cache })
+        let files = Files { load: Some(fixes.to_path_buf()), save: Some(fixes.to_path_buf()), wrote: false };
+        Ok(Site { db: db_path.to_path_buf(), files: Mutex::new(files), own: [format!("127.0.0.1:{port}"), format!("localhost:{port}")], mode,
+                  state: Mutex::new(State { db, page, tables, source }), pager, cache })
+    }
+
+    /// The load file and the save file (`duckosm edit --load --save`). None: not chosen; the page asks for the save file at the first Save.
+    pub fn set_files(&self, load: Option<PathBuf>, save: Option<PathBuf>) {
+        *self.files.lock().unwrap() = Files { load, save, wrote: false };
+    }
+
+    /// The file that `GET /api/fixes` gives: the save file after this server wrote it, else the load file.
+    fn current(&self) -> Option<PathBuf> {
+        let f = self.files.lock().unwrap();
+        if f.wrote { f.save.clone() } else { f.load.clone() }
     }
 
     /// The page of the open database (the HTML that `GET /` gives).
@@ -167,8 +190,29 @@ impl Site {
     fn info(&self) -> Value {
         let s = self.state.lock().unwrap();
         let name = self.db.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        json!({"name": name, "db": self.db.display().to_string(), "fixes": self.fixes.display().to_string(), "exists": self.fixes.exists(),
+        let built_with = s.source.as_ref().ok().and_then(|(config, dir)| overrides_of(config).map(|f| dir.join(f)));
+        let f = self.files.lock().unwrap();
+        let current = if f.wrote { &f.save } else { &f.load };
+        json!({"name": name, "db": self.db.display().to_string(), "load": f.load.as_deref().map(shown), "save": f.save.as_deref().map(shown),
+               "from": current.as_deref().map(shown), "exists": current.as_ref().is_some_and(|p| p.exists()), "built_with": built_with.as_deref().map(shown),
                "tables": s.tables, "build_off": s.source.as_ref().err().cloned().unwrap_or_default()})
+    }
+
+    /// `POST /api/open`: the text of the fixes file `path` (relative to the folder of the server). It becomes the load file, and the save file
+    /// is not chosen any more: a write of the list that came from another file must not go into the old save file.
+    fn open(&self, path: &str) -> Result<Value, String> {
+        let p = yaml_path(path)?;
+        let text = std::fs::read_to_string(&p).map_err(|e| format!("{}: {e}", p.display()))?;
+        self.set_files(Some(p.clone()), None);
+        Ok(json!({"name": shown(&p), "text": text}))
+    }
+
+    /// `POST /api/save-to`: the save file is `path` (relative to the folder of the server). The page writes it next.
+    fn save_to(&self, path: &str) -> Result<Value, String> {
+        let p = yaml_path(path)?;
+        let mut f = self.files.lock().unwrap();
+        (f.save, f.wrote) = (Some(p.clone()), false);
+        Ok(json!({"name": shown(&p)}))
     }
 
     /// Build again: the database closes, the build writes it again, and the page is made again.
@@ -178,11 +222,14 @@ impl Site {
         }
         let mut s = self.state.lock().unwrap();
         let (config, dir) = s.source.clone()?;
-        if !self.fixes.exists() {
-            return Err(format!("{}: the file is not there: add a change first", self.fixes.display()));
+        let save = self.files.lock().unwrap().save.clone().ok_or("Choose the save file first: click Save.")?;
+        if !save.exists() {
+            return Err(format!("{}: the file is not there: add a change first", save.display()));
         }
+        // the build's record names the save file, so that a later Build again, net.rebuild() and net.fixes find it
+        let config = with_overrides(&config, &save);
         s.db.close();
-        let built = s.db.build(&config, &dir, &self.fixes, &self.db);
+        let built = s.db.build(&config, &dir, &save, &self.db);
         // the database opens again also after a failed build (the old file, or what the build left)
         let (page, tables, source) = load(s.db.as_mut(), &self.db, self.pager, self.cache.as_deref())?;
         (s.page, s.tables, s.source) = (page, tables, source);
@@ -254,16 +301,49 @@ impl Site {
         Ok(())
     }
 
-    /// Write the fixes file (the first write of this server keeps the file before it as `<fixes>.bak`).
+    /// Write the save file (the first write of this server to the file keeps the file before it as `<save>.bak`). Err when no save file is chosen.
     fn save(&self, body: &[u8]) -> Result<(), String> {
-        let mut once = self.backed_up.lock().unwrap();
-        if !*once && self.fixes.exists() {
-            let bak = PathBuf::from(format!("{}.bak", self.fixes.display()));
-            std::fs::copy(&self.fixes, &bak).map_err(|e| format!("{}: {e}", bak.display()))?;
+        let mut f = self.files.lock().unwrap();
+        let save = f.save.clone().ok_or("no save file: choose one with Save")?;
+        if !f.wrote && save.exists() {
+            let bak = PathBuf::from(format!("{}.bak", save.display()));
+            std::fs::copy(&save, &bak).map_err(|e| format!("{}: {e}", bak.display()))?;
         }
-        *once = true;
-        std::fs::write(&self.fixes, body).map_err(|e| format!("{}: {e}", self.fixes.display()))
+        std::fs::write(&save, body).map_err(|e| format!("{}: {e}", save.display()))?;
+        f.wrote = true;
+        Ok(())
     }
+}
+
+/// A fixes file that the page names: a `.yaml` or `.yml` path, relative to the folder of the server. The server writes no other kind of file.
+fn yaml_path(path: &str) -> Result<PathBuf, String> {
+    let path = path.trim();
+    let ext = Path::new(path).extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase);
+    if !matches!(ext.as_deref(), Some("yaml" | "yml")) {
+        return Err(format!("{path:?}: a fixes file has the extension .yaml or .yml"));
+    }
+    std::path::absolute(path).map_err(|e| format!("{path}: {e}"))
+}
+
+/// A path as the page shows it: relative to the folder of the server when it is in that folder, else the full path.
+fn shown(p: &Path) -> String {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    p.strip_prefix(&cwd).unwrap_or(p).display().to_string()
+}
+
+/// The fixes file of a config (its top-level `osm_overrides:`), or None.
+fn overrides_of(config: &str) -> Option<String> {
+    let v = config.lines().find_map(|l| l.strip_prefix("osm_overrides:"))?.trim();
+    let v = v.strip_prefix('\'').and_then(|v| v.strip_suffix('\'')).map(|v| v.replace("''", "'"))
+        .or_else(|| v.strip_prefix('"').and_then(|v| v.strip_suffix('"')).map(str::to_string)).unwrap_or_else(|| v.to_string());
+    (!v.is_empty() && v != "null" && v != "~").then_some(v)
+}
+
+/// The config with `osm_overrides:` set to `fixes` (the line is replaced, or added at the end).
+fn with_overrides(config: &str, fixes: &Path) -> String {
+    let mut out: String = config.lines().filter(|l| !l.starts_with("osm_overrides:")).map(|l| format!("{l}\n")).collect();
+    out.push_str(&format!("osm_overrides: '{}'\n", fixes.display().to_string().replace('\'', "''")));
+    out
 }
 
 /// Open the database, make the page, read the tables and the build's record, then lock the database (`LOCK`).
@@ -471,17 +551,25 @@ impl Site {
         let api = path.strip_prefix("api/").unwrap_or("");
         match (method.as_str(), api) {
             ("GET" | "HEAD", "info") => req.say("200 OK", "application/json", site.info().to_string().as_bytes()),
-            ("GET" | "HEAD", "fixes") => match std::fs::read(&site.fixes) {
-                Ok(b) => req.say("200 OK", "text/yaml; charset=utf-8", &b),
-                Err(_) => req.say("404 Not Found", "text/plain", b"no fixes file yet"),
+            ("GET" | "HEAD", "fixes") => match site.current().and_then(|p| std::fs::read(p).ok()) {
+                Some(b) => req.say("200 OK", "text/yaml; charset=utf-8", &b),
+                None => req.say("404 Not Found", "text/plain", b"no fixes file yet"),
             },
-            ("PUT", "fixes") | ("POST", "query" | "build" | "sql" | "table") => {
+            ("PUT", "fixes") | ("POST", "query" | "build" | "sql" | "table" | "open" | "save-to") => {
                 let Some(body) = req.write_body(&site.own)? else { return Ok(()) };
                 match api {
                     "fixes" => match site.save(&body) {
                         Ok(()) => req.say("200 OK", "text/plain", b"saved"),
-                        Err(e) => req.say("500 Internal Server Error", "text/plain", e.as_bytes()),
+                        Err(e) => req.say(if site.files.lock().unwrap().save.is_none() { "409 Conflict" } else { "500 Internal Server Error" }, "text/plain", e.as_bytes()),
                     },
+                    "open" | "save-to" if site.mode == Mode::Edit => {
+                        let p = String::from_utf8_lossy(&body);
+                        match if api == "open" { site.open(&p) } else { site.save_to(&p) } {
+                            Ok(j) => req.say("200 OK", "application/json", j.to_string().as_bytes()),
+                            Err(e) => req.say("400 Bad Request", "text/plain", e.as_bytes()),
+                        }
+                    }
+                    "open" | "save-to" => req.say("404 Not Found", "text/plain", b"not found"),
                     "query" => match site.query(&String::from_utf8_lossy(&body)) {
                         Ok(j) => req.say("200 OK", "application/json", j.as_bytes()),
                         Err(e) => req.say("400 Bad Request", "text/plain", e.as_bytes()),
@@ -502,7 +590,7 @@ impl Site {
                     }
                 }
             }
-            (_, "info" | "fixes" | "query" | "build" | "sql" | "table") => req.say("405 Method Not Allowed", "text/plain", b"not this method"),
+            (_, "info" | "fixes" | "query" | "build" | "sql" | "table" | "open" | "save-to") => req.say("405 Method Not Allowed", "text/plain", b"not this method"),
             _ => req.say("404 Not Found", "text/plain", b"not found"),
         }
     }
@@ -588,10 +676,11 @@ mod tests {
         let port = listener.local_addr().unwrap().port();
         let built = Arc::new(Mutex::new(Vec::new()));
         let ran = Arc::new(Mutex::new(Vec::new()));
-        let site = Site { db: dir.join("area.duckdb"), fixes: fixes.clone(), own: [format!("127.0.0.1:{port}"), format!("localhost:{port}")], mode,
+        let files = Mutex::new(Files { load: Some(fixes.clone()), save: Some(fixes.clone()), wrote: false });
+        let site = Site { db: dir.join("area.duckdb"), files, own: [format!("127.0.0.1:{port}"), format!("localhost:{port}")], mode,
                           state: Mutex::new(State { db: Box::new(Fake { built: built.clone(), ran: ran.clone() }), page: "the page".into(), tables: json!([]),
                                                     source: Ok(("name: a".into(), dir.clone())) }),
-                          pager: |_, _| Ok("the page".into()), backed_up: Mutex::new(false), cache: None };
+                          pager: |_, _| Ok("the page".into()), cache: None };
         std::thread::spawn(move || serve(Arc::new(site), listener));
         let ask = move |req: &str| {
             let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
@@ -759,6 +848,42 @@ mod tests {
         assert!(post("build", "").contains(r#""ok":false"#), "no fixes file: no build");
         std::fs::write(&fixes, "overrides: []\n").unwrap();
         assert!(post("build", "").contains(r#""ok":true"#));
-        assert_eq!(*built.lock().unwrap(), vec!["name: a with overrides: []\n".to_string()]);
+        let rec = format!("name: a\nosm_overrides: '{}'\n with overrides: []\n", fixes.display());
+        assert_eq!(*built.lock().unwrap(), vec![rec], "the build's record names the save file");
+    }
+
+    #[test]
+    fn open_and_save_to_choose_the_files() {
+        let (fixes, ask, port, built) = server("files");
+        let dir = fixes.parent().unwrap().to_path_buf();
+        let req = |m: &str, path: &str, body: &str| ask(&format!("{m} /api/{path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\nContent-Length: {}\r\n\r\n{body}", body.len()));
+        let (base, variant) = (dir.join("base.yaml"), dir.join("variant.yaml"));
+        let _ = std::fs::remove_file(&variant);
+        std::fs::write(&base, "overrides: []\n").unwrap();
+        assert!(req("POST", "open", &base.display().to_string()).contains(r#""text":"overrides: []\n""#));
+        // after Open, no save file: a write is refused, and Build again asks for the save file
+        assert!(req("PUT", "fixes", "new_ways: []\n").starts_with("HTTP/1.1 409"));
+        assert!(req("POST", "build", "").contains("Choose the save file first"));
+        assert!(req("GET", "info", "").contains(r#""save":null"#));
+        assert!(req("GET", "fixes", "").ends_with("overrides: []\n"), "GET gives the load file");
+        for bad in ["/etc/passwd", "notes.txt", ""] {
+            assert!(req("POST", "save-to", bad).starts_with("HTTP/1.1 400"), "{bad}");
+        }
+        assert!(req("POST", "save-to", &variant.display().to_string()).starts_with("HTTP/1.1 200"));
+        assert!(req("PUT", "fixes", "new_ways: []\n").starts_with("HTTP/1.1 200"));
+        assert_eq!(std::fs::read_to_string(&base).unwrap(), "overrides: []\n", "the load file does not change");
+        assert_eq!(std::fs::read_to_string(&variant).unwrap(), "new_ways: []\n");
+        assert!(req("GET", "fixes", "").ends_with("new_ways: []\n"), "after a write, GET gives the save file");
+        assert!(req("POST", "build", "").contains(r#""ok":true"#));
+        assert!(built.lock().unwrap()[0].contains(&format!("osm_overrides: '{}'", variant.display())));
+    }
+
+    #[test]
+    fn the_fixes_file_of_a_config() {
+        assert_eq!(overrides_of("name: a\nosm_overrides: 'data/f.yaml'\n").as_deref(), Some("data/f.yaml"));
+        assert_eq!(overrides_of("osm_overrides: \"x.yaml\"").as_deref(), Some("x.yaml"));
+        assert_eq!(overrides_of("osm_overrides: null\n"), None);
+        assert_eq!(overrides_of("name: a\n"), None);
+        assert_eq!(with_overrides("name: a\nosm_overrides: old.yaml\nb: 1", Path::new("/t/it's.yaml")), "name: a\nb: 1\nosm_overrides: '/t/it''s.yaml'\n");
     }
 }

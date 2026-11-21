@@ -2,6 +2,7 @@
 import shutil
 from pathlib import Path
 
+import pytest
 import yaml
 
 import duckosm
@@ -63,3 +64,13 @@ def test_edit_serves_the_page(tmp_path):
         port = s.getsockname()[1]
     url = net.edit(port=port)
     assert str(port) in url and urllib.request.urlopen(url, timeout=10).status == 200
+    # the library chooses no fixes file; fixes= is the old name of load= and save=
+    info = urllib.request.urlopen(url + "api/info", timeout=10).read().decode()
+    assert '"load":null' in info and '"save":null' in info, info
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    with pytest.warns(DeprecationWarning):
+        url = net.edit(fixes=tmp_path / "f.yaml", port=port)
+    info = urllib.request.urlopen(url + "api/info", timeout=10).read().decode()
+    assert '"load":' in info and '"load":null' not in info and '"save":null' not in info, info

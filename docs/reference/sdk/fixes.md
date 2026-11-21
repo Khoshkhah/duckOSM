@@ -15,7 +15,7 @@ Edit the OSM fixes from Python. The file is the fixes file of [Fix the OSM data]
 | `net.fixes` | the `Fixes` of the file that the network was built with, or `None` |
 | `net.rebuild(fixes=None, out=None)` | builds the area again with the same modes and `fixes`, from the OSM file and the boundary beside the database; `out` default `<name>_fixed.duckdb`. Returns the new `Network` |
 | `net.diff(other, mode=None)` = `diff(net, other)` | a DataFrame of the edges that are different in `other`, by `edge_id`: `mode`, `edge_id`, `change` (`added`, `removed`, `changed`), `changed` (the columns with a new value) |
-| `net.edit(fixes=None, port=8790)` | starts `duckosm edit` on the database in the background and returns the URL of the page |
+| `net.edit(load=None, save=None, port=8790)` | starts `duckosm edit` on the database in the background and returns the URL of the page. The page reads `load` and writes `save`; with no `save`, the first **Save** asks for the file. `fixes=F` is the old name of `load=F, save=F` (a `DeprecationWarning`) |
 
 ```python
 fixes = duckosm.fixes.Fixes("osm_fixes.yaml")
