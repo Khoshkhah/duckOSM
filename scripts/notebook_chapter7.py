@@ -54,14 +54,46 @@ A point is `(lon, lat)`, in this order, as in GeoJSON. Write a point with decima
 
 ch.md("""## Build Monaco with three modes and the multimodal graph
 
-This chapter routes by car, on foot and across modes. A route across modes needs the **multimodal graph**: the
-tables `mm.*`, which join the networks of the modes at their shared junctions. The build makes them only when the
-config says so, so the cell gives `config=` with `multimodal: {enabled: true}` (chapter 1, "Every other option").""")
+### The routing graphs in the file
+
+The routing calls of this chapter search graphs that are tables of the network file. There are two kinds:
+
+| Graph | Made by default? | Where in the file | Rows (Monaco) |
+|---|---|---|---|
+| the graph of one mode: its turns | **yes**, one for each mode that you build | `driving.edge_graph`, `walking.edge_graph`, `cycling.edge_graph` | 6,754 (driving) |
+| the multimodal graph: all modes and the changes between them | **no**: only with `multimodal: {enabled: true}` in the config | the schema `mm`: the tables `mm.edges` and `mm.transfers` | 26,083 and 12,140 |
+
+**The graph of one mode** is the table `edge_graph` in the schema of the mode. Each row is one turn that the mode can
+make, from one edge to the next edge:
+
+| Column | Type | Means |
+|---|---|---|
+| `from_edge` | BIGINT | the edge that you come from (an `edge_id` of `edges`) |
+| `to_edge` | BIGINT | the edge that you go on to. Its start is the end of `from_edge` |
+| `via_edge` | BIGINT | the same as `to_edge` |
+| `cost` | FLOAT | the cost of the turn: `cost_s` of `from_edge`, in seconds |
+| `uses` | VARCHAR | who can make the turn: the mode itself (`car`, `walk`, `bike`), or an access label (`bus`, `private`, `pedestrian`, `delivery`) when one of the edges is in `private_edges` |
+
+**The multimodal graph** is a schema of its own, `mm`, with two tables:
+
+| Table | Holds | Columns |
+|---|---|---|
+| `mm.edges` | the edges of all modes in one table, with their mode | `mode`, `edge_id`, `source`, `target`, `cost_s`, `length_m`, `highway`, `name`, `geometry` |
+| `mm.transfers` | the junctions where you can change mode, and the cost of a change | `node_id` (the junction), `from_mode`, `to_mode`, `cost_s` (seconds), `kind` (`park`, `retrieve`, `bike_park`, `bike_unpark`) |
+
+A route across modes uses `mm.edges` to move in each mode and `mm.transfers` to change mode, for example to park the
+car and walk on. The graphs of the modes stay as they are.
+
+### The build
+
+This chapter routes by car, on foot and across modes, so the build makes the multimodal graph too. The cell gives
+`config=` with `multimodal: {enabled: true}` (chapter 1, "Every other option").""")
 ch.code("""net = duckosm.network(osm_id=2220322, modes=["driving", "walking", "cycling"], name="monaco",
                       config={"multimodal": {"enabled": True}})       # three modes and the multimodal graph
 net.summary()                                                         # one row for each mode""")
 ch.md("""The file has three networks: 2,840 driving edges, 11,938 walking edges and 11,305
-cycling edges. The `mm` tables are not in the summary, because they join the three modes and are not a mode.
+cycling edges. The `mm` tables are not in the summary, because they join the three modes and are not a mode. To see
+them, use `net.tables()` and `net.columns("mm.transfers")` (chapter 2).
 
 > **Tip:** the same build from a config file: write the keys to `monaco.yaml` (`modes: [driving, walking, cycling]`,
 > `multimodal: {enabled: true}`) and call `duckosm.build(config="monaco.yaml")`. The file `config/template.yaml` of
