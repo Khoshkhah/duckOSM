@@ -77,8 +77,19 @@ two rows as two arrays, `src` and `dst`.)
 | 1 | 80 | 30 | 1 |
 | 2 | 200 | 50 | 2 |
 
-A node is a row number in these tables, not an id. A fourth list keeps the id of duckOSM for each row (`edge_id` or
-`node_id`), so that a value that the model predicts for a row goes back to its road.
+In the arcs table, a node has no OSM id. It has its **row number** in the node features table: the first row is node
+0, the second row is node 1, and so on. A graph library needs these small numbers, from 0 to the number of nodes
+minus 1. So duckOSM keeps one more list, with the duckOSM id of each row:
+
+| row (the node in the tables) | `node_id` (the junction in duckOSM) |
+|---|---|
+| 0 | 21911886 |
+| 1 | 21912089 |
+| 2 | 21912095 |
+
+The arc "from 0 to 1" is then the road from junction 21911886 to junction 21912089. In the same way, a list of
+`edge_id` gives the road of each arc. When the model predicts a value for row 1, this list says which junction (or
+which road) it is, so the value goes back to the network.
 
 `graph_arrays` gives these tables for Monaco: 1,768 nodes and 2,840 arcs in the junction graph. `to_pyg` and `to_dgl`
 give the same tables in the form that PyTorch Geometric and DGL read.""")
