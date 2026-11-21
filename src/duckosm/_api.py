@@ -349,6 +349,9 @@ def build(pbf=None, *, config=None, boundary=None, modes=None, output=None, sour
     >>> net = duckosm.build(pbf="my.osm.pbf", speeds=False, config={"options": {"bus_routes": False}})"""
     def flag(name, value):
         return None if value is None else (f"--{name}" if value else f"--no-{name}")
+    if output is None and config is None:        # no place given: a new folder in the work folder
+        stem = Path(pbf).name.split(".")[0] if pbf else (Path(boundary).stem if boundary else "area")
+        output = _new_work(stem) / f"{stem}.duckdb"
     given = config
     config = _build_config(config, options)
     try:
@@ -429,6 +432,21 @@ class Area:
     def __repr__(self):
         return f"Area(pbf={str(self.pbf)!r}, boundary={str(self.boundary)!r})"
 
+    def save(self, folder, name=None):
+        """Copy the two files of the area (the cut ``.osm.pbf`` and the ``.geojson``) into ``folder``, as
+        ``<name>.osm.pbf`` and ``<name>.geojson`` (default: the name of the area). Returns the :class:`Area` of the
+        copies.
+
+        >>> area.save("my_area")"""
+        import shutil
+        folder = Path(folder)
+        folder.mkdir(parents=True, exist_ok=True)
+        stem = name or self.pbf.name.split(".")[0]
+        pbf, boundary = folder / f"{stem}.osm.pbf", folder / f"{stem}.geojson"
+        shutil.copy2(self.pbf, pbf)
+        shutil.copy2(self.boundary, boundary)
+        return Area(pbf, boundary)
+
     def build(self, modes=None, *, output=None, fixes=None, progress=None, **options):
         """Build the network of this area: :func:`duckosm.build` with this OSM file and boundary. ``output``: the
         ``.duckdb`` file (default: next to the OSM file). Returns the :class:`duckosm.Network`.
@@ -456,7 +474,50 @@ def _size(path):
     return f"{n / 1e6:.1f} MB" if n >= 1e5 else f"{n / 1e3:.0f} kB"
 
 
-def get(place=None, *, osm_id=None, bbox=None, h3_cell=None, boundary=None, point=None, dist_m=1000, out=".", name=None,
+def work_dir() -> Path:
+    """duckOSM's work folder, ``<the cache>/work``: the files of an area or a network that you did not save. The cache
+    is ``$DUCKOSM_CACHE``, else ``$XDG_CACHE_HOME/duckosm``, else ``~/.cache/duckosm`` (as the downloads)."""
+    base = os.environ.get("DUCKOSM_CACHE") or (
+        os.path.join(os.environ["XDG_CACHE_HOME"], "duckosm") if os.environ.get("XDG_CACHE_HOME")
+        else os.path.join(os.path.expanduser("~"), ".cache", "duckosm"))
+    return Path(base) / "work"
+
+
+def _new_work(name=None) -> Path:
+    """A new folder in the work folder for one call: ``<name>-<date>-<time>-<4 hex>``."""
+    import secrets
+    import time
+    folder = work_dir() / f"{name or 'area'}-{time.strftime('%Y%m%d-%H%M%S')}-{secrets.token_hex(2)}"
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder
+
+
+def clear_work(days: float | None = None) -> int:
+    """Delete the folders of the work folder (the files that you did not save), or only those older than ``days``.
+    Returns how many folders it deleted. A saved file is not in the work folder, so it stays.
+
+    >>> duckosm.clear_work(days=7)"""
+    import shutil
+    import time
+    folder = work_dir()
+    if not folder.is_dir():
+        return 0
+    n = 0
+    for d in folder.iterdir():
+        if d.is_dir() and (days is None or time.time() - d.stat().st_mtime > days * 86400):
+            shutil.rmtree(d, ignore_errors=True)
+            n += 1
+    return n
+
+
+def _slug(text, default="area"):
+    """A file name from a place name: lower case, ``_`` for each run of other characters."""
+    import re
+    s = re.sub(r"[^a-z0-9]+", "_", str(text or "").lower()).strip("_")
+    return s or default
+
+
+def get(place=None, *, osm_id=None, bbox=None, h3_cell=None, boundary=None, point=None, dist_m=1000, out=None, name=None,
         fixes=None, cache=None, refresh=False, dry_run=False, progress=None):
     """``duckosm get``: the boundary of an area, the smallest Geofabrik extract that holds it (downloaded to a cache
     folder), and the cut of the extract to the boundary, with the OSM ``fixes`` in it when given. Give one of
@@ -464,7 +525,8 @@ def get(place=None, *, osm_id=None, bbox=None, h3_cell=None, boundary=None, poin
     ``point``: ``(lon, lat)``, the area is the box ``dist_m`` metres from it in each direction. ``boundary`` is a
     GeoJSON file, or GeoJSON as a dict (a geometry, a Feature or a FeatureCollection), or an object with
     ``__geo_interface__`` (shapely, geopandas): it is written to ``<out>/<name>.geojson`` (``name`` default ``"area"``).
-    Returns an :class:`Area`: ``duckosm.build(pbf=area.pbf, boundary=area.boundary)``.
+    ``out``: the folder of the two files; default: a new folder in the work folder (:func:`work_dir`), so your folder
+    stays clean; ``area.save(folder)`` keeps them. Returns an :class:`Area`: ``area.build()`` builds it.
 
     ``dry_run=True`` downloads and writes nothing: it returns a dict with the ``name``, the ``boundary`` (a GeoJSON
     Feature) and the ``extract`` (``id``, ``name``, ``km2``, ``url``, ``bytes``, ``cached``). ``progress``: None shows
@@ -474,6 +536,8 @@ def get(place=None, *, osm_id=None, bbox=None, h3_cell=None, boundary=None, poin
     >>> area = duckosm.get(point=(7.4246, 43.7384), dist_m=500)"""
     import math
     from duckosm._progress import reporter
+    if out is None and not dry_run:
+        out = _new_work(name or (_slug(place) if place else f"osm_{osm_id}" if osm_id else None))
     if point is not None:            # the box around the point (as osmnx graph_from_point)
         lon, lat = (float(v) for v in point)
         dy, dx = dist_m / 111_320, dist_m / (111_320 * math.cos(math.radians(lat)))
@@ -483,6 +547,7 @@ def get(place=None, *, osm_id=None, bbox=None, h3_cell=None, boundary=None, poin
         if not isinstance(geo, dict):
             raise TypeError("boundary must be a file path, a GeoJSON dict or an object with __geo_interface__")
         name = name or "area"
+        out = out if out is not None else _new_work(name)
         Path(out).mkdir(parents=True, exist_ok=True)
         boundary = Path(out) / f"{name}.geojson"
         boundary.write_text(json.dumps(geo))

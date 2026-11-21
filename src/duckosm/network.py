@@ -95,7 +95,8 @@ def open(path: str | os.PathLike) -> "Network":  # noqa: A001 -- duckosm.open, t
 
 
 def network(place: str | None = None, *, modes: Iterable[str] | None = DEFAULT_MODES, fixes: str | os.PathLike | None = None,
-            out: str | os.PathLike = "data", name: str | None = None, pbf: str | os.PathLike | None = None,
+            out: str | os.PathLike | None = None, name: str | None = None, pbf: str | os.PathLike | None = None,
+            path: str | os.PathLike | None = None,
             progress: Any = None, **area) -> "Network":
     """Get the OSM file of an area and build its network, in one call. The download stays in a cache.
 
@@ -103,9 +104,11 @@ def network(place: str | None = None, *, modes: Iterable[str] | None = DEFAULT_M
     ``osm_id=``, ``h3_cell=``, ``boundary=`` (a GeoJSON file, a dict or a GeoDataFrame), or ``pbf=`` (an ``.osm.pbf``
     file of your own; ``boundary=`` cuts it, without it the whole file is the area). ``modes``: the networks (default
     driving, walking and cycling). ``fixes``: an OSM fixes file for the cut and the build. The file is
+    The file: ``path`` (for example ``"monaco.duckdb"``) when you give it; else a new folder in duckOSM's work
+    folder (:func:`duckosm.work_dir`), and ``net.save(path)`` keeps it. ``out`` and ``name``: the old way,
     ``<out>/<name>.duckdb``. The build options of :func:`duckosm.build` work here too: ``config=`` (a YAML or JSON file,
-    or a dict), ``speeds``, ``costs``, ``restrictions``, ``bus_routes``, ``connect_paths``,
-    ``snap_m``, ``dem``, ``features`` and ``levels``. ``progress``: as :func:`duckosm.build`.
+    or a dict), ``speeds``, ``costs``, ``restrictions``, ``bus_routes``, ``connect_paths``, ``snap_m``, ``dem``,
+    ``features`` and ``levels``. ``progress``: as :func:`duckosm.build`.
 
     >>> net = duckosm.network("Monaco")
     >>> net = duckosm.network(point=(7.4246, 43.7384), dist_m=500, modes=["walking"])
@@ -124,10 +127,11 @@ def network(place: str | None = None, *, modes: Iterable[str] | None = DEFAULT_M
                                f" The area: {', '.join(area_args)}. The build options: {', '.join(names[len(area_args):])}.")
     if pbf is not None:
         stem = name or Path(pbf).name.split(".")[0]
-        return build(pbf=pbf, boundary=area.pop("boundary", None), modes=modes, output=Path(out) / f"{stem}.duckdb",
+        output = Path(path) if path else Path(out) / f"{stem}.duckdb" if out else None
+        return build(pbf=pbf, boundary=area.pop("boundary", None), modes=modes, output=output,
                      fixes=fixes, progress=progress, **area, **built)
-    return get(place, out=out, name=name, fixes=fixes, progress=progress, **area).build(modes=modes, fixes=fixes,
-                                                                                         progress=progress, **built)
+    got = get(place, out=out, name=name, fixes=fixes, progress=progress, **area)
+    return got.build(modes=modes, output=Path(path) if path else None, fixes=fixes, progress=progress, **built)
 
 
 def resolve(target, mode: str | None, default: str | None = "driving"):
@@ -348,6 +352,8 @@ class Network(os.PathLike):
         if meta.get("built"):
             facts.append(f"built {escape(meta['built'])}")
         facts.append(f"fixes: <code>{escape(str(meta['fixes']))}</code>" if meta.get("fixes") else "no fixes file")
+        if not self.saved:
+            facts.append("<b>not saved</b> (in the work folder): <code>net.save(\"name.duckdb\")</code> keeps it")
         return (f"<div><b>Network {escape(self.path.name.split('.')[0])}</b>: {', '.join(facts)}"
                 f"{self.summary().to_html(index=False)}</div>")
 
@@ -765,6 +771,45 @@ class Network(os.PathLike):
         from duckosm.fixes import Fixes
         path = self._meta().get("fixes")
         return Fixes(path) if path else None
+
+    @property
+    def saved(self) -> bool:
+        """False while the file is in duckOSM's work folder (:func:`duckosm.work_dir`); ``net.save(path)`` keeps it."""
+        from duckosm._api import work_dir
+        try:
+            self.path.resolve().relative_to(work_dir().resolve())
+            return False
+        except ValueError:
+            return True
+
+    def save(self, path: str | os.PathLike, overwrite: bool = False) -> "Network":
+        """Copy the network to ``path`` (a ``.duckdb`` file, or a folder: then ``<folder>/<name>.duckdb``), with its
+        companion files beside it under the new name: the cut OSM file (``.osm.pbf``), the boundary (``.geojson``)
+        and the drawing-order edits (``.levels``), so that :meth:`rebuild` and :meth:`edit` still work. Returns the
+        :class:`Network` of the copy. ``overwrite=False``: an error when ``path`` exists.
+
+        >>> net = duckosm.network(osm_id=2220322, modes=["driving"])
+        >>> net = net.save("monaco.duckdb")"""
+        import shutil
+        dst = Path(path)
+        if dst.is_dir() or str(path).endswith(("/", os.sep)):
+            dst = dst / self.path.name
+        if dst.suffix != ".duckdb":
+            dst = dst.with_suffix(".duckdb")
+        if dst.exists() and dst.resolve() == self.path.resolve():
+            return self
+        if dst.exists() and not overwrite:
+            raise DuckOSMError(f"{dst} exists: give another path, or overwrite=True")
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(self.path, dst)
+        old, new = self.path.name.split(".")[0], dst.name.split(".")[0]
+        for ext in (".osm.pbf", ".geojson", ".levels"):
+            src = self.path.with_name(old + ext)
+            if src.is_dir():
+                shutil.copytree(src, dst.with_name(new + ext), dirs_exist_ok=True)
+            elif src.is_file():
+                shutil.copy2(src, dst.with_name(new + ext))
+        return Network(dst)
 
     def rebuild(self, fixes=None, out: str | os.PathLike | None = None, progress: Any = None) -> "Network":
         """Build the area again, with the same modes, from the OSM file and the boundary beside the file (where

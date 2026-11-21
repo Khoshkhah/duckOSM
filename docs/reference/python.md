@@ -67,6 +67,21 @@ that names a module calls the function of that module, with the same other argum
 
 Later (PR 2 of the design): `network(address=...)`, `geocode(text)`, `geocode_to_gdf(text)`.
 
+### Save a network
+
+A build writes its files to duckOSM's work folder (`duckosm.work_dir()`, `<cache>/work`), not to your folder. The card
+of a network says "not saved" while it is there.
+
+| Call | Does |
+|---|---|
+| `net.save(path, overwrite=False)` | copies the network to `path` (a `.duckdb` file or a folder), with its `.osm.pbf`, `.geojson` and `.levels` beside it; gives the `Network` of the copy |
+| `duckosm.network(..., path="x.duckdb")` | builds straight into `path` |
+| `area.save(folder, name=None)` | copies the cut OSM file and the boundary of an `Area` into `folder` |
+| `net.saved` | `False` while the file is in the work folder |
+| `duckosm.clear_work(days=None)` | deletes the work folder, or only its parts older than `days` |
+
+`out=` and `name=` still work, as before.
+
 ### Your own PBF
 
 `pbf=` takes an `.osm.pbf` file of your own. With `boundary=`, the build cuts the file to that area; without it, the
