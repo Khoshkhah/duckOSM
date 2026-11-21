@@ -9,11 +9,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from notebook_book import IMAGES, Chapter  # noqa: E402
 
 ch = Chapter(9, "09_analysis", "Street network analysis",
-             "The numbers of OSMnx, junctions, street directions, components, nearest roads and heights",
+             "The numbers of OSMnx, junctions, street directions, components, nearest roads, heights and city blocks",
              learn="the two views of the statistics; junctions; street bearings and their entropy; connected "
                    "components; the nearest node and edge of a point; a smaller area; random points; heights and "
-                   "grades; OSMnx on a duckOSM network",
-             time="about 2 minutes", extras="analysis,viz", more_install="\n    %pip install -q osmnx",
+                   "grades; OSMnx on a duckOSM network; city blocks with momepy",
+             time="about 2 minutes", extras="analysis,viz", more_install="\n    %pip install -q osmnx momepy",
              next_=("10_gis", "10. OSM data for GIS", "OSM features, OSM XML and administrative areas"))
 
 ch.md(f"""## What street network analysis measures
@@ -323,6 +323,83 @@ pd.DataFrame({"duckOSM": [ours[k] for k in keys], "OSMnx": [theirs[k] for k in k
 ch.md("""The two columns are the same: 843 nodes (`n`), 1,484 edges (`m`), 636 intersections and 1,070 street segments.
 So you can use `an.stats` and compare its `osmnx` view with any number that OSMnx gives for another city. The tests
 of duckOSM run this check for each key.""")
+
+
+ch.md("""## City blocks with momepy
+
+A city block is the land between streets, with its buildings. Planners use blocks to compare parts of a city: small
+blocks make a city easy to walk, and large blocks make long detours. [momepy](https://docs.momepy.org) is a Python
+library that measures the shape of a city. It makes the blocks from three layers. duckOSM gives all three from the same
+OSM file:
+
+| Layer | From duckOSM |
+|---|---|
+| The streets | the edges of the network (`net.driving.edges()`, `net.walking.edges()`) |
+| The buildings | `duckosm.gis.features(net, tags={"building": True})` (chapter 10) |
+| The land | the boundary of the area (`net.boundary`) less the water |
+
+momepy makes the blocks in three steps:
+
+1. **Enclosures:** it cuts the land along the streets. Each enclosure is an area with streets around it.
+2. **Cells:** it divides each enclosure into one cell for each building (a tessellation). A cell is the land that is
+   nearer to its building than to other buildings.
+3. **Blocks:** it joins the cells of the buildings that are between the same streets.
+
+### The streets
+
+momepy needs one line for each street, in metres. The network has one edge for each direction of a two-way street,
+so the cell keeps the edges with `is_reverse` false. It takes the walking edges too: in Monaco many streets join only
+by steps and footways. It removes the tunnels, because a tunnel does not cut the land above it.""")
+ch.code("""import momepy
+
+lines = pd.concat([net.driving.edges(), net.walking.edges()])      # the edges of two modes
+lines = lines.drop_duplicates("edge_id")                           # a road of both modes counts once
+lines = lines[~lines.is_reverse & lines.tunnel.isna()]             # one line for each street, no tunnels
+crs = lines.estimate_utm_crs()                                     # the UTM zone of Monaco: coordinates in metres
+streets = lines.to_crs(crs)[["edge_id", "highway", "geometry"]]
+len(streets)""")
+ch.md("""### The buildings and the land
+
+The buildings are the OSM areas with a `building` tag. The land is the boundary less the water: the lakes
+(`natural=water`) and the two ports of Monaco (`leisure=marina`).""")
+ch.code("""buildings = duckosm.gis.features(net, tags={"building": True}).to_crs(crs)       # the OSM buildings
+buildings = buildings[buildings.geom_type.isin(["Polygon", "MultiPolygon"])]       # only the areas
+buildings = buildings.explode(index_parts=False).reset_index(drop=True)[["geometry"]]   # one polygon for each row
+water = duckosm.gis.features(net, tags={"natural": ["water"], "leisure": ["marina"]}).to_crs(crs)   # lakes and ports
+land = net.boundary.to_crs(crs).difference(water.union_all())                      # the city without its water
+len(buildings), round(land.area.sum() / 1e6, 2)                                    # buildings, land in km²""")
+ch.md("""### The three steps
+
+`momepy.enclosures` cuts the land along the streets. A port is a hole in the land, and momepy also gives the hole as
+an enclosure, so the second line removes the enclosures that are not on the land. `momepy.generate_blocks` gives two
+results: the blocks, and the block of each building.""")
+ch.code("""enc = momepy.enclosures(streets, limit=land)                       # step 1: the areas between the streets
+enc = enc[enc.representative_point().within(land.union_all())]     # remove the ports (holes in the land)
+cells = momepy.enclosed_tessellation(buildings, enc)               # step 2: one cell for each building
+blocks, block_of = momepy.generate_blocks(cells, streets, buildings)    # step 3: the cells joined into blocks
+len(enc), len(cells), len(blocks)""")
+ch.md("""The land has 2.08 km² and 1,710 enclosures. The 1,258 buildings give 2,711 cells. There are more cells than
+buildings, because an enclosure with no building is also a cell. momepy joins the cells into 292 blocks.""")
+ch.md("""### The size of the blocks
+
+The cell gives each block its area in hectares (1 ha = 10,000 m², about a football field and a half) and puts it in a
+size class.""")
+ch.code("""blocks["ha"] = blocks.area / 10_000                                # the area in hectares
+classes = ["< 0.1 ha", "0.1-0.5 ha", "0.5-1 ha", "1-5 ha", "> 5 ha"]
+blocks["size"] = pd.cut(blocks.ha, [0, 0.1, 0.5, 1, 5, 1000], labels=classes)
+blocks["size"].value_counts().sort_index()                         # the blocks in each class""")
+ch.code("""fig, ax = plt.subplots(figsize=(8, 9))
+streets.plot(ax=ax, color="lightgray", linewidth=0.4)              # the streets first, in light gray
+blocks.plot(ax=ax, column="size", cmap="viridis", legend=True,
+            legend_kwds={"title": "block area", "loc": "lower right"})    # the blocks by size
+buildings.plot(ax=ax, color="black", alpha=0.25)                   # the buildings on top
+ax.set_axis_off()""")
+ch.md("""Most blocks are small: 149 blocks have 0.1 to 0.5 ha, and 57 have less than 0.1 ha. Only 4 blocks have more
+than 5 ha. They are on the coast and on the slopes, where few streets cut the land, for example at the Larvotto beach
+in the northeast. The white areas in the middle are the two ports.
+
+The blocks change with the streets that you give to momepy. With the driving streets only, many steps and footways
+do not cut the land, and the blocks become larger.""")
 
 
 ch.md("""## Try it yourself
