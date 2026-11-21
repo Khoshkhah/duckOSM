@@ -469,7 +469,11 @@ A fixes file changes nothing by itself. A build reads it. There are two ways to 
 | Way | Uses | Use it when |
 |---|---|---|
 | `net.rebuild(fixes=...)` | the same OSM file and boundary as `net` | you want to compare the network before and after the fix |
-| a new build: `duckosm.network(..., fixes=...)` | a new extract, or another area | you build later with newer OSM data, or in another project |""")
+| a new build: `duckosm.network(..., fixes=...)` | a new extract, or another area | you build later with newer OSM data, or in another project |
+
+The database keeps a copy of the fixes file that it was built with, in the table `main.fixes`. Thus `net.fixes` gives
+the rules of the build also when the file moves or changes, and a `.duckdb` file that you send to a colleague has its
+fixes in it. When you change the file after the build, `net.fixes_changed()` is `True`: then build again.""")
 
 ch.md("""### Build again: `net.rebuild`
 
