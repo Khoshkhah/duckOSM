@@ -313,30 +313,34 @@ The easiest way is the editing page. You find a road on a map, change it in a fo
 into the fixes file. It is also the only way for some fixes: a turn that a driver cannot make, a new road, the walls of
 a building. `net.edit()`
 starts the editor **Edit OSM data** on the database, on your computer. The page shows the roads and the buildings of
-the area on a map. Each change that you add on the page goes into the fixes file at once, in the same format as
-`Fixes`.
+the area on a map, and it writes the same format as `Fixes`.
 
-`net.edit()` starts the page in the background and gives its address. Open the address in your browser:
+You choose the files. The page reads one file into its list (`load`) and writes one file (`save`). duckOSM never
+chooses a name or a folder for a fixes file. Thus you can load a base file, save a variant to another file, and the
+base file does not change:
 
 ```python
-net.edit()
+net.edit(load="osm_fixes.yaml", save="osm_fixes_v2.yaml")
 ```
 
 ```text
 'http://127.0.0.1:8790/'
 ```
 
-The page writes the fixes file of the build. A network with no fixes file gets `osm_fixes.yaml` beside its database.
-To write another file, or to use another port, give them to `net.edit()`:
-
-```python
-net.edit(fixes="osm_fixes.yaml", port=8791)
-```
+`net.edit()` starts the page in the background and gives its address. Open the address in your browser. The line
+over the tabs shows the two files: **Loaded: osm_fixes.yaml · Saving to: osm_fixes_v2.yaml**. Each change goes into
+the save file at once. **Open** loads another file, **Save** writes the list, and **Save as** writes it to another
+file. A path is relative to the folder where Python runs.
 
 | Argument | Default | Does |
 |---|---|---|
-| `fixes` | the fixes file of the build, else `osm_fixes.yaml` beside the database | the file that the page writes |
+| `load` | none: the list is empty | a fixes file that the page reads; the page does not write it |
+| `save` | none: the first **Save** asks for the file | the file that the page writes, each change at once; it can be the `load` file |
 | `port` | `8790` | the port of the page on `127.0.0.1` |
+
+With `load` only, the first **Save** asks where to save. With neither, the list is empty, and the page writes nothing
+until the first **Save**. When the network was built with a fixes file, the page asks **Built with osm_fixes.yaml.
+Load it?**, but it does not load the file by itself. `fixes="F"` is the old name of `load="F", save="F"`.
 
 <img src="https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/docs/images/edit-road.png" alt="The editing page: Boulevard Charles III is picked in the Road tab, and its lanes are changed to 3" width="100%">
 
@@ -355,8 +359,9 @@ To add one record:
 
 1. Pick a tab.
 2. Click the road on the map, or type its OSM id and click **Load**.
-3. Change the fields, then click **Add to changes**. The page writes the record into the file at once.
-4. In the **Changes** tab, click **Build again** to build the network again with the file.
+3. Change the fields, then click **Add to changes**. The page writes the record into the save file at once.
+4. In the **Changes** tab, click **Build again** to build the network again with the save file. The database records
+   the save file, so `net.fixes` and `net.rebuild()` find it.
 
 In the **Turn** tab, you pick a road, and the page shows the roads at its junction: the picked road (**From**) is
 blue, the roads that leave the junction are green, and the roads that only arrive are violet. You then choose the
@@ -589,7 +594,7 @@ ch.summary([
     ("`net.rebuild(fixes=..., out=...)`", "builds the area again with the fixes; gives the new `Network`"),
     ("`net.fixes`", "the `Fixes` of the build, or `None`"),
     ("`net.diff(other, mode=None)`, `duckosm.fixes.diff(net, other)`", "the edges that are different, by `edge_id`"),
-    ("`net.edit(fixes=None, port=8790)`", "starts the editing page and gives its URL"),
+    ("`net.edit(load=None, save=None, port=8790)`", "starts the editing page and gives its URL"),
     ("`duckosm.network(..., fixes=...)`, `area.build(fixes=...)`", "a new build with the fixes file"),
     ("`duckosm.gis.quack(..., fixes=...)`", "the QuackOSM table of the OSM file, with the fixes"),
 ], reference="[duckosm.fixes](../reference/sdk/fixes.md)")

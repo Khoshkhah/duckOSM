@@ -44,6 +44,10 @@ const panel = await initFixesPanel({
 	onBuild,       // (): the user clicks "Build again"; the host page builds with panel.text()
 	buildOff,      // optional: () gives why the host cannot build now ("" when it can); Build again is then off, with this reason under it
 	changesNote,   // optional: more HTML for the help text of the Changes tab
+	files,         // optional: where Open, Save and Save as go (see "The fixes files"); the default reads a file of this computer and downloads the file
+	loaded,        // optional: the name of the file that the host loads first (Loaded)
+	saving,        // optional: the name of the save file (Saving to); null: the first Save asks for it
+	builtWith,     // optional: () gives the fixes file of the build; the panel offers it ("Built with X. Load it?") and does not load it by itself
 });
 ```
 
@@ -52,8 +56,25 @@ The panel gives the title, the id `fix` and the six tabs to `frame(options)`. Th
 button (`back: "Steps"` in Studio, `back: null` in `duckosm edit`). The host listens to the event `back` of the frame and then calls
 `close()`. The host can add to the frame's title line (`top`) and head row (`head`) before it gives the frame back. The root of the
 frame gets the id `fix-panel`, and the ids of the tabs are `fix-tab-road` to `fix-tab-changes`.
-The panel returns `text()` (the fixes file, or `null` when there is no change), `load(text)`, `restore()`, `open()`, `close()`,
-`isOpen()`, `rebuilt()` (call it after a build), `select()`, `tab()`, `drawn()` and `count()`.
+The panel returns `text()` (the fixes file, or `null` when there is no change), `load(text, name)` (`name`: the file that it came from),
+`restore()`, `files()` (`{loaded, saving}`), `saveFile()` (Save: it asks for the file when there is none, and gives its name or `null`),
+`open()`, `close()`, `isOpen()`, `rebuilt()` (call it after a build), `select()`, `tab()`, `drawn()` and `count()`.
+
+## The fixes files
+
+Over the tabs, the panel shows **Loaded: X · Saving to: Y** (or **not chosen yet**), with **Open**, **Save** and **Save as**. The panel
+never chooses a file name. **Open** asks first when the list has changes, and after it the save file is not chosen, so a write never puts
+the list of one file into another file. The host gives `files`:
+
+| Key | What it is |
+|---|---|
+| `paths` | `true`: a file name is a path that the person types in a text field (`duckosm edit`: on the computer that runs the server) |
+| `auto` | `true`: each change goes into the save file at once |
+| `open(path)` | gives `{name, text}` of the file, or `null` |
+| `saveTo(path)` | makes `path` the save file and gives its name |
+| `write(name, text)` | writes the save file |
+
+With no `files` (duckOSM Studio in the browser), **Open** reads a file of this computer and **Save** downloads the file.
 
 The frame gives the title line, the tab row, the body that scrolls, the bar under the body and roadstyle's select boxes. The buttons,
 the links and the option rows are roadstyle's parts. `fixes_panel.css` has only the editor's own content, with roadstyle's tokens.
