@@ -394,52 +394,68 @@ in the northeast.
 
 The blocks change with the streets that you give to momepy. With the driving streets only, many steps and footways
 do not cut the land, and the blocks become larger.""")
+ch.md("""### The street space
+
+momepy cuts the land at the center line of each street. So two blocks on the two sides of a street touch at that
+line, and the street has no space of its own. A real street has a width. The next cells give each street a width
+from its kind, and remove the street space from the blocks:
+
+| Kind | `highway` | Width |
+|---|---|---|
+| main road | `motorway`, `trunk`, `primary`, `secondary`, `tertiary` (and their `_link`) | 12 m |
+| street | the other roads for cars | 8 m |
+| footway, steps | `footway`, `steps`, `pedestrian`, `path`, `cycleway`, `corridor` | 2 m |
+
+OSM gives the width of few streets, so these are typical widths, not measured widths.""")
+ch.code("""main = ["motorway", "trunk", "primary", "secondary", "tertiary"]
+paths = ["footway", "steps", "pedestrian", "path", "cycleway", "corridor"]
+kind = pd.Series("street", index=streets.index)                                 # each road is a street, but:
+kind[streets.highway.str.replace("_link", "").isin(main)] = "main road"         # primary_link counts as primary
+kind[streets.highway.isin(paths)] = "footway, steps"
+kind.value_counts()                                                             # the roads of each kind""")
+ch.md("""The map has 4,184 footways and steps, 1,210 streets and 721 main roads. Most lines are footways and steps:
+Monaco has many of them between its streets, on the slopes.""")
+ch.code("""half = kind.map({"main road": 6.0, "street": 4.0, "footway, steps": 1.0})       # half of the width, in metres
+space = streets.buffer(half).union_all()                                        # the street space: each street with its width
+shown = blocks.copy()
+shown["geometry"] = blocks.difference(space)                                    # the blocks without the street space
+round(space.intersection(land.union_all()).area / 1e6, 2), round(shown.area.sum() / 1e6, 2)    # km² of streets, km² of blocks""")
+ch.md("""The street space covers 0.57 km² of the land of Monaco. The blocks without the street space cover 1.39 km².""")
+
 ch.md("""### The map of the blocks
 
-On the map, each block is a half-transparent polygon with a strong border, on top of the buildings and the roads. So
-you see where one block stops and the next one starts, and what is inside it. Two blocks that touch never have the
-same color: `mapclassify.greedy` gives each block one of six colors in this way. The size of the blocks is in the
-table above, not on the map. The plain gray areas in the middle are the two ports.
+On the map, each block is a half-transparent polygon with a strong border, on top of the buildings. The street
+space is white between the blocks. Two blocks that touch never have the same color: `mapclassify.greedy` gives each
+block one of six colors in this way. The size of the blocks is in the table above, not on the map. The plain gray
+areas in the middle are the two ports.
 
 The map has four layers, from the bottom to the top:
 
 | Layer | Style |
 |---|---|
-| The buildings | gray |
-| The roads | white: wide for a main road (`primary`, `secondary`, ...), narrow for a street |
+| The street space | white |
 | The footways and the steps | brown dashed lines |
-| The blocks | half-transparent, with a border in the same color; two blocks that touch never have the same color |
-
-The first cell gives each block its color, and each road its kind and its style. The second cell draws the map.""")
-ch.code("""import mapclassify
-
-blocks["color"] = mapclassify.greedy(blocks, min_colors=6)                       # 0 to 5: blocks that touch differ
-main = ["motorway", "trunk", "primary", "secondary", "tertiary"]
-paths = ["footway", "steps", "pedestrian", "path", "cycleway", "corridor"]
-kind = pd.Series("street", index=streets.index)                                 # each road is a street, but:
-kind[streets.highway.str.replace("_link", "").isin(main)] = "main road"         # primary_link counts as primary
-kind[streets.highway.isin(paths)] = "footway, steps"
-roads = {"footway, steps": dict(color="#8b4513", linewidth=0.5, linestyle="--"),
-         "street": dict(color="white", linewidth=1.0),
-         "main road": dict(color="white", linewidth=2.2)}
-kind.value_counts()                                                             # the roads of each kind""")
-ch.md("""The map has 4,184 footways and steps, 1,210 streets and 721 main roads. Most lines are footways and steps:
-Monaco has many of them between its streets, on the slopes.""")
-ch.code("""from matplotlib.colors import ListedColormap
+| The buildings | gray |
+| The blocks | half-transparent, with a border in the same color; two blocks that touch never have the same color |""")
+ch.code("""import geopandas as gpd
+import mapclassify
+from matplotlib.colors import ListedColormap
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 
+shown["color"] = mapclassify.greedy(shown, min_colors=6)                       # 0 to 5: blocks that touch differ
 six = ListedColormap(["#1b9e77", "#d95f02", "#7570b3", "#e7298a", "#66a61e", "#e6ab02"])    # the six block colors
 fig, ax = plt.subplots(figsize=(12, 13), dpi=200)          # a large picture with many pixels: zoom in to see each block
 ax.set_facecolor("#e8e8e8")                                # the background in light gray
+gpd.GeoSeries([space], crs=streets.crs).plot(ax=ax, color="white")             # the street space
+streets[kind == "footway, steps"].plot(ax=ax, color="#8b4513", linewidth=0.5, linestyle="--")    # the footways
 buildings.plot(ax=ax, color="#9e9e9e", edgecolor="#6e6e6e", linewidth=0.2)      # the buildings
-for k, style in roads.items():
-    streets[kind == k].plot(ax=ax, **style)                                     # the roads
-blocks.plot(ax=ax, column="color", cmap=six, alpha=0.35)                        # each block: a half-transparent polygon
-blocks.boundary.plot(ax=ax, color=[six(c) for c in blocks.color], linewidth=1.3)    # and its border, in its color
+shown.plot(ax=ax, column="color", cmap=six, alpha=0.35)                         # each block: a half-transparent polygon
+shown.boundary.plot(ax=ax, color=[six(c) for c in shown.color], linewidth=1.3)  # and its border, in its color
 legend = [Patch(facecolor=(0.11, 0.62, 0.47, 0.35), edgecolor="#1b9e77", linewidth=1.3, label="block (six colors)"),
-          Patch(facecolor="#9e9e9e", edgecolor="#6e6e6e", label="building")]
-legend += [Line2D([], [], label=k, **style) for k, style in roads.items()]
+          Patch(facecolor="#9e9e9e", edgecolor="#6e6e6e", label="building"),
+          Patch(facecolor="white", edgecolor="#bbbbbb", label="street space"),
+          Line2D([], [], color="#8b4513", linewidth=0.8, linestyle="--", label="footway, steps")]
 ax.legend(handles=legend, title="Blocks of Monaco", loc="lower right", facecolor="#e8e8e8")
 ax.set_xticks([])
 ax.set_yticks([])
