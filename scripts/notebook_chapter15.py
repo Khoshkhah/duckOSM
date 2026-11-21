@@ -48,10 +48,13 @@ turn has no arc, so a value does not flow across a turn that a car cannot make.
 
 ch.md("""## How a model reads a graph: three tables
 
-A model cannot read a drawing of dots and lines. A graph library keeps a graph as three tables of numbers. The small
+A model cannot read a drawing of dots and lines. A graph library keeps a graph as three tables of numbers (in
+Python, a table of numbers is an array with rows and columns). The small
 network below has 3 junctions (0, 1 and 2) and 3 one-way roads: 0 to 1, 1 to 2, and 2 to 0.
 
-**1. The arcs.** Two lists: the start node and the end node of each arc. Arc 0 goes from node 0 to node 1.
+**1. The arcs.** A table of two rows: the start node and the end node of each arc, with one column for each arc.
+Arc 0 goes from node 0 to node 1. (PyTorch Geometric keeps it in this form, as `edge_index`. `graph_arrays` gives the
+two rows as two arrays, `src` and `dst`.)
 
 | | arc 0 | arc 1 | arc 2 |
 |---|---|---|---|
