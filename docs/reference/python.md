@@ -127,7 +127,7 @@ net = duckosm.build(pbf="my.osm.pbf", config={"options": {"bus_routes": False}, 
 | `net.schema()`, `net.schema("driving")` | one row for each table: the schema, the table, the number of rows and of columns, and the description |
 | `net.tables()`, `net.columns("driving.edges")` | the tables of the file; the columns of one table, with their types and descriptions |
 | `net.summarize("driving.edges")` | DuckDB's `SUMMARIZE`: for each column the minimum, the maximum, the distinct values, the quartiles and the NULL percentage |
-| `net.connect()` | a read-only DuckDB connection with the extension spatial: for Arrow (`.arrow()`), Polars (`.pl()`) or DuckDB relations |
+| `net.connect()` | a read-only DuckDB connection with the extension spatial: for Arrow (`.to_arrow_table()`), Polars (`.pl()`) or DuckDB relations. In DuckDB 1.5, `.arrow()` gives a lazy `RecordBatchReader`, not a table. The connection has its own DuckDB instance, so a reader that you do not read to the end does not stop the other calls of `net` |
 | `net.edges(mode=None, where=None, crs=None)` | a `GeoDataFrame` of the edges: all columns, `edge_id` as `int64`, float columns as `float64`. `where`: a SQL filter, put into the query as it is (give only text that you trust). `crs`: for example `3857`, or `"utm"` for the UTM zone of the area. |
 | `net.nodes(mode=None, crs=None)` | a `GeoDataFrame` of the nodes |
 | `net.sql("SELECT ...", params=None)` | a DataFrame; read-only, with the extension spatial |

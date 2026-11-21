@@ -29,7 +29,10 @@ class Route(dict):
 
     - ``.edge_ids``: the edge ids, in the order of the route.
     - ``.edges``: a GeoDataFrame of the edges, in the order of the route (``seq``, ``edge_id``, the edge columns).
-    - ``.length_m``, ``.time_s``: the sums of ``length_m`` and ``cost_s`` of the edges.
+    - ``.length_m``, ``.time_s``: the sums of ``length_m`` and ``cost_s`` of the edges. A route between two points
+      also includes the access legs: ``length_m`` includes ``start.access_m`` and ``end.access_m`` (the distance from
+      each point to its road), ``time_s`` includes ``access_s``, and only the used parts of the first and the last
+      edge count.
     - ``.geometry``: one shapely line (a MultiLineString where the edges do not join).
     - ``.directions()``: the turn-by-turn steps. ``.map()``: the route on the roadstyle map of the network.
 
@@ -205,8 +208,9 @@ def _own_weight(db, mode, weight, ids) -> dict:
 def route(net, a, b, mode=None, weight="time", graph=None):
     """The fastest route (``weight="length"``: the shortest) from ``a`` to ``b``, as a :class:`Route`, or None when no
     route connects them. ``a`` and ``b``: two edge ids, two ``(lon, lat)`` points (then :func:`route_points`: each point
-    joins its nearest road) or place names (:func:`geocode`). ``graph``: a networkx graph of
-    :func:`duckosm.ml.to_networkx` (the Python code).
+    joins its nearest road; ``length_m`` and ``time_s`` then include the distance and the walking time from each point
+    to its road, ``access_m`` and ``access_s`` of ``start`` and ``end``) or place names (:func:`geocode`). ``graph``: a
+    networkx graph of :func:`duckosm.ml.to_networkx` (the Python code).
 
     >>> duckosm.routing.route(net.driving, (7.4155, 43.7285), (7.4335, 43.7468))
     >>> duckosm.routing.route(net.walking, "Boulevard Albert 1er", "Avenue de la Costa")"""

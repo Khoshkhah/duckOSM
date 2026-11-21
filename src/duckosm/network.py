@@ -90,8 +90,8 @@ def open(path: str | os.PathLike) -> "Network":  # noqa: A001 -- duckosm.open, t
     >>> net = duckosm.open("data/monaco.duckdb")"""
     path = Path(path)
     if not path.is_file():
-        raise DuckOSMError(f"{path}: no such database file. Build one with duckosm.network(\"Monaco\") or "
-                           f"duckosm.build(pbf=..., output=\"{path}\").")
+        raise DuckOSMError(f"{shown(path)}: no such database file. Build one with duckosm.network(\"Monaco\") or "
+                           f"duckosm.build(pbf=..., output=\"{shown(path)}\").")
     return Network(path)
 
 
@@ -196,12 +196,19 @@ class Network(os.PathLike):
         return sorted(set(super().__dir__()) | set(extra))
 
     # ---- what is in the file ------------------------------------------------------------------------------------------
-    def _connect(self):
-        """A read-only connection to the file, with the extension spatial loaded. The caller closes it."""
+    def _connect(self, own: bool = False):
+        """A read-only connection to the file, with the extension spatial loaded. The caller closes it. ``own``: the
+        connection has its own DuckDB instance (the file is attached to an in-memory database), so a result that the
+        caller does not read to the end does not lock the shared instance of the other calls."""
         import duckdb
         if not self.path.is_file():
-            raise DuckOSMError(f"{self.path}: no such database file. Build it with duckosm.network or duckosm.build.")
-        con = duckdb.connect(str(self.path), read_only=True)
+            raise DuckOSMError(f"{shown(self.path)}: no such database file. Build it with duckosm.network or duckosm.build.")
+        if own:
+            con = duckdb.connect()
+            name = self.path.name.split(".")[0].replace('"', '""')
+            con.execute(f"ATTACH '{str(self.path).replace(chr(39), chr(39) * 2)}' AS \"{name}\" (READ_ONLY); USE \"{name}\"")
+        else:
+            con = duckdb.connect(str(self.path), read_only=True)
         try:
             con.load_extension("spatial")
         except duckdb.Error:
@@ -210,12 +217,14 @@ class Network(os.PathLike):
         return con
 
     def connect(self):
-        """A read-only DuckDB connection to the file, with the extension spatial loaded: for Arrow (``.arrow()``),
-        Polars (``.pl()``) or DuckDB relations. Close it after use, or use it in a ``with`` block.
+        """A read-only DuckDB connection to the file, with the extension spatial loaded: for Arrow
+        (``.to_arrow_table()``), Polars (``.pl()``) or DuckDB relations. Close it after use, or use it in a ``with``
+        block. In DuckDB 1.5, ``.arrow()`` gives a lazy ``RecordBatchReader``, not a table. The connection has its own
+        DuckDB instance, so a reader that you do not read to the end does not stop the other calls of ``net``.
 
         >>> with net.connect() as con:
-        ...     t = con.sql("SELECT * FROM driving.edges").arrow()"""
-        return self._connect()
+        ...     t = con.sql("SELECT * FROM driving.edges").to_arrow_table()"""
+        return self._connect(own=True)
 
     def sql(self, query: str, params: Any = None):
         """The result of a SQL query as a pandas DataFrame (read-only; the extension spatial is loaded). ``params``: the
@@ -264,7 +273,7 @@ class Network(os.PathLike):
                       f"WHERE database_name = current_database(){where} ORDER BY schema, \"table\"",
                       None if schema is None else {"schema": schema})
         if schema is not None and not len(df):
-            raise DuckOSMError(f"no schema {schema!r} in {self.path}; the schemas: "
+            raise DuckOSMError(f"no schema {schema!r} in {shown(self.path)}; the schemas: "
                                f"{', '.join(sorted({t.split('.')[0] for t in self.tables()}))}")
         if len(df):                                  # exact counts: duckdb_tables().estimated_size is an estimate
             counts = self.sql(" UNION ALL ".join(f"SELECT {i} AS i, count(*) AS n FROM \"{s}\".\"{n}\""
@@ -362,7 +371,7 @@ class Network(os.PathLike):
     def _mode(self, mode):
         modes = self.modes
         if mode not in modes:
-            raise DuckOSMError(f"no mode {mode!r} in {self.path}; the modes in the file: {', '.join(modes)}. "
+            raise DuckOSMError(f"no mode {mode!r} in {shown(self.path)}; the modes in the file: {', '.join(modes)}. "
                                f"Build it with modes=[..., {mode!r}].")
         return mode
 
@@ -373,7 +382,7 @@ class Network(os.PathLike):
         modes = self.modes
         if len(modes) == 1:
             return modes[0]
-        raise DuckOSMError(f"{self.path} has the modes {', '.join(modes)}: choose one, for example "
+        raise DuckOSMError(f"{shown(self.path)} has the modes {', '.join(modes)}: choose one, for example "
                            f"net[{modes[0]!r}].route(...) or mode={modes[0]!r}")
 
     def _frame(self, table, geometry, where, crs):
@@ -800,7 +809,7 @@ class Network(os.PathLike):
         if dst.exists() and dst.resolve() == self.path.resolve():
             return self
         if dst.exists() and not overwrite:
-            raise DuckOSMError(f"{dst} exists: give another path, or overwrite=True")
+            raise DuckOSMError(f"{shown(dst)} exists: give another path, or overwrite=True")
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(self.path, dst)
         old, new = self.path.name.split(".")[0], dst.name.split(".")[0]

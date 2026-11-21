@@ -6,7 +6,7 @@ of Autoware and of the `lanelet2` library, with your OSM fixes. The file is OSM 
 | Reference and format | |
 |---|---|
 | Format | [Lanelet2 map](https://github.com/fzi-forschungszentrum-informatik/Lanelet2/blob/master/lanelet2_core/doc/LaneletAndAreaTagging.md) in [OSM XML](https://wiki.openstreetmap.org/wiki/OSM_XML) |
-| Reference tool | none: no test loads the map in Autoware or in `lanelet2` yet |
+| Reference tool | the [`lanelet2`](https://github.com/fzi-forschungszentrum-informatik/Lanelet2) library: chapter 14 of the notebook manual loads the Monaco map with it. It reads 3318 lanelets with 0 faults, but in its `RoutingGraph` only 732 lanelets have a next lanelet. No test loads the map in Autoware yet |
 | Check | the tests check the structure and the tags of the lanelets. [How each output is checked](../concepts/checks.md) |
 
 ```bash

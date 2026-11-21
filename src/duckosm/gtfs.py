@@ -9,6 +9,8 @@ import os
 import tempfile
 import zipfile
 
+from duckosm._progress import shown
+
 # GTFS route_type -> OpenStreetMap-style name (basic types 0-12, and the extended ones by their hundreds)
 _BASIC = {0: "tram_stop", 1: "subway_station", 2: "train_station", 3: "bus_stop", 4: "ferry_terminal",
           5: "tram_stop", 6: "cable_car_station", 7: "funicular_station", 11: "bus_stop", 12: "train_station"}
@@ -29,11 +31,11 @@ def _unpack(path, into):
     if os.path.isdir(path):
         return path
     if not zipfile.is_zipfile(path):
-        raise ValueError(f"{path}: not a GTFS zip file or folder")
+        raise ValueError(f"{shown(path)}: not a GTFS zip file or folder")
     with zipfile.ZipFile(path) as z:
         names = {os.path.basename(n): n for n in z.namelist() if os.path.basename(n) in _FILES}
         if "stops.txt" not in names:
-            raise ValueError(f"{path}: no stops.txt: not a GTFS feed")
+            raise ValueError(f"{shown(path)}: no stops.txt: not a GTFS feed")
         for base, n in names.items():
             with z.open(n) as src, open(os.path.join(into, base), "wb") as dst:
                 dst.write(src.read())
@@ -54,7 +56,7 @@ def read_stops(paths):
             d = _unpack(str(path), tmp)
             have = {f for f in _FILES if os.path.exists(os.path.join(d, f))}
             if "stops.txt" not in have:
-                raise ValueError(f"{path}: no stops.txt: not a GTFS feed")
+                raise ValueError(f"{shown(path)}: no stops.txt: not a GTFS feed")
             con = duckdb.connect()
             rd = lambda f: f"read_csv('{os.path.join(d, f)}', all_varchar = true, header = true, " \
                            f"null_padding = true, ignore_errors = true)"   # noqa: E731

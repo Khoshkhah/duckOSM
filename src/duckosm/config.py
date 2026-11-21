@@ -16,6 +16,8 @@ import logging
 
 import yaml
 
+from duckosm._progress import shown
+
 
 def _only_known(cls, data: dict) -> dict:
     """Keep only keys that are fields of dataclass `cls`; warn about the others (a typo, or a key
@@ -291,14 +293,14 @@ class Config:
             if not self.source_db:
                 raise ValueError("source.source_db is required for source.type: duckdb")
             if not Path(self.source_db).exists():
-                raise FileNotFoundError(f"source_db not found: {self.source_db}")
+                raise FileNotFoundError(f"source_db not found: {shown(self.source_db)}")
             if not self.effective_boundary_path:
                 raise ValueError("a boundary is required to clip from a duckdb source")
         else:
             if not self.effective_pbf_path:
                 raise ValueError("pbf_path (or source.pbf_path) is required")
             if not Path(self.effective_pbf_path).exists():
-                raise FileNotFoundError(f"PBF file not found: {self.effective_pbf_path}")
+                raise FileNotFoundError(f"PBF file not found: {shown(self.effective_pbf_path)}")
         # the walls need the Rust engine, a PBF and a boundary. The config templates turn them on, so a build that cannot make them goes on
         # without them, with a warning (Kaveh, 2026-11-06), and does not stop
         if self.options.building_faces and (self.options.engine != "rust" or self.source_type != "pbf" or not self.effective_boundary_path):
@@ -307,9 +309,9 @@ class Config:
                 "(the Python engine has no step for them). This build makes no main.building_faces.")
             self.options.building_faces = False
         if self.osm_overrides and not Path(self.osm_overrides).exists():
-            raise FileNotFoundError(f"OSM fixes file not found: {self.osm_overrides}")
+            raise FileNotFoundError(f"OSM fixes file not found: {shown(self.osm_overrides)}")
         if self.effective_boundary_path and not Path(self.effective_boundary_path).exists():
-            raise FileNotFoundError(f"Boundary file not found: {self.effective_boundary_path}")
+            raise FileNotFoundError(f"Boundary file not found: {shown(self.effective_boundary_path)}")
 
     def get_db_path(self) -> Path:
         """Full path to the output DuckDB file.
