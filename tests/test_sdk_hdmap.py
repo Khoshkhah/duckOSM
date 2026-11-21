@@ -44,3 +44,21 @@ def test_to_opendrive_junctions_from_a_network(gmns, tmp_path):
     a = duckosm.hdmap.to_opendrive(net.driving, tmp_path / "a.xodr", junctions=True)
     b = duckosm.hdmap.to_opendrive(gmns, tmp_path / "b.xodr", mode="driving", junctions=True)
     assert a == b and a["junctions"] > 0
+
+
+def test_surfaces(gmns):
+    """One polygon for each lane with a cut line (area = length x width) and one for each junction node."""
+    import duckdb
+    lanes, junctions = duckosm.hdmap.surfaces(gmns)
+    con = duckdb.connect(str(gmns), read_only=True)
+    n_lanes = con.execute("SELECT count(*) FROM gmns_driving.lane WHERE geom_cut IS NOT NULL").fetchone()[0]
+    nodes = {r[0] for r in con.execute("SELECT node_id FROM gmns_driving.node").fetchall()}
+    links = {r[0] for r in con.execute("SELECT link_id FROM gmns_driving.link").fetchall()}
+    con.close()
+    assert len(lanes) == n_lanes > 0 and set(lanes.edge_id) <= links
+    assert len(junctions) > 0 and set(junctions.node_id) <= nodes
+    assert lanes.crs == junctions.crs == "EPSG:4326" and lanes.is_valid.mean() > 0.99
+    m = lanes.to_crs(lanes.estimate_utm_crs())
+    length = m.geometry.boundary.length / 2 - lanes.width    # a strip with flat ends: border = 2 x (length + width)
+    ratio = (m.area / (length * lanes.width)).median()
+    assert 0.9 < ratio < 1.1
