@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **The SUMO export does not run netconvert by default, and it has the traffic lights, the stop signs and the bus stops.**
+  `to_sumo` and `duckosm sumo` write the plain XML and the `.netccfg`; the user changes the `.netccfg` and runs
+  `netconvert -c`. `run_netconvert=True` (`--netconvert`) runs it as before. The `.nod.xml` has `type="traffic_light"`
+  (`highway=traffic_signals`), `priority_stop` (`highway=stop`) and `allway_stop` (`stop=all`); a sign on a node of the way
+  within 25 m of the junction goes to that junction, and the lights within 20 m of each other share one program (`tl`).
+  The new `.add.xml` has a SUMO `<busStop>` for each OSM bus stop, on a lane of a bus route. With netconvert, the new
+  `.tll.xml` has the signal programs that netconvert built, and the `.netccfg` lists it, so that a user can edit them.
+  The default config has `tls.default-type=actuated`. `docs/exports/sumo.md`.
+
 - **The `.duckdb` file has the descriptions of its tables and columns** (DuckDB `COMMENT ON`), from
   `docs/reference/database.md`: `SELECT comment FROM duckdb_columns()`. The Rust build reads the page at compile time;
   the sdist includes it. The step writes a comment only for a table or a column that is in the file. Monaco, three

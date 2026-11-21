@@ -13,13 +13,77 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 /// The default options of netconvert (`DEFAULT_NETCFG`): the ids and the topology of duckOSM stay as they are.
-const DEFAULT_NETCFG: [(&str, &str); 5] = [
+const DEFAULT_NETCFG: [(&str, &str); 6] = [
     ("proj.utm", "true"),
     ("geometry.remove", "false"),
     ("junctions.join", "false"),
     ("no-turnarounds.except-deadend", "true"),
     ("numerical-ids", "false"),
+    // OSM has no signal timings: a program that follows the traffic (SUMO's advice for OSM)
+    ("tls.default-type", "actuated"),
 ];
+
+/// The traffic lights and stop signs of OSM on the network nodes, as `NODE_TYPES_SQL` of sumo.py (the same text): node id, type
+/// (3 traffic light, 2 all-way stop, 1 stop), the shared program id (`tl`) of the lights within 20 m of each other.
+const NODE_TYPES_SQL: &str = r#"WITH s AS (SELECT osm_id, lon, lat, CASE WHEN tags['highway'] = 'traffic_signals' THEN 3 WHEN tags['stop'] = 'all' THEN 2 ELSE 1 END AS t
+    FROM raw.nodes WHERE tags['highway'] IN ('traffic_signals', 'stop')),
+n AS (SELECT node_id, ST_X(geom) AS x, ST_Y(geom) AS y FROM {mode}.nodes WHERE geom IS NOT NULL),
+c AS (SELECT DISTINCT s.osm_id, s.t, n.node_id, 111320 * sqrt(pow(n.y - s.lat, 2) + pow((n.x - s.lon) * cos(radians(s.lat)), 2)) AS d
+    FROM s JOIN {mode}.way_nodes a ON a.node_id = s.osm_id JOIN {mode}.way_nodes b ON b.way_id = a.way_id JOIN n ON n.node_id = b.node_id),
+k AS (SELECT * FROM c QUALIFY row_number() OVER (PARTITION BY osm_id ORDER BY d, node_id) = 1),
+t AS (SELECT k.node_id, max(k.t) AS t, any_value(n.x) AS x, any_value(n.y) AS y FROM k JOIN n USING (node_id) WHERE k.d <= 25 GROUP BY k.node_id),
+g AS (SELECT a.node_id, min(b.node_id) AS tl, count(*) AS m FROM t a JOIN t b ON a.t = 3 AND b.t = 3
+    AND 111320 * sqrt(pow(b.y - a.y, 2) + pow((b.x - a.x) * cos(radians(a.y)), 2)) <= 20 GROUP BY a.node_id)
+SELECT t.node_id, t.t, CASE WHEN g.m > 1 THEN g.tl END FROM t LEFT JOIN g USING (node_id) ORDER BY t.node_id"#;
+
+/// The bus stops (`.add.xml`), as `BUS_STOPS_SQL` of sumo.py (the same text).
+const BUS_STOPS_SQL: &str = r#"WITH p AS (SELECT osm_id, lon, lat, tags['name'] AS name, tags['public_transport'] = 'stop_position' AS pos FROM raw.nodes
+    WHERE tags['highway'] = 'bus_stop' OR tags['public_transport'] = 'platform' OR (tags['public_transport'] = 'stop_position' AND tags['bus'] = 'yes')),
+s AS (SELECT * FROM p WHERE NOT pos OR NOT EXISTS (SELECT 1 FROM p q WHERE NOT q.pos
+    AND 111320 * sqrt(pow(q.lat - p.lat, 2) + pow((q.lon - p.lon) * cos(radians(p.lat)), 2)) <= 30)),
+e AS (SELECT edge_id, geometry, length_m FROM {mode}.edges WHERE edge_id IN (SELECT edge_id FROM bus.route_edges)),
+c AS (SELECT s.osm_id, s.name, e.edge_id, e.length_m, s.lon, s.lat, e.geometry, ST_LineLocatePoint(e.geometry, ST_Point(s.lon, s.lat)) AS f
+    FROM s JOIN e ON ST_DWithin(e.geometry, ST_Point(s.lon, s.lat), 0.0005)),
+d AS (SELECT *, ST_LineInterpolatePoint(geometry, f) AS q, ST_LineInterpolatePoint(geometry, greatest(f - 0.01, 0)) AS a,
+    ST_LineInterpolatePoint(geometry, least(f + 0.01, 1)) AS b FROM c),
+k AS (SELECT osm_id, name, edge_id, f * length_m AS pos_m, length_m,
+    111320 * sqrt(pow(ST_Y(q) - lat, 2) + pow((ST_X(q) - lon) * cos(radians(lat)), 2)) AS dist,
+    (ST_X(b) - ST_X(a)) * (lat - ST_Y(a)) - (ST_Y(b) - ST_Y(a)) * (lon - ST_X(a)) AS side FROM d),
+best AS (SELECT * FROM k WHERE dist <= 30 QUALIFY row_number() OVER (PARTITION BY osm_id ORDER BY side < 0 AND dist > 0.5 DESC, dist, edge_id) = 1)
+SELECT b.osm_id, b.name, b.edge_id,
+    (SELECT count(*) FROM {lanes} l WHERE l.edge_id = b.edge_id AND l.lane_num > (SELECT max(m.lane_num) FROM {lanes} m
+        WHERE m.edge_id = b.edge_id AND m.use <> 'bike'))::BIGINT AS lane,
+    round(greatest(b.pos_m - 7.5, 0), 2)::DOUBLE, round(least(b.pos_m + 7.5, b.length_m), 2)::DOUBLE,
+    (SELECT string_agg(DISTINCT r.ref, ' ' ORDER BY r.ref) FROM bus.route_edges r WHERE r.edge_id = b.edge_id) AS lines
+FROM best b ORDER BY b.osm_id"#;
+
+/// The SUMO node type of the code of `NODE_TYPES_SQL`, strongest first.
+const NODE_TYPES: [&str; 3] = ["traffic_light", "allway_stop", "priority_stop"];
+
+/// The signal programs that netconvert built (the `<tlLogic>` elements of the .net.xml) as a .tll.xml, as `_write_tll`; the number
+/// (none: no file).
+fn write_tll(net: &Path, path: &Path) -> Result<usize> {
+    let (mut out, mut n, mut inside) = (String::new(), 0, false);
+    crate::each_line(net, |l| {
+        let t = l.trim_start();
+        if t.starts_with("<tlLogic ") {
+            inside = true;
+            n += 1;
+        }
+        if inside {
+            out.push_str(l);
+            out.push('\n');
+        }
+        if t.starts_with("</tlLogic>") {
+            inside = false;
+        }
+        Ok(())
+    })?;
+    if n > 0 {
+        std::fs::write(path, format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<tlLogics>\n{out}</tlLogics>\n")).map_err(|x| x.to_string())?;
+    }
+    Ok(n)
+}
 
 fn priority(hw: Option<&str>) -> i32 {
     match hw.unwrap_or("") {
@@ -249,10 +313,19 @@ pub struct Summary {
     pub nod: PathBuf,
     pub edg: PathBuf,
     pub con: Option<PathBuf>,
+    /// the bus stops for SUMO (`--additional-files`), if there are some
+    pub add: Option<PathBuf>,
+    /// the netconvert config: the built-in one, or the user's
+    pub netccfg: Option<PathBuf>,
     pub net: Option<PathBuf>,
+    /// the signal programs that netconvert built, if it ran and there are signals
+    pub tll: Option<PathBuf>,
     pub n_nodes: usize,
     pub n_edges: usize,
     pub n_connections: usize,
+    pub n_traffic_lights: usize,
+    pub n_stop_signs: usize,
+    pub n_bus_stops: usize,
 }
 
 fn e(e: duckdb::Error) -> String {
@@ -577,6 +650,35 @@ pub fn to_sumo_with(db: &Path, out_dir: &Path, mode: &str, net_name: &str, conne
     std::fs::create_dir_all(out_dir).map_err(|x| format!("{}: {x}", out_dir.display()))?;
     let path = |ext: &str| out_dir.join(format!("{net_name}.{ext}"));
     let (nod_path, edg_path, con_path, net_path) = (path("nod.xml"), path("edg.xml"), path("con.xml"), path("net.xml"));
+    // the traffic lights and stop signs of OSM: node id -> (type, tl), as `_node_types`
+    let mut types: HashMap<i64, (&'static str, Option<i64>)> = HashMap::new();
+    if mode == "driving" && has_table(&con, "raw", "nodes")? && has_table(&con, mode, "way_nodes")? {
+        let mut st = con.prepare(&NODE_TYPES_SQL.replace("{mode}", mode)).map_err(e)?;
+        for r in st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i32>(1)?, r.get::<_, Option<i64>>(2)?))).map_err(e)? {
+            let (n, t, tl) = r.map_err(e)?;
+            types.insert(n, (NODE_TYPES[(3 - t) as usize], tl));
+        }
+    }
+    // (type, tl) of a node; a joined junction takes the strongest sign of its nodes
+    let ntype = |id: &str| -> Option<(&'static str, Option<i64>)> {
+        match id.strip_prefix("cluster_") {
+            Some(m) => m
+                .split('_')
+                .filter_map(|n| n.parse::<i64>().ok().and_then(|n| types.get(&n).copied()))
+                .min_by_key(|x| NODE_TYPES.iter().position(|t| *t == x.0)),
+            None => id.parse::<i64>().ok().and_then(|n| types.get(&n).copied()),
+        }
+    };
+    let node_xml = |n: &str, x: f64, y: f64| -> String {
+        let mut a = String::new();
+        if let Some((t, tl)) = ntype(n) {
+            a.push_str(&format!(" type=\"{t}\""));
+            if let Some(tl) = tl {
+                a.push_str(&format!(" tl=\"{tl}\""));
+            }
+        }
+        format!("  <node id=\"{n}\" x=\"{x:.7}\" y=\"{y:.7}\"{a}/>\n")
+    };
 
     let bus = o.bus_edges && mode == "driving" && has_table(&con, "driving", "private_edges")?;
     let pin = 1099511627776i64; // 2^40: the rows of a second table come after the rows of the first
@@ -803,22 +905,31 @@ pub fn to_sumo_with(db: &Path, out_dir: &Path, mode: &str, net_name: &str, conne
 
     // the three files, each written while DuckDB reads the tables (`joined`: None), or from the network of a junction join, which
     // is in memory; gives the numbers of nodes, edges and connections
-    let write = |joined: Option<&Joined<'_>>, lanes: Option<&HashMap<(String, String), Vec<(String, String)>>>| -> Result<(usize, usize, usize)> {
+    let write = |joined: Option<&Joined<'_>>, lanes: Option<&HashMap<(String, String), Vec<(String, String)>>>| -> Result<(usize, usize, usize, usize, usize)> {
         let mut f = Out::create(&nod_path, false)?;
         f.put("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<nodes>\n")?;
-        let mut n_nodes = 0;
+        let (mut n_nodes, mut n_lights, mut n_stops) = (0, 0, 0);
+        let mut count = |n: &str| match ntype(n).map(|x| x.0) {
+            Some("traffic_light") => n_lights += 1,
+            Some(_) => n_stops += 1,
+            None => {}
+        };
         match joined {
             None => each_chunk(&con, &nodes_sql, [], |c| {
                 for i in 0..c.len {
-                    let (n, x, y) = (c.i64(0, i).unwrap_or_default(), c.f64(1, i).unwrap_or_default(), c.f64(2, i).unwrap_or_default());
-                    f.put(&format!("  <node id=\"{n}\" x=\"{x:.7}\" y=\"{y:.7}\"/>\n"))?;
+                    let (n, x, y) = (c.i64(0, i).unwrap_or_default().to_string(), c.f64(1, i).unwrap_or_default(), c.f64(2, i).unwrap_or_default());
+                    if !types.is_empty() {
+                        count(&n);
+                    }
+                    f.put(&node_xml(&n, x, y))?;
                 }
                 n_nodes += c.len;
                 Ok(())
             })?,
             Some(j) => {
                 for (n, x, y) in &j.m.nodes {
-                    f.put(&format!("  <node id=\"{n}\" x=\"{x:.7}\" y=\"{y:.7}\"/>\n"))?;
+                    count(n);
+                    f.put(&node_xml(n, *x, *y))?;
                 }
                 n_nodes = j.m.nodes.len();
             }
@@ -958,25 +1069,63 @@ pub fn to_sumo_with(db: &Path, out_dir: &Path, mode: &str, net_name: &str, conne
             f.put("</connections>\n")?;
             f.finish()?;
         }
-        Ok((n_nodes, n_edges, n_conns))
+        Ok((n_nodes, n_edges, n_conns, n_lights, n_stops))
     };
-    let (n_nodes, n_edges, n_connections) = write(None, None)?;
+    let (n_nodes, n_edges, n_connections, n_traffic_lights, n_stop_signs) = write(None, None)?;
+    // the bus stops, as `_write_bus_stops`
+    let add_path = path("add.xml");
+    let mut n_bus_stops = 0;
+    if mode == "driving" && has_table(&con, "raw", "nodes")? && has_table(&con, "bus", "route_edges")? {
+        let lanes = if has_table(&con, mode, "lane_profile")? {
+            format!("{mode}.lane_profile")
+        } else {
+            "(SELECT NULL::BIGINT AS edge_id, NULL::INTEGER AS lane_num, NULL::VARCHAR AS use WHERE false)".to_string()
+        };
+        let mut st = con.prepare(&BUS_STOPS_SQL.replace("{mode}", mode).replace("{lanes}", &lanes)).map_err(e)?;
+        let mut x = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<additional>\n");
+        for r in st
+            .query_map([], |r| {
+                Ok((r.get::<_, i64>(0)?, r.get::<_, Option<String>>(1)?, r.get::<_, i64>(2)?, r.get::<_, i64>(3)?, r.get::<_, f64>(4)?, r.get::<_, f64>(5)?, r.get::<_, Option<String>>(6)?))
+            })
+            .map_err(e)?
+        {
+            let (osm, name, eid, lane, a, b, lines) = r.map_err(e)?;
+            x.push_str(&format!("  <busStop id=\"bus_stop_{osm}\" lane=\"{eid}_{lane}\" startPos=\"{a:.2}\" endPos=\"{b:.2}\" friendlyPos=\"true\""));
+            if let Some(n) = name.filter(|n| !n.is_empty()) {
+                x.push_str(&format!(" name={}", quoteattr(&n)));
+            }
+            if let Some(l) = lines.filter(|l| !l.is_empty()) {
+                x.push_str(&format!(" lines={}", quoteattr(&l)));
+            }
+            x.push_str("/>\n");
+            n_bus_stops += 1;
+        }
+        if n_bus_stops > 0 {
+            x.push_str("</additional>\n");
+            std::fs::write(&add_path, x).map_err(|x| x.to_string())?;
+        }
+    }
+    eprintln!("SUMO[{mode}]: {n_traffic_lights} traffic lights, {n_stop_signs} stop signs, {n_bus_stops} bus stops");
+    if use_conns && !netconvert && perms.all_keyed().any(|c| c.2.is_some() || !c.3.is_empty()) {
+        eprintln!("SUMO connections[{mode}]: some turns are open or closed to some vehicles only; netconvert takes that only lane by lane, which the export writes when it runs netconvert itself");
+    }
     let mut s = Summary {
         nod: nod_path.clone(),
         edg: edg_path.clone(),
         con: use_conns.then(|| con_path.clone()),
+        add: (n_bus_stops > 0).then_some(add_path),
+        netccfg: Some(config.map_or_else(|| path("netccfg"), Path::to_path_buf)),
         net: None,
+        tll: None,
         n_nodes,
         n_edges,
         n_connections,
+        n_traffic_lights,
+        n_stop_signs,
+        n_bus_stops,
     };
-    if !netconvert {
-        return Ok(s);
-    }
-
-    let (bin, home) = find_netconvert()?;
-    // the built-in netconvert config (.netccfg) with the options `opts`
-    let write_cfg = |opts: &[(String, String)]| -> Result<()> {
+    // the built-in netconvert config (.netccfg) with the options `opts`, and the signal programs `tll`
+    let write_cfg = |opts: &[(String, String)], tll: Option<&Path>| -> Result<()> {
         let mut l = vec![
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>".to_string(),
             "<configuration>".into(),
@@ -985,6 +1134,9 @@ pub fn to_sumo_with(db: &Path, out_dir: &Path, mode: &str, net_name: &str, conne
         ];
         if use_conns {
             l.push(format!("  <connection-files value=\"{}\"/>", rel(&con_path, out_dir)));
+        }
+        if let Some(t) = tll {
+            l.push(format!("  <tllogic-files value=\"{}\"/>", rel(t, out_dir)));
         }
         l.push(format!("  <output-file value=\"{}\"/>", rel(&net_path, out_dir)));
         for (k, v) in opts {
@@ -1004,10 +1156,14 @@ pub fn to_sumo_with(db: &Path, out_dir: &Path, mode: &str, net_name: &str, conne
             }
         }
         None => {
-            write_cfg(&opts)?;
+            write_cfg(&opts, None)?;
             cmd.extend(["-c".into(), path("netccfg").display().to_string()]);
         }
     }
+    if !netconvert {
+        return Ok(s);
+    }
+    let (bin, home) = find_netconvert()?;
     let run = |extra: &[String]| -> Result<()> {
         // the name of the program only: its full path has the home folder of the user, and a notebook keeps this line in its outputs
         let name = bin.file_name().map_or_else(|| bin.display().to_string(), |n| n.to_string_lossy().into_owned());
@@ -1061,7 +1217,7 @@ pub fn to_sumo_with(db: &Path, out_dir: &Path, mode: &str, net_name: &str, conne
             for x in o2.iter_mut().filter(|x| x.0 == "junctions.join") {
                 x.1 = "false".into();
             }
-            write_cfg(&o2)?;
+            write_cfg(&o2, None)?;
             let n_rules: HashSet<(i64, &[i64])> = prules.iter().map(|p| (p.from, p.via.as_slice())).collect();
             eprintln!(
                 "SUMO: {} joined junction(s), {} connections through them, {} of {} via-way restriction path(s) applied",
@@ -1090,6 +1246,20 @@ pub fn to_sumo_with(db: &Path, out_dir: &Path, mode: &str, net_name: &str, conne
         }
         write(joined.as_ref(), Some(&lanes))?;
         run(&[])?;
+    }
+    let tll = path("tll.xml");
+    if write_tll(&net_path, &tll)? > 0 {
+        if config.is_none() {
+            // the next `netconvert -c` keeps the programs that a user edits in it
+            let mut o2 = opts.clone();
+            if joined.is_some() {
+                for x in o2.iter_mut().filter(|x| x.0 == "junctions.join") {
+                    x.1 = "false".into();
+                }
+            }
+            write_cfg(&o2, Some(&tll))?;
+        }
+        s.tll = Some(tll);
     }
     s.net = Some(net_path);
     Ok(s)

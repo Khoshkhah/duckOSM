@@ -48,7 +48,7 @@ def _paths(d, keys):
 
 # ---- exports -----------------------------------------------------------------------------------------------------
 
-def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network", run_netconvert: bool = True,
+def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network", run_netconvert: bool = False,
             netconvert_bin: str = None, connections: bool = True, config=None, bus_edges: bool = False,
             edge_attrs: dict = None, lanes: dict = None):
     """See :func:`duckosm.sumo.to_sumo`."""
@@ -57,7 +57,7 @@ def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network", run_
         def run(c):   # the paths as Path objects, as the Rust code gives them
             return _paths(sumo.to_sumo(c, out_dir, mode=mode, net_name=net_name, run_netconvert=run_netconvert,
                                 netconvert_bin=netconvert_bin, connections=connections, config=config,
-                                bus_edges=bus_edges, edge_attrs=edge_attrs, lanes=lanes), ("nod", "edg", "con", "netccfg", "net"))
+                                bus_edges=bus_edges, edge_attrs=edge_attrs, lanes=lanes), ("nod", "edg", "con", "add", "netccfg", "net", "tll"))
         if not isinstance(con, (str, os.PathLike)):
             return run(con)
         import duckdb
@@ -73,7 +73,7 @@ def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network", run_
             pass                      # not found: the Rust code gives the error
     r = json.loads(_rust().to_sumo(_db(con), str(out_dir), mode, net_name, connections,
                                    None if config is None else str(config), run_netconvert))
-    return _paths(r, ("nod", "edg", "con", "netccfg", "net"))
+    return _paths(r, ("nod", "edg", "con", "add", "netccfg", "net", "tll"))
 
 
 def to_gis(con, out, modes=None, fmt: str = "gpkg", boundary: bool = True, name: str = None,
