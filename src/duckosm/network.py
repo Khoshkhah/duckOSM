@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 from typing import Any, Iterable
 
+from duckosm._progress import shown
 from duckosm.errors import DuckOSMError, require
 
 HIGHLIGHT = "#e8590c"
@@ -336,19 +337,19 @@ class Network(os.PathLike):
     # ---- the notebook view --------------------------------------------------------------------------------------------
     def __repr__(self) -> str:
         if not self.path.is_file():
-            return f"Network({str(self.path)!r}, missing)"
+            return f"Network({shown(self.path)!r}, missing)"
         from duckosm._api import _size
         s = self.summary()
         modes = ", ".join(f"{r.mode} {r.edges} edges" for r in s.itertuples())
-        return f"Network({str(self.path)!r}, {_size(self.path)}, {modes})"
+        return f"Network({shown(self.path)!r}, {_size(self.path)}, {modes})"
 
     def _repr_html_(self) -> str:
         from html import escape
         from duckosm._api import _size
         if not self.path.is_file():
-            return f"<b>Network</b> <code>{escape(str(self.path))}</code>: missing"
+            return f"<b>Network</b> <code>{escape(shown(self.path))}</code>: missing"
         meta = self._meta()
-        facts = [f"<code>{escape(str(self.path))}</code>", _size(self.path)]
+        facts = [f"<code>{escape(shown(self.path))}</code>", _size(self.path)]
         if meta.get("built"):
             facts.append(f"built {escape(meta['built'])}")
         facts.append(f"fixes: <code>{escape(str(meta['fixes']))}</code>" if meta.get("fixes") else "no fixes file")
@@ -897,11 +898,11 @@ class ModeView:
 
     def __repr__(self):
         r = self.summary().iloc[0]
-        return f"ModeView({str(self.network.path)!r}, {self.mode}: {r.edges} edges, {r.nodes} nodes, {r.km} km)"
+        return f"ModeView({shown(self.network.path)!r}, {self.mode}: {r.edges} edges, {r.nodes} nodes, {r.km} km)"
 
     def _repr_html_(self):
         from html import escape
-        return (f"<div><b>{escape(self.mode)}</b> of <code>{escape(str(self.network.path))}</code>"
+        return (f"<div><b>{escape(self.mode)}</b> of <code>{escape(shown(self.network.path))}</code>"
                 f"{self.summary().to_html(index=False)}</div>")
 
 

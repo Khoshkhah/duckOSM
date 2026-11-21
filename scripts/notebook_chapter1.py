@@ -277,14 +277,13 @@ ch.md("""### The work folder
 
 | Files | Where | Set it with |
 |---|---|---|
-| networks and areas that you did not save | the work folder: `duckosm.work_dir()` | `DUCKOSM_CACHE` (the work folder is `<cache>/work`) |
+| networks and areas that you did not save | the work folder, `~/.cache/duckosm/work` (`duckosm.work_dir()` gives it) | `DUCKOSM_CACHE` (the work folder is `<cache>/work`) |
 | your saved networks | where you save them | `net.save(path)`, `path=`, `area.save(folder)` |
 | the Geofabrik extracts | the cache: `~/.cache/duckosm` | `DUCKOSM_CACHE` |
 
 `duckosm.clear_work()` deletes the work folder; `duckosm.clear_work(days=7)` deletes only the parts older than seven
 days. Your saved files are not in it, so they stay.""")
-ch.code("""print(duckosm.work_dir())
-duckosm.clear_work(days=7)""")
+ch.code("""duckosm.clear_work(days=7)""")
 
 ch.md("""## Try it yourself
 
