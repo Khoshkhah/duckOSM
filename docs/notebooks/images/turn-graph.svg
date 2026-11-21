@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="320" viewBox="0 0 900 320" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#57606a"/></marker>
+    <marker id="g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#2ea043"/></marker>
+    <marker id="r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#d1242f"/></marker>
+  </defs>
+  <rect width="900" height="320" fill="#ffffff"/>
+  <text x="200" y="28" font-size="16" font-weight="600" fill="#1f2328" text-anchor="middle">The junction</text>
+  <text x="660" y="28" font-size="16" font-weight="600" fill="#1f2328" text-anchor="middle">The turn graph</text>
+  <!-- roads -->
+  <g stroke="#d0d7de" stroke-width="26" stroke-linecap="round">
+    <line x1="40" y1="170" x2="360" y2="170"/>
+    <line x1="200" y1="50" x2="200" y2="295"/>
+  </g>
+  <g stroke-width="3" fill="none">
+    <line x1="50" y1="176" x2="186" y2="176" stroke="#1f6feb" marker-end="url(#a)"/>
+    <line x1="214" y1="176" x2="350" y2="176" stroke="#57606a" marker-end="url(#a)"/>
+    <line x1="194" y1="184" x2="194" y2="290" stroke="#57606a" marker-end="url(#a)"/>
+    <line x1="206" y1="156" x2="206" y2="58" stroke="#57606a" marker-end="url(#a)"/>
+  </g>
+  <g font-size="14" font-weight="600" fill="#1f2328">
+    <text x="100" y="205">edge 1</text>
+    <text x="280" y="205">edge 2</text>
+    <text x="120" y="270">edge 3</text>
+    <text x="218" y="80">edge 4</text>
+  </g>
+  <circle cx="160" cy="138" r="15" fill="#ffffff" stroke="#d1242f" stroke-width="3"/>
+  <text x="160" y="143" font-size="12" font-weight="700" fill="#d1242f" text-anchor="middle">L</text>
+  <line x1="150" y1="128" x2="170" y2="148" stroke="#d1242f" stroke-width="3"/>
+  <text x="40" y="118" font-size="12" fill="#57606a">no left turn</text>
+  <!-- graph -->
+  <g font-size="15" font-weight="600" text-anchor="middle">
+    <circle cx="500" cy="170" r="26" fill="#ddf4ff" stroke="#1f6feb" stroke-width="2"/><text x="500" y="175" fill="#1f2328">1</text>
+    <circle cx="790" cy="170" r="26" fill="#f6f8fa" stroke="#57606a" stroke-width="2"/><text x="790" y="175" fill="#1f2328">2</text>
+    <circle cx="700" cy="275" r="26" fill="#f6f8fa" stroke="#57606a" stroke-width="2"/><text x="700" y="280" fill="#1f2328">3</text>
+    <circle cx="700" cy="70" r="26" fill="#f6f8fa" stroke="#57606a" stroke-width="2"/><text x="700" y="75" fill="#1f2328">4</text>
+  </g>
+  <line x1="527" y1="170" x2="760" y2="170" stroke="#2ea043" stroke-width="3" marker-end="url(#g)"/>
+  <text x="640" y="162" font-size="12" fill="#2ea043" text-anchor="middle">straight on</text>
+  <line x1="522" y1="185" x2="673" y2="263" stroke="#2ea043" stroke-width="3" marker-end="url(#g)"/>
+  <text x="575" y="245" font-size="12" fill="#2ea043" text-anchor="middle">right turn</text>
+  <line x1="522" y1="155" x2="673" y2="82" stroke="#d1242f" stroke-width="2.5" stroke-dasharray="7 5"/>
+  <text x="575" y="100" font-size="12" fill="#d1242f" text-anchor="middle">no arc</text>
+  <text x="660" y="312" font-size="12" fill="#57606a" text-anchor="middle">A node is an edge. An arc is a legal turn, and it costs the time of edge 1.</text>
+</svg>

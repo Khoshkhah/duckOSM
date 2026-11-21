@@ -10,11 +10,49 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 NOTEBOOKS = os.path.join(HERE, "..", "docs", "notebooks")
-CHAPTERS = ["01_area_to_network"]          # the chapters in the book style (scripts/notebook_book.py)
+CHAPTERS = ["01_area_to_network", "02_inspect", "03_maps", "04_join_by_edge_id", "05_osm_fixes", "06_exports",
+            "07_routing", "08_routing_advanced", "09_analysis", "10_gis", "11_mobility", "12_sim", "13_planning",
+            "14_hdmap", "15_ml"]          # the chapters in the book style (scripts/notebook_book.py)
 # a short opening of each chapter (the notebook has it in its band picture)
-OPENING = {"01_area_to_network": "This chapter shows how you get the road network of an area into one file: from a "
-           "place name, an OSM id, a box, a point, an H3 cell, a polygon of your own, a map, or an OSM file that you "
-           "already have. It also shows the options of the build, and how you save the network."}
+OPENING = {
+    "01_area_to_network": "This chapter shows how you get the road network of an area into one file: from a place name, an "
+    "OSM id, a box, a point, an H3 cell, a polygon of your own, a map, or an OSM file that you already have. It also "
+    "shows the options of the build, and how you save the network.",
+    "05_osm_fixes": "OSM data has errors: an old speed limit, a wrong one-way, a road that is closed for road works. In "
+    "duckOSM you write each fix one time, in a fixes file. The build reads the file, so the network, the routes, the "
+    "maps and every export show the corrected data.",
+    "06_exports": "A duckOSM network is a DuckDB file, and many tools cannot read it. An export writes the network in the "
+    "format of such a tool: SUMO, MATSim, GMNS, OpenDRIVE, a GIS file or vector tiles. In each format, the id of a road "
+    "is the `edge_id`, so the results of each tool join back to the network.",
+    "07_routing": "A route in duckOSM goes from edge to edge on the turn graph. In this graph a node is a road in one "
+    "direction, and an arc is a legal turn. So every route obeys the one-way rules and the turn restrictions of OSM. A "
+    "route can start at an edge id, a point or a street name, and it can change mode on the way.",
+    "08_routing_advanced": "One route answers one question. Many questions need many routes: the travel time between all "
+    "pairs of places, the area that you reach in 10 minutes, the nearest stop from each street. This chapter shows the "
+    "routing calls for these questions. They all search the same graph of turns, so their results agree.",
+    "09_analysis": "A road network has a form: its junctions, its dead ends, the directions of its streets and its "
+    "connected parts. Street network analysis describes this form with numbers. This chapter gives the numbers of "
+    "OSMnx on a duckOSM network, and shows that OSMnx itself works on it.",
+    "10_gis": "An OSM file holds more than roads: buildings, shops, parks, bus stops and administrative areas. This "
+    "chapter gives these OSM features as GIS layers, writes the network as OSM XML, and finds the quarter of each road. "
+    "The features come from the same OSM file as the network, so the two agree.",
+    "11_mobility": "GPS traces, traffic sensors and counts become useful when each record has an edge. This chapter puts "
+    "GPS traces on the driving network of Monaco with map matching, puts sensors on their nearest edges and counts the "
+    "points on each edge. It also shows how your data stays on the correct edges after a rebuild.",
+    "12_sim": "A traffic simulation needs a network, a demand and a simulator. This chapter makes the SUMO and MATSim "
+    "networks of Monaco, runs a short SUMO simulation with random trips and puts the counts back on the duckOSM edges. "
+    "The id of each SUMO edge and of each MATSim link is the `edge_id`, so no table of ids is necessary.",
+    "13_planning": "Transport planning tools need a network with lanes and turns, not only roads. This chapter writes "
+    "the GMNS tables of Monaco, checks them, makes the meso and micro networks, loads the network in path4gmns and "
+    "makes an AequilibraE project.",
+    "14_hdmap": "An automated vehicle needs more than the roads. It needs each lane, its borders, and the lane that comes "
+    "next through a junction. In this chapter, you make the lanes of Monaco and write them as a CommonRoad map, a "
+    "Lanelet2 map, a lane graph and an OpenDRIVE file.",
+    "15_ml": "A road network is a graph, and duckOSM gives it in two forms: junctions joined by roads, and roads joined "
+    "by legal turns. In this chapter, you make both graphs of Monaco for networkx, rustworkx and PyTorch Geometric, and "
+    "train a small graph neural network that predicts the speed limit of each road. Each prediction goes back to its "
+    "road by its `edge_id`.",
+}
 IMG = "https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/docs/notebooks/images"
 COLAB = "https://colab.research.google.com/github/Khoshkhah/duckOSM/blob/main/docs/notebooks/01_area_to_network.ipynb"
 KINDS = {"output": ("note", "What the output shows", "output-note"), "tip": ("tip", "Tip", ""),
@@ -163,7 +201,7 @@ title: "{title}"
 """}]
     for c in src["cells"][1:]:
         if c["cell_type"] == "markdown":
-            cells.append({"cell_type": "markdown", "metadata": {}, "source": fix_links(convert_md("".join(c["source"])))})
+            cells.append({"cell_type": "markdown", "metadata": {}, "source": local_images(fix_links(convert_md("".join(c["source"]))))})
         else:
             c = dict(c)
             if "nightly_wheel" not in "".join(c["source"]):
@@ -181,6 +219,13 @@ title: "{title}"
     return len(cells)
 
 
+def local_images(s):
+    """The pictures of the notebooks from the book's own copy (images/), so a new picture shows before it is on main."""
+    return s.replace(IMG + "/", "images/")
+
+
 if __name__ == "__main__":
+    import shutil
+    shutil.copytree(os.path.join(NOTEBOOKS, "images"), os.path.join(HERE, "images"), dirs_exist_ok=True)
     for slug in CHAPTERS:
         print(slug, chapter(slug), "cells")

@@ -2,7 +2,7 @@
 
 This page is for users of the CommonRoad Scenario Designer, Lanelet2, scenariogeneration and CARLA. Each table gives
 the call of your tool and the duckOSM call that does the same work. The module is `duckosm.hdmap`
-([reference](../reference/sdk/hdmap.md)). The notebook [9. HD maps](../notebooks/09_hdmap.md) runs each call on
+([reference](../reference/sdk/hdmap.md)). The notebook [14. HD maps](../notebooks/14_hdmap.md) runs each call on
 Monaco.
 
 ```bash

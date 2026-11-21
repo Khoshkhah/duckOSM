@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1140" height="300" viewBox="0 0 1140 300" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+<rect width="1140" height="300" rx="14" fill="#ffffff"/>
+<text x="570" y="34" text-anchor="middle" font-size="17" font-weight="700" fill="#1f2328">One two-way road between two nodes is two edges</text>
+<text x="570" y="58" text-anchor="middle" font-size="13" fill="#57606a">the OSM way 4230114 (Boulevard du Ténao), part 3 of the way, in driving.edges</text>
+<path d="M250 120 H866" stroke="#d1242f" stroke-width="5"/>
+<path d="M866 110 l22 10 l-22 10 z" fill="#d1242f"/>
+<path d="M890 186 H274" stroke="#1f6feb" stroke-width="5"/>
+<path d="M274 176 l-22 10 l22 10 z" fill="#1f6feb"/>
+<circle cx="200" cy="153" r="34" fill="#f6f8fa" stroke="#57606a" stroke-width="2.5"/>
+<text x="200" y="149" text-anchor="middle" font-size="13" font-weight="700" fill="#1f2328">node</text>
+<text x="200" y="166" text-anchor="middle" font-size="11" fill="#57606a">1080509801</text>
+<circle cx="940" cy="153" r="34" fill="#f6f8fa" stroke="#57606a" stroke-width="2.5"/>
+<text x="940" y="149" text-anchor="middle" font-size="13" font-weight="700" fill="#1f2328">node</text>
+<text x="940" y="166" text-anchor="middle" font-size="11" fill="#57606a">1868723946</text>
+<text x="560" y="98" text-anchor="middle" font-size="14" fill="#d1242f"><tspan font-weight="700">edge_ref 4230114#3f</tspan>   source 1080509801, target 1868723946</text>
+<text x="560" y="146" text-anchor="middle" font-size="14" fill="#1f2328">edge_id 4950030941241418106</text>
+<text x="560" y="214" text-anchor="middle" font-size="14" fill="#1f6feb"><tspan font-weight="700">edge_ref 4230114#3r</tspan>   source 1868723946, target 1080509801</text>
+<text x="560" y="234" text-anchor="middle" font-size="14" fill="#1f2328">edge_id 414242052250797</text>
+<rect x="170" y="252" width="800" height="34" rx="8" fill="#1f6feb" fill-opacity="0.08" stroke="#1f6feb" stroke-width="1.5"/>
+<text x="570" y="274" text-anchor="middle" font-size="14" fill="#1f2328">edge_id = (hash(osm_id, source, target) &gt;&gt; 1)::BIGINT : the same way and the same two ends give the same number</text>
+</svg>

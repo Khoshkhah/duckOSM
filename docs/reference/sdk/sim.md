@@ -16,7 +16,7 @@ sn = duckosm.sim.sumo_net(files)                   # sumolib.net.Net
 ids = duckosm.sim.edge_map(files)                  # SUMO id -> edge_id: join the output of SUMO on "id"
 ```
 
-Notebook: [7. Traffic simulation](../../notebooks/07_sim.md). Guide:
+Notebook: [12. Traffic simulation](../../notebooks/12_sim.md). Guide:
 [duckOSM for traffic simulation users](../../compare/for-simulation-users.md).
 
 Pages: [SUMO](../../exports/sumo.md), [MATSim](../../exports/matsim.md).

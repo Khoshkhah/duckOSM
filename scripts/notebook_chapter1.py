@@ -10,7 +10,7 @@ from notebook_book import Chapter  # noqa: E402
 
 ch = Chapter(1, "01_area_to_network", "Get and build an area",
              "From a place, a box, a polygon or your own OSM file to one network file",
-             learn="the parts of a duckOSM build; seven ways to choose an area; the modes; your own PBF file; the build options and `config=`; how you save a network",
+             learn="the parts of a duckOSM build; seven ways to choose an area; the modes (driving, walking, cycling); your own PBF file; the build options and `config=`; how you save a network",
              time="about 3 minutes (the first download included)", extras="widget,viz",
              next_=("02_inspect", "2. Look inside the file", "the tables, the columns and SQL"))
 
