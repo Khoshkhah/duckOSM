@@ -283,3 +283,81 @@ h3 { background: transparent !important; border-left: 3px solid #ffd43b !importa
   padding: .1rem 0 .1rem .8rem !important; font-size: 1.05rem !important; margin: 1.8rem 0 .8rem !important; }
 body.quarto-dark h3 { background: transparent !important; }
 h3 .header-section-number { color: var(--bk-muted) !important; font-weight: 600; }
+
+// ---- the dark theme: brightness levels (code darker than the page, headings lighter) and yellow edges ----
+body.quarto-dark { --bk-line: #545d68; --bk-code-bg: #1c2128; --bk-out-bg: #1c2128; }
+body.quarto-dark div.sourceCode { background: #1c2128 !important; border-color: #3d444d !important; }
+body.quarto-dark div.cell .cell-output { background: #1f242b !important; border-color: #3d444d !important; }
+body.quarto-dark h2 { background: #323a44 !important; box-shadow: inset 4px 0 0 #ffd43b; }
+body.quarto-dark .chapter-facts { background: #282e36 !important; }
+body.quarto-dark .callout.callout-note.output-note { background: rgba(83, 155, 245, .12) !important; }
+body.quarto-dark .callout.callout-note.output-note .callout-header { background: rgba(83, 155, 245, .24) !important; }
+body.quarto-dark .callout.callout-important.key-idea { background: rgba(176, 131, 240, .12) !important; }
+body.quarto-dark .callout.callout-important.key-idea .callout-header { background: rgba(176, 131, 240, .25) !important; }
+body.quarto-dark .callout.callout-tip { background: rgba(87, 171, 90, .12) !important; }
+body.quarto-dark .callout.callout-tip .callout-header { background: rgba(87, 171, 90, .24) !important; }
+body.quarto-dark .callout.callout-warning { background: rgba(198, 144, 38, .12) !important; }
+body.quarto-dark .callout.callout-warning .callout-header { background: rgba(198, 144, 38, .25) !important; }
+body.quarto-dark main table td, body.quarto-dark main table th { border-color: #3d444d !important; }
+
+// ---- the left panel: the logo and the name, the tools in a row of their own, parts, number badges ----
+#quarto-sidebar { background: var(--bk-page, transparent) !important; border-right: 1px solid var(--bk-line) !important; }
+body.quarto-dark #quarto-sidebar { background: #22272e !important; }
+.sidebar-header { display: flex; flex-wrap: wrap; align-items: center; gap: .2rem .6rem; border-bottom: 1px solid var(--bk-line); padding-bottom: .8rem; }
+.sidebar-header .sidebar-logo-link img, .sidebar-logo { width: 34px !important; height: 34px !important; max-height: none !important; margin: 0 .2rem 0 0 !important; }
+.sidebar-header .sidebar-title { margin: 0 !important; }
+#quarto-sidebar .sidebar-title::after { content: "The notebook manual" !important; font-size: .74rem !important; }
+.sidebar-header .sidebar-tools-main { width: 100%; justify-content: flex-start !important; gap: .3rem; margin: .3rem 0 0 0 !important; padding-left: 0 !important; }
+.sidebar-header .sidebar-tools-main a, .sidebar-header .sidebar-tools-main .quarto-color-scheme-toggle { font-size: .95rem; color: var(--bk-muted) !important; }
+// the parts: small uppercase labels with space above them
+.sidebar-navigation .sidebar-item-section { margin-top: .9rem; }
+.sidebar-navigation .sidebar-item-section > .sidebar-item-container .sidebar-item-text,
+.sidebar-navigation .sidebar-item-section > .sidebar-item-container a { font-size: .68rem !important; font-weight: 700 !important;
+  letter-spacing: .08em; text-transform: uppercase; color: var(--bk-faint) !important; padding: .2rem .65rem !important; background: none !important; }
+.sidebar-navigation .sidebar-item-section .sidebar-item-toggle { display: none; }
+// the chapter number in a small round badge, yellow for the open chapter
+.sidebar-navigation .sidebar-link .chapter-number { display: inline-flex; align-items: center; justify-content: center; min-width: 1.45rem; height: 1.45rem;
+  border-radius: 50%; background: var(--bk-surface-2); color: var(--bk-muted) !important; font-size: .74rem; font-weight: 700; }
+.sidebar-navigation .sidebar-link.active .chapter-number { background: #ffd43b !important; color: #17191f !important; }
+.sidebar-navigation .sidebar-item-container .sidebar-link { align-items: center !important; }
+
+// ---- the left panel, fixed selectors ----
+// the part labels are the toggle buttons of the sections: show them as labels, hide only their arrow
+.sidebar-navigation .sidebar-item-section .sidebar-item-toggle { display: block !important; }
+.sidebar-navigation .sidebar-item-section > .sidebar-item-container > .sidebar-item-toggle,
+.sidebar-navigation .sidebar-item-section > .sidebar-item-container > .sidebar-item-toggle .menu-text {
+  font-size: .68rem !important; font-weight: 700 !important; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--bk-faint) !important; background: none !important; padding: .15rem .65rem !important; cursor: default; }
+.sidebar-navigation .sidebar-item-toggle .bi-chevron-right { display: none; }
+// the chapters under a part: normal text, not labels
+.sidebar-navigation .sidebar-section .sidebar-link, .sidebar-navigation .sidebar-section .sidebar-link .menu-text {
+  text-transform: none !important; letter-spacing: 0 !important; font-size: .92rem !important; font-weight: 500 !important; }
+.sidebar-navigation .sidebar-section .sidebar-link { color: var(--bk-muted) !important; }
+.sidebar-navigation .sidebar-section .sidebar-link.active, .sidebar-navigation .sidebar-section .sidebar-link.active .menu-text {
+  color: var(--bk-text) !important; font-weight: 600 !important; }
+// the number badge of the open chapter: ink on yellow in both themes
+body .sidebar-navigation .sidebar-link.active .chapter-number, body.quarto-dark .sidebar-navigation .sidebar-link.active .chapter-number {
+  background: #ffd43b !important; color: #17191f !important; }
+// the logo beside the name; the subtitle, then the tools, under them
+.sidebar-header { flex-wrap: nowrap !important; align-items: flex-start !important; }
+.sidebar-header .sidebar-logo-link { flex: 0 0 auto; margin-top: .15rem; }
+.sidebar-header .sidebar-title { display: flex !important; flex-wrap: wrap; align-items: center; }
+.sidebar-header .sidebar-title > a { order: 1; }
+#quarto-sidebar .sidebar-header .sidebar-title::after { order: 2; width: 100%; margin-top: 0 !important; }
+.sidebar-header .sidebar-title .sidebar-tools-main { order: 3; width: 100%; margin-top: .35rem !important; }
+
+// ---- the search box: compact, with its label and the "/" key hint ----
+#quarto-sidebar .sidebar-search { margin: .2rem 0 .4rem; }
+#quarto-sidebar .aa-Autocomplete, #quarto-sidebar #quarto-search { height: 2rem; }
+#quarto-sidebar .aa-Form { height: 2rem !important; min-height: 2rem !important; border-radius: 8px !important; }
+#quarto-sidebar .aa-Input { font-size: .82rem !important; color: var(--bk-text) !important; }
+#quarto-sidebar .aa-Input::placeholder { color: var(--bk-faint) !important; opacity: 1; }
+#quarto-sidebar .aa-InputWrapperSuffix::after { content: "/"; font-family: $font-family-monospace; font-size: .7rem; color: var(--bk-faint);
+  border: 1px solid var(--bk-line); border-radius: 4px; padding: 0 .35rem; margin-right: .4rem; line-height: 1.3; }
+#quarto-sidebar .aa-SubmitIcon { width: 15px; height: 15px; }
+
+// ---- code and output: clearly different in the light theme (code gray, output white) ----
+body:not(.quarto-dark) div.sourceCode { background: #eef1f5 !important; }
+body:not(.quarto-dark) div.cell .cell-output { background: #ffffff !important; }
+// code below the page color, output above it: the two boxes differ in both themes
+body.quarto-dark div.cell .cell-output { background: #2d333b !important; }
