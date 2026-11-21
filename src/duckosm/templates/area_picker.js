@@ -92,6 +92,13 @@ export default {
       showPlan();
     });
     const draft = (geom) => map.getSource("draft")?.setData(geom ? { type: "Feature", geometry: geom, properties: {} } : empty);
+    // the chosen area at once, before the dry run of Python answers (a slow or lost answer must not hide it)
+    const show = (g) => {
+      const src = map.getSource("draft");
+      if (!src || !g) return;
+      src.setData(g.type === "Feature" || g.type === "FeatureCollection" ? g : { type: "Feature", geometry: g, properties: {} });
+      map.fitBounds(bounds(g), { padding: 30, maxZoom: 14 });
+    };
 
     // the tabs
     const selectTab = (name) => {
@@ -144,7 +151,8 @@ export default {
       try {
         const geometry = await polygon(t, id);
         name = name || `${what}_${id}`;
-        draft(null);
+        show(geometry);
+        info(`${name}: finding the extract ...`);
         set({ mode: "boundary", geojson: { type: "Feature", properties: { name, osm_type: what, osm_id: id }, geometry }, name });
       } catch (e) { info(`OSM ${what} ${id}: no boundary (${e.message})`); }
     };
@@ -175,7 +183,7 @@ export default {
     // box: drag on the map, or type W,S,E,N
     $(".dk-bbox-go").onclick = () => {
       const v = $(".dk-bbox").value.split(",").map(Number);
-      if (v.length === 4 && v.every(Number.isFinite)) { draft(boxGeom(v)); set({ mode: "bbox", bbox: v }); }
+      if (v.length === 4 && v.every(Number.isFinite)) { show(boxGeom(v)); set({ mode: "bbox", bbox: v }); }
     };
     let start = null;
     map.on("mousedown", (e) => {
@@ -205,7 +213,7 @@ export default {
       const h3 = await h3lib();
       if (!h3.isValidCell(cell)) return ($(".dk-info").textContent = "This is not an H3 cell id.");
       const ring = h3.cellToBoundary(cell, true);
-      draft({ type: "Polygon", coordinates: [ring] });
+      show({ type: "Polygon", coordinates: [ring] });
       $(".dk-h3").value = cell;
       set({ mode: "h3", h3_cell: cell });
     };
@@ -222,7 +230,7 @@ export default {
       if (!f) return;
       try {
         const geojson = JSON.parse(await f.text());
-        draft(null);
+        show(geojson);
         set({ mode: "boundary", geojson, name: f.name.split(".")[0] });
       } catch (err) { $(".dk-info").textContent = `${f.name}: not a GeoJSON file (${err.message})`; }
     };
