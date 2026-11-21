@@ -10,6 +10,7 @@ and matplotlib are imported in the methods. The maps come from roadstyle (``road
 from __future__ import annotations
 
 import os
+import tempfile
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -934,12 +935,16 @@ class Network(os.PathLike):
                 shutil.copy2(src, dst.with_name(new + ext))
         return Network(dst)
 
-    def add_multimodal(self, transfer_s: float = 60, pair_costs: dict | None = None, progress: Any = None) -> "Network":
+    def add_multimodal(self, transfer_s: float = 60, pair_costs: dict | None = None, node_costs=None,
+                       only_listed_nodes: bool = False, progress: Any = None) -> "Network":
         """Add the multimodal graph to this file, with no new build: the schema ``mm`` with ``mm.edges`` (the edges of
         all modes) and ``mm.transfers`` (the changes of mode at the shared junctions). It reads the modes that are in
         the file, so it needs walking and one more mode. A file that has ``mm`` gets it again. ``transfer_s``: the
         seconds of a change of mode; ``pair_costs``: another cost for one direction, ``{"walking->driving": 120}``.
-        Returns the network, so that a route across modes can follow (:meth:`route_multimodal_points`).
+        ``node_costs``: the cost of a change at some junctions, a DataFrame (or a CSV or Parquet file) with ``node_id``
+        and ``cost_s``, and optionally ``from_mode`` and ``to_mode`` (empty: each change), or a dict ``{node_id:
+        cost_s}``. A row with modes wins over a row without. ``only_listed_nodes``: the changes only at those junctions
+        (for example, park only at car parks). Returns the network, so that a route across modes can follow (:meth:`route_multimodal_points`).
 
         >>> net.add_multimodal().route_multimodal_points((7.4155, 43.7285), (7.4335, 43.7468))"""
         from duckosm import _rust
@@ -951,7 +956,20 @@ class Network(os.PathLike):
         args = ["duckosm", "multimodal", str(self.path), "--transfer-cost", str(transfer_s)]
         for pair, seconds in (pair_costs or {}).items():
             args += ["--pair-cost", f"{pair}={seconds}"]
-        code = timed(progress, "multimodal graph", lambda: _rust.cli(args))
+        with tempfile.TemporaryDirectory() as tmp:
+            if node_costs is not None:
+                if isinstance(node_costs, (str, os.PathLike)):
+                    path = os.fspath(node_costs)
+                else:
+                    import pandas as pd
+                    df = (pd.DataFrame({"node_id": list(node_costs), "cost_s": list(node_costs.values())})
+                          if isinstance(node_costs, dict) else pd.DataFrame(node_costs))
+                    path = os.path.join(tmp, "node_costs.csv")
+                    df.to_csv(path, index=False)
+                args += ["--node-costs", path] + (["--only-listed-nodes"] if only_listed_nodes else [])
+            elif only_listed_nodes:
+                raise DuckOSMError("only_listed_nodes=True needs node_costs: the junctions where a change is allowed")
+            code = timed(progress, "multimodal graph", lambda: _rust.cli(args))
         if code:
             raise DuckOSMError(f"duckosm multimodal stopped with exit code {code}")
         return self

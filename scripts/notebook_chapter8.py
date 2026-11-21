@@ -11,7 +11,7 @@ from notebook_book import IMAGES, Chapter  # noqa: E402
 ch = Chapter(8, "08_routing_advanced", "Advanced routing",
              "The Route object, many routes, the k best routes, travel time matrices, isochrones and accessibility",
              learn="the graph that all routing calls search; the members of a `Route`; place names; many routes in "
-                   "parallel; the k best routes; a travel time matrix; isochrones; accessibility",
+                   "parallel; the k best routes; a travel time matrix; isochrones; accessibility; your own cost of each edge and of each change of mode",
              time="about 2 minutes", extras="widget,viz,graph",
              next_=("09_analysis", "9. Street network analysis", "the numbers of OSMnx, junctions, components and points"))
 
@@ -141,7 +141,8 @@ the name, so the call did not use Nominatim.
 ch.md("""## The fastest or the shortest: `weight`
 
 `weight="time"` (the default) gives the fastest route: the sum of `cost_s`. `weight="length"` gives the shortest
-route: the sum of `length_m`. All calls of this chapter, except `isochrones` and `accessibility`, take `weight`.""")
+route: the sum of `length_m`. All calls of this chapter take `weight`. It can also be your own cost of each edge:
+see "Your own cost" below.""")
 ch.code("""import pandas as pd
 
 ids = net.driving.edges().edge_id.sample(200, random_state=1).tolist()   # 200 driving edges, chosen at random
@@ -383,6 +384,93 @@ exit. The 5 main roads end at the boundary of the area: the road goes on in OSM,
 cannot leave such an edge, so `route` gives `None` for a route that starts on it, as in "Many routes in parallel"
 above.""")
 
+ch.md("""## Your own cost
+
+### A cost that is not the time
+
+Each call of this chapter makes one cost as small as possible: the time, or the length. Sometimes the best route
+is the one with the smallest toll, the least CO2 or the least danger. `weight` also takes your own cost of each edge:
+
+| `weight` | The cost of an edge |
+|---|---|
+| `"time"` (the default) | `cost_s`, the travel time in seconds |
+| `"length"` | `length_m`, in metres |
+| the name of a column, for example `"toll_s"` | the value of that numeric column of `<mode>.edges` |
+| a pandas Series (or a dict) with the edge ids as its index | your value for each edge |
+
+Your cost replaces the time of the edge. A cost must be 0 or more. The search stays in Rust: duckOSM gives the cost of
+each edge to the router, so a route with your cost is as fast as a route by time.
+
+An edge that has no value in your Series (or `NULL` in the column) gets a cost from `missing`:
+
+| `missing` | An edge with no value |
+|---|---|
+| `"time"` (the default) | costs its time (`cost_s`) |
+| `"skip"` | is not used: no route goes on it |
+
+### A toll on Boulevard Louis II
+
+Boulevard Louis II goes along the sea, through a tunnel, to Larvotto. Here it gets a made-up toll: each of its edges
+costs 120 s more. The other edges cost their time.""")
+ch.code("""fontvieille, larvotto = (7.4155, 43.7285), (7.4335, 43.7468)            # two points
+louis = set(net.driving.edges(where="name = 'Boulevard Louis II'").edge_id)  # the edges of Boulevard Louis II
+time_s = net.driving.edges().set_index("edge_id").cost_s                 # the time of each edge
+toll = time_s.copy()
+toll[toll.index.isin(louis)] += 120                                      # the toll: 120 s more on each edge
+toll.name = "time_and_toll"
+fast = net.driving.route(fontvieille, larvotto)                          # the fastest route
+paid = net.driving.route(fontvieille, larvotto, weight=toll)             # the cheapest route with the toll
+pd.DataFrame({"fastest": [fast.time_s, fast.length_m, len(louis & set(fast.edge_ids))],
+              "with the toll": [paid.time_s, paid.length_m, len(louis & set(paid.edge_ids))]},
+             index=["time_s", "length_m", "edges on Louis II"]).round()""")
+ch.md("""The fastest route takes 229 s and 2,939 m, and 12 of its edges are on Boulevard Louis II. With the toll, the cheapest
+route uses no edge of the boulevard: it takes 268 s and 3,308 m, 39 s and 369 m more. For this trip, the toll costs
+more than the 39 s that the boulevard saves.""")
+ch.code("""paid.weight, round(paid.cost)          # the name of the cost, and the cost of the route""")
+ch.md("""`paid.weight` is the name of the Series, and `paid.cost` is the sum of your costs of its edges: 240. `paid.time_s`
+stays the real time of the route, 268 s. The cost is less than the time, because a route between two points counts
+only the used parts of its first and last edge, and in your cost the walks from the points to the roads cost 0. For
+`"time"`, `route.cost` is `route.time_s`.""")
+ch.code("""net.map("driving", routes={"fastest": fast, "with the toll": paid})     # the two routes""")
+ch.md("""### An edge that no route uses: `missing="skip"`
+
+To keep all routes off Boulevard Louis II, give the time of all other edges and use `missing="skip"`. The edges of
+the boulevard are not in the Series, so no route goes on them.""")
+ch.code("""no_louis = time_s[~time_s.index.isin(louis)]                              # each edge except the boulevard
+around = net.driving.route(fontvieille, larvotto, weight=no_louis, missing="skip")
+round(around.time_s), round(around.length_m), len(louis & set(around.edge_ids))""")
+ch.md("""The route takes 268 s and 3,308 m, and it uses no edge of the boulevard (0). It is the route of the toll: a toll of
+120 s on each edge is already enough to keep this trip off the boulevard.""")
+
+ch.md("""### The cost of a change of mode at each junction
+
+[7. Routing](07_routing.md) gives one cost to each change of mode (`transfer_s`), or one cost to each pair of modes
+(`pair_costs`). `node_costs` gives a cost to the changes at some junctions. It is a DataFrame with the columns
+`node_id` and `cost_s`, and optionally `from_mode` and `to_mode` (empty: each change at the junction). With
+`only_listed_nodes=True`, a route can change mode only at those junctions.
+
+Here a car can park only at a car park: a junction of a parking aisle (`service = 'parking_aisle'`) that walking also
+has. A change at a car park costs 30 s.""")
+ch.code('''parks = net.sql("""SELECT DISTINCT node_id FROM (SELECT source AS node_id FROM driving.edges WHERE service = 'parking_aisle'
+                                     UNION SELECT target FROM driving.edges WHERE service = 'parking_aisle')
+                   WHERE node_id IN (SELECT node_id FROM walking.nodes)""")      # the junctions of the car parks
+net.add_multimodal(node_costs=pd.DataFrame({"node_id": parks.node_id, "cost_s": 30}),
+                   only_listed_nodes=True)                                   # changes of mode only at the car parks
+net.sql("SELECT kind, count(*) AS changes, min(cost_s) AS cost_s FROM mm.transfers GROUP BY kind ORDER BY kind")''')
+ch.md("""Monaco has 51 such junctions. The multimodal graph now has 204 changes: at each of the 51 junctions the four kinds
+`park`, `retrieve`, `bike_park` and `bike_unpark`, each 30 s. The rows of `node_costs` have no modes, so they are for
+each change: a bicycle also changes only at the car parks. The graph of chapter 7 has 12,140 changes.""")
+ch.code("""trip = net.route_multimodal_points(fontvieille, larvotto)                 # a trip that parks at a car park
+[(leg["mode"], len(leg["edges"]), round(leg["time_s"])) for leg in trip["legs"]], round(trip["time_s"])""")
+ch.md("""The trip walks on 7 edges (111 s) to a car park, drives on 64 edges (184 s), parks at a car park and walks on 24
+edges (555 s) to Larvotto. The total is 917 s: the legs, the two changes of 30 s and the walks from the points to the
+roads. The car-only route takes 229 s, so here the trip with the car parks is much slower: the car park where it parks
+is more than 9 minutes on foot from Larvotto. The last cell gives the file the multimodal graph of chapter 7 again,
+for the next chapters.""")
+ch.code("""net.add_multimodal()          # the multimodal graph of chapter 7 again: a change at each shared junction, 60 s""")
+ch.md("""> **Tip:** the same costs work without Python: `duckosm multimodal monaco.duckdb --node-costs parks.csv
+> --only-listed-nodes`, or `multimodal: {node_costs: parks.csv, only_listed_nodes: true}` in a build config.""")
+
 ch.md("""## Try it yourself
 
 **1.** Find the three best walking routes from the casino square to the port, and compare their times.
@@ -448,6 +536,8 @@ ch.summary([
     ("`net.walking.isochrones(origins, minutes, buffer_m=...)`", "the polygons reached within each time"),
     ("`net.walking.accessibility(origins, targets, minutes)`", "the targets reached from each origin, and the nearest"),
     ("`duckosm.routing.routed_graph(view)`", "the SQL relation of the graph of all calls"),
+    ("`net.driving.route(a, b, weight=series, missing=\"skip\")`", "the route with your own cost of each edge"),
+    ("`net.add_multimodal(node_costs=df, only_listed_nodes=True)`", "the cost of a change of mode at each junction"),
 ], reference="[duckosm.routing](../reference/sdk/routing.md)")
 
 ch.write(sys.argv[1])

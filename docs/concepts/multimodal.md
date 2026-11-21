@@ -51,6 +51,7 @@ the listed junctions", the changes at the other junctions are removed: for examp
 | Where | How |
 |---|---|
 | command line | `duckosm multimodal DB --node-costs FILE.csv [--only-listed-nodes]` |
+| Python | `net.add_multimodal(node_costs=df, only_listed_nodes=True)`: a DataFrame, a file or a dict `{node_id: cost_s}` |
 | config | `multimodal.node_costs: FILE.csv` and `multimodal.only_listed_nodes: true` |
 
 ```text
