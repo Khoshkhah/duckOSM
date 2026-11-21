@@ -588,7 +588,7 @@ def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network",
         cmd = [binary, "-c", cfg_path]
         out["netccfg"] = cfg_path
     def run(cmd):
-        logger.info("running: " + " ".join(cmd))
+        logger.info("running: " + " ".join([os.path.basename(cmd[0]), *cmd[1:]]))   # not the full path: it has the home folder
         res = subprocess.run(cmd, capture_output=True, text=True)
         if res.returncode != 0:
             raise RuntimeError(f"netconvert failed (exit {res.returncode}):\n{res.stderr[-2000:]}")

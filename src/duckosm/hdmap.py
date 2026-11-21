@@ -12,12 +12,36 @@ lane_graph = build_lane_graph
 
 def to_opendrive(net, out_path, mode=None, crs=None, junctions=False):
     """The ASAM OpenDRIVE file (``.xodr``) of one mode (experimental). ``junctions``: also the junctions, from the
-    movements. Returns the numbers.
+    movements of a GMNS database. ``net`` can be a network, a mode view or a GMNS database
+    (:func:`duckosm.planning.to_gmns`). With ``junctions=True`` and a network, this function first writes the GMNS
+    database of the mode to a temporary folder and reads the roads and the junctions from it. To keep that file, make
+    it with :func:`duckosm.planning.to_gmns` and pass its path. Returns the numbers.
 
-    >>> duckosm.hdmap.to_opendrive(net.driving, "out/monaco.xodr")"""
+    >>> duckosm.hdmap.to_opendrive(net.driving, "out/monaco.xodr")
+    >>> duckosm.hdmap.to_opendrive(net.driving, "out/monaco_junctions.xodr", junctions=True)"""
     from duckosm import _api
     db, mode = resolve(net, mode)
-    return _api.to_opendrive(db, out_path, mode=mode, crs=crs, junctions=junctions)
+    path = _api._db(db)
+    if not junctions or path is None or _has_table(path, f"gmns_{mode}", "movement"):
+        return _api.to_opendrive(db, out_path, mode=mode, crs=crs, junctions=junctions)
+    import os
+    import tempfile
+
+    from duckosm.planning import to_gmns
+    with tempfile.TemporaryDirectory() as tmp:
+        gmns = os.path.join(tmp, "gmns.duckdb")
+        to_gmns(path, gmns, mode=mode)
+        return _api.to_opendrive(gmns, out_path, mode=mode, crs=crs, junctions=True)
+
+
+def _has_table(path, schema, table):
+    import duckdb
+    con = duckdb.connect(str(path), read_only=True)
+    try:
+        return con.execute("SELECT count(*) FROM duckdb_tables() WHERE schema_name = ? AND table_name = ?",
+                           [schema, table]).fetchone()[0] > 0
+    finally:
+        con.close()
 
 
 def _local(geoms, lon0, lat0):
@@ -35,8 +59,11 @@ def to_commonroad(gmns_db, path, mode="driving", country_id="ZAM", map_name=None
     one lanelet for each lane (its center line to the edge of the junction, ``geom_cut``, and its width) and one for
     each lane connector through a junction, with the predecessors, the successors and the lanes on each side. The
     coordinates are metres east and north of the center of the area (``location`` has its latitude and longitude).
-    Returns ``{path, lanelets, lanes, connectors, ids}``: ``ids`` is a DataFrame of ``lanelet_id`` → GMNS ``lane_id``
-    or ``connector_id`` and the ``edge_id``.
+    Returns ``{path, lanelets, lanes, connectors, dropped, ids}``: ``lanes`` and ``connectors`` are the rows of the GMNS
+    database; ``lanelets`` is the number of lanelets in the file. ``dropped`` is the number of lanes and connectors
+    that are not in the file, because their left or right border is not one line (a lane that is too short or bends too
+    much for its width: 231 of 7450 on Monaco). ``ids`` is a DataFrame of ``lanelet_id`` → GMNS ``lane_id`` or
+    ``connector_id`` and the ``edge_id``, only for the lanelets in the file.
 
     >>> duckosm.hdmap.to_commonroad("out/gmns.duckdb", "out/monaco_commonroad.xml")"""
     from pathlib import Path
@@ -131,4 +158,6 @@ def to_commonroad(gmns_db, path, mode="driving", country_id="ZAM", map_name=None
     ids = pd.DataFrame({"lanelet_id": rows.lanelet_id, "gmns_id": rows.key,
                         "edge_id": pd.concat([lanes.edge_id, conns.from_lane_id.str.split("_").str[0].astype("int64")],
                                              ignore_index=True)})
-    return {"path": path, "lanelets": len(lanelets), "lanes": len(lanes), "connectors": len(conns), "ids": ids}
+    ids = ids[ids.lanelet_id.isin(sides)].reset_index(drop=True)
+    return {"path": path, "lanelets": len(lanelets), "lanes": len(lanes), "connectors": len(conns),
+            "dropped": len(rows) - len(lanelets), "ids": ids}

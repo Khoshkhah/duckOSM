@@ -34,3 +34,13 @@ def test_to_commonroad(gmns, tmp_path):
     import duckdb
     links = {r[0] for r in duckdb.connect(str(gmns), read_only=True).execute("SELECT link_id FROM gmns_driving.link").fetchall()}
     assert set(ids.edge_id) <= links                                                  # each lanelet goes back to a link
+    assert out["dropped"] == out["lanes"] + out["connectors"] - out["lanelets"]       # the rows with no lanelet
+    assert len(ids) == out["lanelets"] and set(ids.lanelet_id) == {x.lanelet_id for x in lanelets}
+
+
+def test_to_opendrive_junctions_from_a_network(gmns, tmp_path):
+    """junctions=True with a mode view: the GMNS file is made in a temporary folder; the same numbers as from the GMNS file."""
+    net = duckosm.Network(gmns.parent / "monaco.duckdb")
+    a = duckosm.hdmap.to_opendrive(net.driving, tmp_path / "a.xodr", junctions=True)
+    b = duckosm.hdmap.to_opendrive(gmns, tmp_path / "b.xodr", mode="driving", junctions=True)
+    assert a == b and a["junctions"] > 0

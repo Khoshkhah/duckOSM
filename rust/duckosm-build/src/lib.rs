@@ -2045,6 +2045,11 @@ pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String>
     if !p.geoparquet && !p.duckdb {
         return Err("no output format: use geoparquet, duckdb or both".into());
     }
+    // a file with the name of a schema (mm.duckdb) makes `mm.transfers` ambiguous: refuse it before anything is written
+    #[cfg(feature = "duckdb")]
+    if p.duckdb {
+        duckosm_duckdb::steps::check_db_name(&out.join(format!("{}.duckdb", p.name)))?;
+    }
     duckosm_core::fs::create_dir_all(out).map_err(|e| e.to_string())?;
     if let Some(predicate) = &p.clip {
         return clip::build(pbf_path, out, p, predicate);
