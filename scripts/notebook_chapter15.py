@@ -50,6 +50,8 @@ There are two ways to make a graph from a duckOSM network. duckOSM gives both.
 
 <img src="{IMAGES}/ml-two-graphs.svg" alt="The junction graph: each node is a vertex, each edge is an arc. The turn graph: each edge becomes a vertex, each turn is an arc" width="100%">
 
+The table compares the two graphs: what a vertex and an arc are in each one, and which numbers describe them.
+
 | Graph | A vertex is | An arc is | Vertex features | Arc features |
 |---|---|---|---|---|
 | junction graph, `graph="nodes"` | a node | an edge | `lon`, `lat` | the columns of the edge that you choose |
@@ -137,11 +139,17 @@ How it works:
 2. The `features` columns become numbers (`float32`). The next section tells how each type of column changes.
 3. The arrays go into a dict, with the names of the feature columns and the duckOSM id of each row number.
 
+`graph_arrays` takes three arguments:
+
 | Argument | Default | What it does |
 |---|---|---|
 | `net` | | a `Network`, a mode view (`net.driving`) or the path of a `.duckdb` file |
 | `graph` | `"nodes"` | `"nodes"`: the junction graph. `"turns"`: the turn graph |
 | `features` | `DEFAULT_FEATURES` | the columns of `<mode>.edges` that become features: `length_m`, `maxspeed_kmh`, `lanes` |
+
+The result is a Python dict. Each key of the dict holds one array (or a list of names). The table lists the keys. The
+column "Shape" gives the size of each array: (rows,) for a list of numbers, and (rows, columns) for a table. "vertices",
+"arcs" and "features" are the numbers of vertices, arcs and feature columns of the graph.
 
 | Key | Type | Shape, junction graph | Shape, turn graph | What it is |
 |---|---|---|---|---|
