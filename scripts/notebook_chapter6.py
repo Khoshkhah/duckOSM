@@ -74,19 +74,32 @@ ch.md("""## SUMO
 second. Its network file is `.net.xml`. SUMO's program `netconvert` makes it from three **plain XML** files: the
 nodes (`.nod.xml`), the edges (`.edg.xml`) and the connections between lanes (`.con.xml`).
 
-`to_sumo` writes the three plain files, then runs `netconvert` on them. The extra `sim` installs `netconvert` (the
-Python package `eclipse-sumo`).
+`to_sumo` makes the SUMO network in two steps:
+
+1. It writes the three plain files and a **netconvert config** (`.netccfg`). The config is the input of `netconvert`:
+   it names the three plain files, the output file and the options of the conversion.
+2. It runs `netconvert -c network.netccfg`. `netconvert` reads the config and the files that it names, and writes
+   `.net.xml`.
+
+```text
+network.nod.xml ─┐
+network.edg.xml ─┼─ named in network.netccfg ──> netconvert -c network.netccfg ──> network.net.xml
+network.con.xml ─┘
+```
+
+The extra `sim` installs `netconvert` (the Python package `eclipse-sumo`).
 
 | Argument | Default | Does |
 |---|---|---|
 | `net_name` | `"network"` | the start of each file name |
 | `run_netconvert` | `True` | `False`: only the plain XML, with no SUMO program |
 | `connections` | `True` | writes the connections of the lanes at each junction (from the turn graph and the turn lanes) |
-| `config` | none | a netconvert config file of your own |""")
+| `config` | none | your own netconvert config (a `.netccfg` path, or a dict of options), in place of the default options |""")
 ch.code("""sumo = net.to_sumo("out/sumo")    # the plain XML files, and the .net.xml of netconvert
 sumo                              # the paths and the numbers""")
-ch.md("""**What the output shows.** The dict has the paths of the three plain files, of the netconvert config
-(`.netccfg`) and of SUMO's network (`.net.xml`). The plain files have 1,768 nodes, 2,840 edges and 5,082
+ch.md("""**What the output shows.** The line `running: netconvert -c out/sumo/network.netccfg` is step 2. The dict has the
+paths of the three plain files, of the netconvert config (`.netccfg`, the input of netconvert) and of SUMO's network
+(`.net.xml`, its output). The plain files have 1,768 nodes, 2,840 edges and 5,082
 connections: the same nodes and edges as the network, and one connection for each arc of the turn graph that a car
 can use (chapter 7).""")
 ch.md("""The check: SUMO's own network file must have each edge of duckOSM. `duckosm.sim.edge_map` reads the `.net.xml`
