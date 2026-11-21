@@ -148,7 +148,8 @@ A wall `type` is `front`, `back`, `side`, `party` or `court`. The result is in [
 
 ## From Python
 
-`duckosm.fixes` writes the same file ([reference](../reference/sdk/fixes.md)).
+`duckosm.fixes` writes the same file ([reference](../reference/sdk/fixes.md)). The changes stay in memory until
+`fixes.save("osm_fixes.yaml")`.
 
 | Editor | Python |
 |---|---|
@@ -156,6 +157,7 @@ A wall `type` is `front`, `back`, `side`, `party` or `court`. The result is in [
 | **Road** tab: one-way, lanes, layer | `fixes.set(way=..., oneway=True, lanes=2, layer=1)` |
 | **Road** tab: delete the road | `fixes.remove(way=...)` |
 | remove the way from one network | `fixes.exclude(way=..., modes=["driving"])` |
+| **Save**, **Save as** | `fixes.save("osm_fixes.yaml")` |
 | **Changes**: **Build again** | `net.rebuild(fixes=fixes)` |
 | the editor on a map | `net.edit(load="osm_fixes.yaml", save="osm_fixes_v2.yaml")` |
 | the edges that changed | `net.diff(fixed)` |

@@ -379,8 +379,10 @@ button of the page.
 
 ch.md("""### From Python: `duckosm.fixes.Fixes`
 
-`duckosm.fixes.Fixes(path)` opens a fixes file, or makes a new one when the file does not exist. Each call that adds a
-rule writes the file at once, so the file on disk is always the same as the object in Python.
+`duckosm.fixes.Fixes()` holds the rules of a fixes file in Python. `Fixes(load="osm_fixes.yaml")` reads a file that
+you have; `Fixes()` starts with no rules. The calls that change the rules change them in memory only. `fixes.save(path)`
+writes them to a file, as its own step. duckOSM never chooses a file name, and a load never writes the loaded file, so
+you can load a base file and save a variant to another file.
 
 `fixes.set(way, **fields)` adds a rule for the way, or changes its rule. A keyword that is a field of a rule (`oneway`,
 `lanes`, `layer`, `note` ...) goes into the rule. Each other keyword is an OSM tag: `maxspeed=10` sets the tag
@@ -388,25 +390,28 @@ rule writes the file at once, so the file on disk is always the same as the obje
 ch.md("""The fix of this chapter: road works on Boulevard Louis II, the OSM way 4230891, lower its speed limit to
 10 km/h.""")
 ch.code("""way = 4230891                                          # Boulevard Louis II: the OSM way to fix
-fixes = duckosm.fixes.Fixes("osm_fixes.yaml")          # open or make the fixes file
+fixes = duckosm.fixes.Fixes()                          # no rules yet (load="file.yaml" reads a file)
 fixes.set(way=way, maxspeed=10, note="road works")     # one rule: the tag maxspeed of the way, and a note
 fixes                                                  # the card: a table of the rules""")
-ch.md("""The card names the file and the number of rules (1). The table has one row for
-each way: `osm_id`, the OSM `tags` of the rule (`maxspeed` is the text `'10'`) and the `note`.
+ch.md("""The card gives the number of rules (1) and says "not saved": the rule is only in memory. The table has one row
+for each way: `osm_id`, the OSM `tags` of the rule (`maxspeed` is the text `'10'`) and the `note`.
 
-The file is ordinary YAML. You can read it, keep it in git with your project, and give it to a colleague.""")
+`fixes.save(path)` writes the rules to a file. The first save needs a path. A later `fixes.save()` writes the same file
+again.""")
+ch.code("""fixes.save("osm_fixes.yaml")                           # write the rules: now there is a file""")
+ch.md("""The file is ordinary YAML. You can read it, keep it in git with your project, and give it to a colleague.""")
 ch.code("""print(open("osm_fixes.yaml").read())    # the fixes file on disk""")
 ch.md("""The rule is one item of `overrides`: the `osm_id`, the `tags` with `maxspeed` and
 the `note`. This is the format that the map editor writes, so the two tools can share one file.
 
-> **Warning:** `Fixes` writes the whole file again at each change. Comments that you wrote in the file by hand are
+> **Warning:** `save` writes the whole file again. Comments that you wrote in the file by hand are
 > lost. The other keys of the file (`new_ways`, `turn_restrictions`, `extra`) stay.""")
 
 
 ch.md("""#### The other calls
 
 `set` is one of five calls that change the rules. The table shows all of them. Each call returns the `Fixes`, so you
-can chain the calls.
+can chain the calls. They change the rules in memory; `save` writes them.
 
 | Call | Does | The field in the file |
 |---|---|---|
@@ -415,11 +420,12 @@ can chain the calls.
 | `fixes.remove(way)` | removes the way from the whole build: no road, no building, no feature | `remove: true` |
 | `fixes.drop(way)` | deletes the rule of the way, so the way is as in OSM again | the rule is gone |
 | `fixes.rules()` | gives the rules as a DataFrame | |
+| `fixes.save(path)` | writes the rules to `path` (later: `fixes.save()` to the same file) | the whole file |
 
 The cell below tries each call on a second file, `practice.yaml`, so the file of the chapter keeps its one rule. Two
 other roads of Monaco get a rule each.""")
 ch.code("""w2, w3 = 503633031, 166399479                              # Avenue Princesse Grace and Boulevard Albert 1er
-practice = duckosm.fixes.Fixes("practice.yaml")              # a second fixes file
+practice = duckosm.fixes.Fixes()                             # a second set of rules
 practice.set(way=w2, oneway=True, lanes=2)                   # two fields of a rule: one-way, two lanes
 practice.set(way=w2, highway="residential")                  # an OSM tag; the rule of w2 keeps its fields
 practice.exclude(way=w3, modes=["driving"])                  # no cars on w3; walking and cycling keep it
@@ -429,7 +435,8 @@ make a new rule: it added the tag `highway` to the rule of `w2`, and `oneway` an
 only `exclude_modes`.""")
 ch.code("""practice.remove(way=w3)        # remove w3 from the whole build
 practice.drop(way=w2)          # w2 is as in OSM again
-practice, len(practice)        # the file now has one rule""")
+practice.save("practice.yaml")  # a second fixes file
+practice, len(practice)        # the file has one rule""")
 ch.md("""After `drop`, the file has one rule: the rule of `w3`, with `exclude_modes` and now
 also `remove: true`. `len(fixes)` is the number of rules.
 
@@ -442,7 +449,7 @@ ch.md("""### In a text editor
 
 The file is plain text, so you can also write it yourself in any text editor, in the format of section "The format of
 the file". The cell below writes a file `hand.yaml` with one rule from Python, as a text editor would. Then `Fixes`
-opens it and shows its rule: the file is the same as a file that `Fixes` or the editing page writes.""")
+loads it and shows its rule: the file is the same as a file that `Fixes` or the editing page writes.""")
 ch.code('''from pathlib import Path
 
 Path("hand.yaml").write_text("""overrides:
@@ -451,7 +458,7 @@ Path("hand.yaml").write_text("""overrides:
       maxspeed: "10"
     note: road works
 """)                                                     # the file, written as text
-duckosm.fixes.Fixes("hand.yaml").rules()               # open it: one rule''')
+duckosm.fixes.Fixes(load="hand.yaml").rules()          # load it: one rule''')
 ch.md("""> **Warning:** YAML uses the spaces at the start of each line. Keep two spaces for each level, as in the example,
 > and write a number in a tag in quotes (`"10"`), because an OSM tag is text.""")
 
@@ -543,7 +550,7 @@ ch.md("""#### A fix that removes a road
 
 The next cell checks this rule. It closes the fixed way to cars with `exclude`, in a third file, and builds the area
 again into `data/monaco_closed.duckdb` (`out=`).""")
-ch.code("""closed = duckosm.fixes.Fixes("closed.yaml").exclude(way=way, modes=["driving"])    # no cars on the way
+ch.code("""closed = duckosm.fixes.Fixes().exclude(way=way, modes=["driving"]).save("closed.yaml")   # no cars on the way
 shut = net.rebuild(fixes=closed, out="data/monaco_closed.duckdb")                   # a third network
 gone = net.diff(shut)                                                               # the edges that are different
 gone.change.value_counts(), set(fixed.edges(where=f"osm_id = {way}").edge_id) == set(gone.edge_id[gone.change == "removed"])""")
@@ -561,16 +568,16 @@ them.""")
 ch.exercises([
     ("Make the fixed way one-way with `fixes.set(way=way, oneway=True)`, build again into a new file, and count the "
      "edges that `diff` gives as removed.",
-     """fixes.set(way=way, oneway=True)                              # the rule of the way gets a field
+     """fixes.set(way=way, oneway=True).save("oneway.yaml")          # the rule of the way gets a field; a file of its own
 oneway = net.rebuild(fixes=fixes, out="data/monaco_oneway.duckdb")
 d = net.diff(oneway)
 (d.change == "removed").sum()                                 # the edges of the other direction"""),
     ("Close Boulevard Albert 1er (`w3`) to cars only, and find the new time of the route.",
-     """closed3 = duckosm.fixes.Fixes("closed3.yaml").exclude(way=w3, modes="driving")
+     """closed3 = duckosm.fixes.Fixes().exclude(way=w3, modes="driving").save("closed3.yaml")
 net.rebuild(fixes=closed3, out="data/monaco_closed3.duckdb").route(a, b).time_s     # about 252 s"""),
     ("Delete the rule of the fixed way, so that the way is as in OSM again, and look at the file.",
-     """fixes.drop(way=way)
-print(open("osm_fixes.yaml").read())                           # overrides: []"""),
+     """fixes.drop(way=way).save("as_in_osm.yaml")                 # a file of its own: osm_fixes.yaml keeps its rule
+print(open("as_in_osm.yaml").read())                           # overrides: []"""),
 ])
 
 ch.glossary([
@@ -585,7 +592,8 @@ ch.glossary([
 ])
 
 ch.summary([
-    ("`duckosm.fixes.Fixes(path)`", "opens or makes a fixes file"),
+    ("`duckosm.fixes.Fixes(load=None)`", "the rules of a fixes file, in memory"),
+    ("`fixes.save(path=None)`", "writes the rules to a file; the first save needs a path"),
     ("`fixes.set(way, **fields)`", "adds or changes the rule of a way: fields of a rule and OSM tags"),
     ("`fixes.exclude(way, modes)`", "removes the way from the networks of `modes`"),
     ("`fixes.remove(way)`", "removes the way from the build"),

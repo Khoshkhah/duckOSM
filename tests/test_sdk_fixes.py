@@ -12,22 +12,29 @@ DATA = Path(__file__).parent / "data"
 
 
 def test_fixes_file(tmp_path):
-    f = Fixes(tmp_path / "osm_fixes.yaml")
-    assert len(f) == 0 and not f.path.exists()                       # made at the first rule
+    f = Fixes()
     f.set(way=1, oneway=True, maxspeed=30).set(way=1, lanes=2).exclude(way=2, modes="driving").remove(way=3)
+    assert not list(tmp_path.iterdir()), "a change writes no file"
+    with pytest.raises(duckosm.DuckOSMError, match="needs a path"):
+        f.save()
+    f.save(tmp_path / "osm_fixes.yaml")
     rules = yaml.safe_load(f.path.read_text())["overrides"]
     assert rules == [{"osm_id": 1, "oneway": True, "tags": {"maxspeed": "30"}, "lanes": 2},
                      {"osm_id": 2, "exclude_modes": ["driving"]}, {"osm_id": 3, "remove": True}]
     assert len(Fixes(f.path)) == 3 and "<table" in f._repr_html_()
-    f.drop(way=3)
+    f.drop(way=3).save()                                            # a later save() writes the same file again
     assert list(Fixes(f.path).rules().osm_id) == [1, 2]
 
 
 def test_the_existing_file_keeps_its_other_keys(tmp_path):
     shutil.copy(DATA / "osm_fixes.yaml", tmp_path / "f.yaml")
     before = yaml.safe_load((tmp_path / "f.yaml").read_text())
-    Fixes(tmp_path / "f.yaml").set(way=4392632, note="checked")
-    after = yaml.safe_load((tmp_path / "f.yaml").read_text())
+    text = (tmp_path / "f.yaml").read_text()
+    f = Fixes(load=tmp_path / "f.yaml").set(way=4392632, note="checked")
+    assert (tmp_path / "f.yaml").read_text() == text, "a load and a change do not write the loaded file"
+    f.save(tmp_path / "v2.yaml")
+    assert (tmp_path / "f.yaml").read_text() == text, "a save to another file keeps the loaded file"
+    after = yaml.safe_load((tmp_path / "v2.yaml").read_text())
     assert len(after["overrides"]) == len(before["overrides"]) and set(after) == set(before)
 
 
@@ -40,8 +47,10 @@ def test_rebuild_and_diff(tmp_path):
     two_way = net.sql("SELECT osm_id FROM driving.edges WHERE NOT oneway AND osm_id > 0 ORDER BY length_m DESC LIMIT 1").osm_id[0]
     slow = net.sql(f"SELECT osm_id FROM driving.edges WHERE osm_id NOT IN ({two_way}) AND osm_id > 0 "
                    "ORDER BY length_m DESC LIMIT 1").osm_id[0]
-    fixes = Fixes(tmp_path / "osm_fixes.yaml").set(way=int(two_way), oneway=True).set(way=int(slow), maxspeed=10)
-    fixed = net.rebuild(fixes=fixes, progress=False)
+    fixes = Fixes().set(way=int(two_way), oneway=True).set(way=int(slow), maxspeed=10)
+    with pytest.raises(duckosm.DuckOSMError, match="save the fixes first"):
+        net.rebuild(fixes=fixes, progress=False)
+    fixed = net.rebuild(fixes=fixes.save(tmp_path / "osm_fixes.yaml"), progress=False)
     assert fixed.path.name == "monaco_fixed.duckdb" and fixed.fixes is not None and len(fixed.fixes) == 2
     d = net.diff(fixed)
     removed = d[d.change == "removed"]
