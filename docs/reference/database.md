@@ -289,6 +289,7 @@ Always empty: the virtual nodes are in `nodes`, with `node_id < 0`.
 | [`admin_boundaries`](#admin_boundaries) | after `duckosm admin`; in a `duckosm extract` result, only the sub-areas inside the area |
 | [`building_faces`](#building_faces) | a build from a PBF, with `options.building_faces` (off) and a boundary |
 | [`building_entrances`](#building_entrances) | `duckosm build` from a PBF, with `options.building_faces` (off) and a boundary |
+| [`fixes`](#fixes) | a build with a fixes file (`--fixes`, `osm_overrides`) |
 
 `main` also holds the macro `edge_id_hash(osm_id, source, target)`, the `edge_id` formula:
 [Compute or match an id](../concepts/edge-ids.md#compute-or-match-an-id).
@@ -308,6 +309,19 @@ One row: where to open a map, and the time zone of the area.
 | `duckosm_version` | VARCHAR | the duckOSM version that built it |
 | `build_config` | VARCHAR | the config of the build as YAML (all keys, with the options of the command line). [`duckosm edit`](cli.md#edit) builds the database again from it. NULL in a database from `duckosm extract`, or from `duckosm` without `--config` |
 | `build_dir` | VARCHAR | the folder in which the build ran: the relative paths of `build_config` are for this folder; NULL like `build_config` |
+
+### `fixes`
+
+One row: the fixes file that the build used, as it was at the build. The database keeps the rules that it was built
+with when the file moves, changes or is not there. Only a build writes this table. `net.fixes` reads it, and
+`net.fixes_changed()` compares it with the file at `path`.
+
+| Column | Type | Description |
+|---|---|---|
+| `yaml` | VARCHAR | the whole text of the fixes file |
+| `path` | VARCHAR | the path of the file, as the build got it |
+| `sha256` | VARCHAR | the SHA-256 of `yaml`, in hexadecimal |
+| `built_at` | TIMESTAMP | when the database was built |
 
 ### `boundary`
 

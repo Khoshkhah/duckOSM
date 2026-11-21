@@ -33,11 +33,19 @@ class Fixes(os.PathLike):
         self.changed = False                   # changes that are not saved
         self.data = (yaml.safe_load(self.loaded.read_text()) or {}) if self.loaded and self.loaded.is_file() else {}
 
+    @classmethod
+    def from_text(cls, text: str) -> "Fixes":
+        """The rules of the YAML text ``text``, with no loaded file and no save file (``net.fixes``: the rules of the build)."""
+        import yaml
+        f = cls()
+        f.data = yaml.safe_load(text) or {}
+        return f
+
     def __fspath__(self) -> str:
         from duckosm.errors import DuckOSMError
         path = self.path or self.loaded
         if self.changed or path is None:
-            raise DuckOSMError("the fixes have changes that are not saved: save the fixes first: fixes.save('name.yaml')")
+            raise DuckOSMError("the fixes have no file, or changes that are not saved: save the fixes first: fixes.save('name.yaml')")
         return str(path)
 
     def __str__(self) -> str:

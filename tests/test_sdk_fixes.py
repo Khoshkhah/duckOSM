@@ -43,7 +43,7 @@ def test_rebuild_and_diff(tmp_path):
     shutil.copy(DATA / "monaco.geojson", tmp_path / "monaco.geojson")
     net = duckosm.build(pbf=tmp_path / "monaco.osm.pbf", boundary=tmp_path / "monaco.geojson", modes=["driving"],
                         output=tmp_path / "monaco.duckdb", progress=False)
-    assert net.fixes is None
+    assert net.fixes is None and not net.has_fixes()
     two_way = net.sql("SELECT osm_id FROM driving.edges WHERE NOT oneway AND osm_id > 0 ORDER BY length_m DESC LIMIT 1").osm_id[0]
     slow = net.sql(f"SELECT osm_id FROM driving.edges WHERE osm_id NOT IN ({two_way}) AND osm_id > 0 "
                    "ORDER BY length_m DESC LIMIT 1").osm_id[0]
@@ -61,6 +61,18 @@ def test_rebuild_and_diff(tmp_path):
     assert all("maxspeed_kmh" in c for c, e in zip(speed.changed, speed.edge_id)
                if e in set(net.sql(f"SELECT edge_id FROM driving.edges WHERE osm_id = {slow}").edge_id))
     assert len(net.diff(net)) == 0
+    # main.fixes keeps the rules of the build: an edit or a delete of the file does not change net.fixes
+    import hashlib
+    text = (tmp_path / "osm_fixes.yaml").read_text()
+    rec = fixed.sql("SELECT yaml, sha256 FROM main.fixes")
+    assert rec.yaml[0] == text and rec.sha256[0] == hashlib.sha256(text.encode()).hexdigest()
+    assert fixed.has_fixes() and not fixed.fixes_changed()
+    Fixes(load=tmp_path / "osm_fixes.yaml").drop(way=int(slow)).save()
+    assert fixed.fixes_changed() and len(fixed.fixes) == 2, "fixes_changed sees the edit; net.fixes keeps the rules of the build"
+    (tmp_path / "osm_fixes.yaml").unlink()
+    assert len(fixed.fixes) == 2 and fixed.fixes.path is None
+    with pytest.raises(duckosm.DuckOSMError, match="not there"):
+        fixed.fixes_changed()
 
 
 def test_edit_serves_the_page(tmp_path):

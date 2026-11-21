@@ -786,12 +786,48 @@ class Network(os.PathLike):
     # ---- the OSM fixes: duckosm.fixes ------------------------------------------------------------------------------
     @property
     def fixes(self):
-        """The :class:`duckosm.fixes.Fixes` of the file that the network was built with, or None.
+        """The :class:`duckosm.fixes.Fixes` of the rules that the network was built with (the table ``main.fixes``), or None.
+        The rules are in memory, with no save file: ``net.fixes.save("name.yaml")`` writes them to a file that you choose.
+        A file from an older build has no ``main.fixes``: then the rules come from the file at the path of the build.
 
         >>> net.fixes"""
         from duckosm.fixes import Fixes
+        record = self._fixes_record()
+        if record is not None:
+            return Fixes.from_text(record["yaml"])
         path = self._meta().get("fixes")
         return Fixes(path) if path else None
+
+    def _fixes_record(self) -> dict | None:
+        """The row of ``main.fixes`` (``yaml``, ``path``, ``sha256``), or None."""
+        if "main.fixes" not in self.tables():
+            return None
+        rows = self.sql("SELECT yaml, path, sha256 FROM main.fixes LIMIT 1")
+        return rows.iloc[0].to_dict() if len(rows) else None
+
+    def has_fixes(self) -> bool:
+        """True when the network was built with a fixes file (``main.fixes`` has a row, or, in a file from an older build,
+        the build names a fixes file).
+
+        >>> net.has_fixes()"""
+        return self._fixes_record() is not None or bool(self._meta().get("fixes"))
+
+    def fixes_changed(self) -> bool:
+        """True when the fixes file at the path of the build is now different from the rules that the network was built
+        with (``main.fixes``): then build again. False when they are the same. Stops with a message when the network has
+        no fixes, or when the file is not there.
+
+        >>> net.fixes_changed()"""
+        import hashlib
+        record = self._fixes_record()
+        if record is None:
+            raise DuckOSMError("fixes_changed: this network has no record of its fixes (main.fixes): "
+                               "it was built with no fixes file, or by an older duckOSM")
+        path = Path(record["path"])
+        if not path.is_file():
+            raise DuckOSMError(f"fixes_changed: the fixes file of the build is not there: {path}. "
+                               "net.fixes has the rules of the build: net.fixes.save('name.yaml') writes them again")
+        return hashlib.sha256(path.read_text().encode()).hexdigest() != record["sha256"]
 
     @property
     def saved(self) -> bool:

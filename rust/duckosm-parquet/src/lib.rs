@@ -1033,6 +1033,40 @@ pub fn write_metadata_to<W: Write + Send>(out: W, m: &Metadata) -> Result<(), St
     })
 }
 
+/// The row of `main.fixes`: the fixes file that the build used, as it was at the build.
+pub struct FixesRecord {
+    /// The whole text of the file.
+    pub yaml: String,
+    /// The path of the file, as the build got it.
+    pub path: String,
+    /// The SHA-256 of the text, in hexadecimal.
+    pub sha256: String,
+    /// Microseconds since 1970 (UTC).
+    pub built_at: i64,
+}
+
+/// Write `main.fixes` (one row).
+pub fn write_fixes_to<W: Write + Send>(out: W, r: &FixesRecord) -> Result<(), String> {
+    let fields = vec![
+        field("yaml", DataType::Utf8),
+        field("path", DataType::Utf8),
+        field("sha256", DataType::Utf8),
+        field("built_at", DataType::Timestamp(TimeUnit::Microsecond, None)),
+    ];
+    write_rows(out, fields, std::slice::from_ref(r), |c| {
+        let mut at = TimestampMicrosecondBuilder::new();
+        for r in c {
+            at.append_value(r.built_at);
+        }
+        vec![
+            texts(c.iter().map(|r| Some(r.yaml.as_str()))),
+            texts(c.iter().map(|r| Some(r.path.as_str()))),
+            texts(c.iter().map(|r| Some(r.sha256.as_str()))),
+            Arc::new(at.finish()),
+        ]
+    })
+}
+
 /// Write rows as a plain Parquet file, one row group for each `ROW_GROUP` rows: `batch` makes the columns of a part,
 /// each with its name and whether it can hold NULL. The writer keeps the schema of the first part, so the flag must
 /// not come from the data of a part.

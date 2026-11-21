@@ -256,6 +256,7 @@ pub fn write_whole_area_tables(out: &Path, boundary: &str, p: &crate::Params) ->
         lookup,
     };
     crate::write_area_tables(&area, |name| File::create(out.join(name)).map(BufWriter::new).map_err(io))?;
+    crate::write_fixes_record(p, built_at(p), |name| File::create(out.join(name)).map(BufWriter::new).map_err(io))?;
     if opts.calculate_costs {
         write_transfers(out, modes)?;
     }
