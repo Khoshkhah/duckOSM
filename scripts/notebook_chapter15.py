@@ -17,10 +17,13 @@ ch = Chapter(15, "15_ml", "Graph machine learning",
 
 ch.md(f"""## A road network as a graph for a model
 
-Graph machine learning trains a model on a graph. The model learns one value for each node or each arc from two
-inputs: the features of the node or arc (numbers that describe it) and the values of its neighbours. A road network
-is a good input, because the value of a road depends on the roads that it connects to. Some questions that a model
-can answer:
+A **graph** is a set of dots (the **nodes**) joined by lines (the **arcs**). A road network is a graph: the junctions
+are dots and the roads are lines between them.
+
+**Graph machine learning** trains a model that learns a value for each node or each arc. It uses two things: the
+numbers that describe each node or arc (its **features**, for example the length of a road), and the values of its
+neighbors. A road network is a good case for it, because a road is like the roads that it connects to: a quiet side
+street is next to other quiet streets. Some questions that a model can answer:
 
 - Which speed limit has a road where OSM has no `maxspeed` tag?
 - How many vehicles use a road that has no traffic sensor, when its neighbours have sensors?
@@ -43,6 +46,40 @@ turn has no arc, so a value does not flow across a turn that a car cannot make.
 > **Key idea:** each graph keeps the `edge_id`. The model predicts one value for each row, and the `edge_id` of the row
 > takes the value back to its road. Then the value joins to the network, to the map and to your own data (chapter 4).""")
 
+ch.md("""## How a model reads a graph: three tables
+
+A model cannot read a drawing of dots and lines. A graph library keeps a graph as three tables of numbers. The small
+network below has 3 junctions (0, 1 and 2) and 3 one-way roads: 0 to 1, 1 to 2, and 2 to 0.
+
+**1. The arcs.** Two lists: the start node and the end node of each arc. Arc 0 goes from node 0 to node 1.
+
+| | arc 0 | arc 1 | arc 2 |
+|---|---|---|---|
+| from | 0 | 1 | 2 |
+| to | 1 | 2 | 0 |
+
+**2. The node features.** One row for each node, with the numbers that describe it.
+
+| node | lon | lat |
+|---|---|---|
+| 0 | 7.42 | 43.73 |
+| 1 | 7.43 | 43.74 |
+| 2 | 7.41 | 43.74 |
+
+**3. The arc features.** One row for each arc, in the same order as the arcs.
+
+| arc | length_m | maxspeed_kmh | lanes |
+|---|---|---|---|
+| 0 | 120 | 50 | 2 |
+| 1 | 80 | 30 | 1 |
+| 2 | 200 | 50 | 2 |
+
+A node is a row number in these tables, not an id. A fourth list keeps the id of duckOSM for each row (`edge_id` or
+`node_id`), so that a value that the model predicts for a row goes back to its road.
+
+`graph_arrays` gives these tables for Monaco: 1,768 nodes and 2,840 arcs in the junction graph. `to_pyg` and `to_dgl`
+give the same tables in the form that PyTorch Geometric and DGL read.""")
+
 ch.md("""## Open the network of chapter 1
 
 Chapter 1 builds Monaco with three modes (driving, walking and cycling) and saves it as `monaco.duckdb`. This chapter
@@ -54,8 +91,8 @@ turn graph.""")
 
 ch.md("""## The feature arrays: `graph_arrays`
 
-A graph library reads a graph as arrays: the two ends of each arc, a matrix of node features and a matrix of arc
-features. `duckosm.ml.graph_arrays` gives these arrays as NumPy arrays in a dict. The PyTorch Geometric and DGL
+`duckosm.ml.graph_arrays` gives the three tables of the section above as NumPy arrays in a dict: `src` and `dst`
+(the arcs), `x` (the node features) and `edge_attr` (the arc features), with the ids of the rows. The PyTorch Geometric and DGL
 formats later in this chapter are the same arrays as tensors.
 
 How it works:
