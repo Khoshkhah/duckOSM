@@ -9,314 +9,405 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from notebook_book import IMAGES, Chapter  # noqa: E402
 
 ch = Chapter(15, "15_ml", "Graph machine learning",
-             "The road graph of an area for networkx, rustworkx, PyTorch Geometric and DGL, keyed by edge_id",
-             learn="the junction graph and the turn graph; networkx and rustworkx graphs; the feature arrays; a PyTorch "
-                   "Geometric graph; a small graph neural network that learns the speed limits; how a prediction goes back "
-                   "to its edge",
-             time="about 4 minutes (the install of PyTorch included)", extras="ml,graph,viz", next_=None)
+             "The road graph of an area as arrays and tensors for a graph neural network, keyed by edge_id",
+             learn="the junction graph and the turn graph; the feature arrays and how their rows map to the ids; your own "
+                   "feature columns; the PyTorch Geometric, DGL and NumPy formats; a graph neural network that learns the "
+                   "speed limits; the predictions on the map",
+             time="about 4 minutes (the install of PyTorch Geometric included)", extras="ml,viz", next_=None)
 
-ch.md(f"""## Two graphs of one road network
+ch.md(f"""## A road network as a graph for a model
 
-A road network is a graph, but there are two ways to make it one. Each way answers other questions, and duckOSM gives
-both.
+Graph machine learning trains a model on a graph. The model learns one value for each node or each arc from two
+inputs: the features of the node or arc (numbers that describe it) and the values of its neighbours. A road network
+is a good input, because the value of a road depends on the roads that it connects to. Some questions that a model
+can answer:
 
-- The **junction graph** (`graph="nodes"`): a node is a junction, and an arc is an edge, one direction of a road. This
-  is the graph of OSMnx and of most map tools. Use it when the question is about places: which junctions are central,
-  how the streets connect.
-- The **turn graph** (`graph="turns"`): a node is an edge, and an arc is a legal turn from one edge to the next. This
-  is the routing graph of duckOSM (`<mode>.edge_graph`). A forbidden turn has no arc. Use it when the question is about
-  roads: a value for each road (a speed, a flow, a class), or a route that obeys the turn rules.
+- Which speed limit has a road where OSM has no `maxspeed` tag?
+- How many vehicles use a road that has no traffic sensor, when its neighbours have sensors?
+- Which road class has a road that OSM tags badly?
 
-<img src="{IMAGES}/ml-two-graphs.svg" alt="The junction graph: junctions joined by edges. The turn graph: edges joined by turns" width="100%">
+There are two ways to make a graph from a road network. duckOSM gives both.
+
+<img src="{IMAGES}/ml-two-graphs.svg" alt="The junction graph: junctions joined by edges. The turn graph: edges joined by legal turns" width="100%">
 
 | Graph | A node is | An arc is | Node features | Arc features |
 |---|---|---|---|---|
-| `graph="nodes"` | a junction | an edge | `lon`, `lat` | the `features` columns of the edge |
-| `graph="turns"` | an edge | a legal turn | the `features` columns of the edge | `cost`: the seconds of the first edge |
+| junction graph, `graph="nodes"` | a junction | an edge (one direction of a road) | `lon`, `lat` | the columns of the edge that you choose |
+| turn graph, `graph="turns"` | an edge | a legal turn from one edge to the next | the columns of the edge that you choose | `cost`: the seconds of the first edge |
 
-The module `duckosm.ml` makes these graphs for five libraries:
+Use the **junction graph** when the value belongs to a place: a junction, a crossing, a bus stop at a junction. Use the
+**turn graph** when the value belongs to a road: a speed, a flow, a road class. In the turn graph each road is a
+node, so the usual node models of a graph library (node classification, node regression) work on roads. A forbidden
+turn has no arc, so a value does not flow across a turn that a car cannot make.
 
-| Call | Library | Graph |
-|---|---|---|
-| `to_networkx` | networkx | the turn graph, a `DiGraph` |
-| `to_networkx_nodes` | networkx | the junction graph, a `MultiDiGraph` (as OSMnx) |
-| `to_rustworkx` | rustworkx | either graph, a `PyDiGraph` |
-| `graph_arrays` | numpy | the index and feature arrays, for any library |
-| `to_pyg` | PyTorch Geometric | either graph, a `Data` object |
-| `to_dgl` | DGL | either graph, a `DGLGraph` |
-
-DuckDB makes the index arrays of each graph in SQL. Python only puts them into the objects of the library.
-
-> **Key idea:** each graph keeps the `edge_id`. A model predicts a value for each node or arc, and the `edge_id` takes
-> each value back to its road. Then the value joins to the network, to a map and to your own data (chapter 4).""")
+> **Key idea:** each graph keeps the `edge_id`. The model predicts one value for each row, and the `edge_id` of the row
+> takes the value back to its road. Then the value joins to the network, to the map and to your own data (chapter 4).""")
 
 ch.md("""## Open the network of chapter 1
 
-Chapter 1 builds Monaco with three modes (driving, walking and cycling) and saves it as `monaco.duckdb`. This chapter opens that file with `duckosm.open`: it builds nothing. The graphs use the driving network.""")
+Chapter 1 builds Monaco with three modes (driving, walking and cycling) and saves it as `monaco.duckdb`. This chapter
+opens that file with `duckosm.open`: it builds nothing. The graphs use the driving network.""")
 ch.code("""net = duckosm.open("monaco.duckdb")    # the network of chapter 1: Monaco, three modes
-net                                                   # the card""")
-ch.md("""The driving network of Monaco has 2840 edges. Each edge is one node of the turn
-graph and one arc of the junction graph.""")
-
-ch.md("""## networkx
-
-[networkx](https://networkx.org) is the common graph library of Python. It has hundreds of algorithms: shortest paths,
-centrality, components, communities. It keeps the graph in Python objects, so it is slow on large areas, but it is the
-fastest way to try an idea on a city.
-
-### The turn graph: `to_networkx`
-
-`net.driving.to_networkx()` is the same as `duckosm.ml.to_networkx(net.driving)`. It gives a `networkx.DiGraph`. A node
-is an `edge_id` and carries the data of its road: `name`, `highway`, `length_m`, `maxspeed_kmh`, `cost_s` and
-`geometry` (WKT). An arc is a legal turn. Its `weight` is the cost of the first edge:
-
-| `weight` | The weight of an arc |
-|---|---|
-| `"time"` (default) | the travel time of the first edge, in seconds (`cost_s`) |
-| `"length"` | the length of the first edge, in metres (`length_m`) |""")
-ch.code("""import networkx as nx                                     # the graph library
-
-g = net.driving.to_networkx()                              # the turn graph: a node is an edge_id
-first = next(iter(g.nodes))                                # one edge
-g.number_of_nodes(), g.number_of_edges(), first, g.nodes[first]["highway"], list(g.out_edges(first, data=True))""")
-ch.md("""The turn graph has 2840 nodes, one for each edge, and 5082 arcs, one for each legal
-turn. The first edge has two turns. Both arcs have the same weight (5.3 s), because the weight is the time of the first
-edge.""")
-
-ch.md("""### A route in the turn graph
-
-A shortest path in the turn graph is a route that obeys the turn restrictions, because a forbidden turn has no arc.
-The weight of the route is the time of each edge except the last one. Chapter 7 does the same with the Rust router of
-duckOSM. Here networkx finds the time from the first edge to edge 500 of the graph.""")
-ch.code("""target = list(g.nodes)[500]                                               # another edge
-nx.shortest_path_length(g, first, target, weight="weight")                # seconds, with the legal turns only""")
-ch.md("""The fastest legal route takes 266.4 seconds, not counting the time on the last
-edge.""")
-
-ch.md("""### The junction graph: `to_networkx_nodes`
-
-`duckosm.ml.to_networkx_nodes(net.driving)` gives the junction graph as a `networkx.MultiDiGraph`, in the layout of
-OSMnx: a node is a junction `node_id` with `x` and `y` (longitude and latitude), and each arc is a road with all the
-columns of `driving.edges`. The key of an arc is its `edge_id`, so two roads between the same two junctions stay two
-arcs. The graph has `crs` `EPSG:4326`, so OSMnx and momepy can use it (chapter 9).""")
-ch.code("""gn = duckosm.ml.to_networkx_nodes(net.driving)             # the junction graph, as OSMnx
-node, data = next(iter(gn.nodes(data=True)))              # one junction and its data
-type(gn).__name__, gn.number_of_nodes(), gn.number_of_edges(), gn.graph, data""")
-ch.code("""parts = list(nx.strongly_connected_components(g))         # the parts where each edge can reach each other edge
-len(parts), max(len(p) for p in parts)                     # in the turn graph""")
-ch.md("""**What the output shows.** The junction graph has 1768 junctions and 2840 arcs, the same edges as the turn
-graph. Each junction has its `x` and `y`, its `h3_cell` and its `tile`. The turn graph has 145 strongly connected parts.
-The largest part has 2614 of the 2840 edges. The other parts are short pieces: roads that end at the boundary of the
-area, and dead ends where no turn is allowed.
-
-> **Tip:** the top-level `duckosm.to_networkx(con, ...)` takes a DuckDB connection, for code that has a connection and
-> no `Network`. `duckosm.ml.to_networkx` takes a `Network`, a mode view or a path.""")
-
-ch.md("""## rustworkx
-
-[rustworkx](https://www.rustworkx.org) has many of the algorithms of networkx, written in Rust. It is often 10 to 100
-times faster, and it uses less memory. Its nodes are numbers (indices), not ids. `net.driving.to_rustworkx()` is the
-same as `duckosm.ml.to_rustworkx(net.driving)`:
-
-| Argument | Default | What it does |
-|---|---|---|
-| `graph` | `"turns"` | `"turns"`: a node is an `edge_id`. `"junctions"`: a node is `{node_id, x, y}` and an arc a road with its columns |
-| `weight` | `"time"` | the weight of a turn: `"time"` in seconds or `"length"` in metres |
-
-`h.attrs["index"]` gives the node index of an id, and `h[i]` gives the id of an index.""")
-ch.code("""import rustworkx as rx                                            # the graph library in Rust
-
-h = net.driving.to_rustworkx()                                     # the turn graph
-i, j = h.attrs["index"][first], h.attrs["index"][target]           # the indices of the two edges
-seconds = rx.dijkstra_shortest_path_lengths(h, i, float, goal=j)[j]  # the arc weight is a number of seconds
-h.num_nodes(), h.num_edges(), h[i] == first, seconds""")
-ch.code("""hj = duckosm.ml.to_rustworkx(net.driving, graph="junctions")       # the junction graph
-hj.num_nodes(), hj.num_edges()""")
-ch.md("""**What the output shows.** The rustworkx turn graph has the same 2840 nodes and 5082 arcs as the networkx graph.
-The index of the first edge gives back its `edge_id`. Dijkstra finds the same 266.4 seconds as networkx. The junction
-graph has 1768 nodes and 2840 arcs.""")
+net                                    # the card""")
+ch.md("""The driving network of Monaco has 2840 edges. Each edge is one arc of the junction graph and one node of the
+turn graph.""")
 
 ch.md("""## The feature arrays: `graph_arrays`
 
-A graph neural network reads a graph as arrays: the index pairs of the arcs, a matrix of node features and a matrix of
-arc features. `duckosm.ml.graph_arrays` gives these arrays as numpy, so you can use any library. `to_pyg` and `to_dgl`
-use the same arrays.
+A graph library reads a graph as arrays: the two ends of each arc, a matrix of node features and a matrix of arc
+features. `duckosm.ml.graph_arrays` gives these arrays as NumPy arrays in a dict. The PyTorch Geometric and DGL
+formats later in this chapter are the same arrays as tensors.
 
-| Key | What it is |
-|---|---|
-| `src`, `dst` | the node index at the start and at the end of each arc |
-| `x`, `x_names` | the node features, and the name of each column |
-| `edge_attr`, `edge_attr_names` | the arc features, and the name of each column |
-| `num_nodes` | the number of nodes |
-| `edge_id` | the `edge_id` of each arc (`"nodes"`) or of each node (`"turns"`) |
-| `node_id` | the `node_id` of each node (`"nodes"` only) |
-| `graph`, `mode` | the kind of graph and the mode |
+How it works:
 
-`features` chooses the columns of `driving.edges` (default `length_m`, `maxspeed_kmh`, `lanes`). A text column, for
-example `highway`, becomes one 0/1 column for each value (`highway=primary`). A boolean column becomes 0/1. NULL becomes
-0.""")
-ch.code("""arrays = duckosm.ml.graph_arrays(net.driving, features=["length_m", "maxspeed_kmh", "lanes", "highway"])  # the junction graph
-{k: getattr(v, "shape", v) for k, v in arrays.items() if not k.endswith("names")}                     # the size of each array""")
-ch.code("""arrays["edge_attr_names"]          # the names of the arc feature columns""")
-ch.md("""The junction graph has 1768 nodes and 2840 arcs. `x` has 2 columns (`lon`, `lat`).
-`edge_attr` has 13 columns: the three numbers, then one column for each of the 10 `highway` values of the driving
-roads of Monaco.""")
-ch.code("""turn_arrays = duckosm.ml.graph_arrays(net.driving, graph="turns", features=["length_m", "lanes", "highway"])
-{k: getattr(v, "shape", v) for k, v in turn_arrays.items() if not k.endswith("names")}, turn_arrays["edge_attr_names"]""")
-ch.md("""In the turn graph the 2840 edges are the nodes, with 12 feature columns (`length_m`,
-`lanes` and 10 `highway` columns). The 5082 arcs are the turns, with one feature, `cost`.""")
+1. DuckDB reads the nodes and the arcs of the mode, sorted by their id. The row number of a node in this order is its
+   index in the arrays.
+2. The `features` columns become numbers (`float32`). The next section tells how each type of column changes.
+3. The arrays go into a dict, with the names of the feature columns and the ids of the rows.
 
-ch.md("""## PyTorch Geometric
+| Argument | Default | What it does |
+|---|---|---|
+| `net` | | a `Network`, a mode view (`net.driving`) or the path of a `.duckdb` file |
+| `graph` | `"nodes"` | `"nodes"`: the junction graph. `"turns"`: the turn graph |
+| `features` | `DEFAULT_FEATURES` | the columns of `<mode>.edges` that become features: `length_m`, `maxspeed_kmh`, `lanes` |
 
-[PyTorch Geometric](https://pyg.org) (PyG) is the graph library of PyTorch. `duckosm.ml.to_pyg` gives a
-`torch_geometric.data.Data` object with the arrays of `graph_arrays` as tensors:
+| Key | Type | Shape, junction graph | Shape, turn graph | What it is |
+|---|---|---|---|---|
+| `src`, `dst` | `int64` | (arcs,) | (arcs,) | the index of the node at the start and at the end of each arc |
+| `x` | `float32` | (nodes, 2) | (nodes, features) | the node features, one row for each node |
+| `x_names` | list of text | 2 names | one name for each feature | the name of each column of `x` |
+| `edge_attr` | `float32` | (arcs, features) | (arcs, 1) | the arc features, one row for each arc |
+| `edge_attr_names` | list of text | one name for each feature | 1 name | the name of each column of `edge_attr` |
+| `num_nodes` | int | | | the number of nodes |
+| `edge_id` | `int64` | (arcs,) | (nodes,) | the `edge_id` of each arc (junction graph) or of each node (turn graph) |
+| `node_id` | `int64` | (nodes,) | no key | the `node_id` of each junction |
+| `graph`, `mode` | text | | | `"nodes"` or `"turns"`, and the mode |
 
-| Attribute | What it is |
-|---|---|
-| `edge_index` | the `src` and `dst` of each arc, a tensor of 2 rows |
-| `x`, `edge_attr` | the node features and the arc features |
-| `num_nodes` | the number of nodes |
-| `edge_id` | a tensor: the `edge_id` of each arc (`"nodes"`) or of each node (`"turns"`) |
-| `node_id` | the `node_id` of each node (`"nodes"` only) |
-| `x_names`, `edge_attr_names` | the names of the feature columns |
+The cell makes the junction graph with the default features and prints the type and the shape of each array.""")
+ch.code("""arrays = duckosm.ml.graph_arrays(net.driving)    # the junction graph, the default features
 
-The `ml` extra installs `torch` and `torch_geometric`.
+for key, value in arrays.items():                # each key of the dict
+    if hasattr(value, "shape"):                  # a NumPy array: its type and shape
+        print(f"{key:16} {str(value.dtype):8} {value.shape}")
+    else:                                        # a number, a text or a list of names
+        print(f"{key:16} {value}")""")
+ch.md("""The junction graph has 1768 nodes (junctions) and 2840 arcs (edges). `x` has two columns, `lon` and `lat`.
+`edge_attr` has the three default features of each edge. `edge_id` has one id for each arc, and `node_id` one id for
+each node.""")
 
-### The junction graph
+ch.md("""### How a column becomes numbers
 
-A text column (`highway`) becomes one 0/1 column for each value. `edge_id` is a tensor with the `edge_id` of each arc,
-so each prediction goes back to its edge.""")
-ch.code("""data = duckosm.ml.to_pyg(net.driving, features=["length_m", "maxspeed_kmh", "lanes", "highway"])    # the junction graph
-data                                                                                                 # its tensors""")
-ch.code("""data.edge_attr_names[:6], data.edge_id[:3]    # the first feature columns, and the first edge ids""")
-ch.md("""The `Data` object has the sizes of `graph_arrays`: 1768 nodes with 2 features, 2840
-arcs with 13 features. The first three `edge_id`s are the same numbers as in `driving.edges`.""")
+A model reads only numbers, and a missing value is not a number. So `graph_arrays` changes each feature column by its
+type:
 
-ch.md("""### The turn graph, and a model
+| Type of the column | Example | What it becomes |
+|---|---|---|
+| a number (`FLOAT`, `INTEGER`) | `length_m`, `lanes` | one column, the same value as `float32` |
+| `BOOLEAN` | `oneway` | one column: 1 for true, 0 for false |
+| text (`VARCHAR`) | `highway`, `surface` | one 0/1 column for each value of the area (a "one-hot" column), named `<column>=<value>` |
+| a missing value (NULL) | `surface` of many edges | 0 in a number column, 0 in each one-hot column of a text column |
 
-On the turn graph each node is an edge. A model on this graph predicts one value for each road. The model of this
-section learns the speed limit of an edge from its length, its lanes, its road class and the edges that it connects
-to. It trains on 80 % of the edges, and the other 20 % check it.
+The next cell makes the turn graph with four features of three kinds: a number, a boolean and two text columns. The
+column `surface` has no value on many edges of Monaco.""")
+ch.code("""turn_arrays = duckosm.ml.graph_arrays(net.driving, graph="turns",
+                                      features=["length_m", "oneway", "highway", "surface"])    # the turn graph
+turn_arrays["x"].shape, turn_arrays["x_names"]                         # the node features and their names""")
+ch.code("""no_surface = turn_arrays["x"][:, -3:].sum(axis=1) == 0    # the edges with 0 in each of the 3 surface columns
+no_surface.sum()                                           # the edges without a surface tag""")
+ch.md("""**What the output shows.** The 2840 edges are the nodes of the turn graph, and each has 15 feature columns:
+`length_m`, `oneway` (0 or 1), 10 `highway` columns and 3 `surface` columns. The roads of Monaco have 10 `highway`
+values and 3 `surface` values, so these are the one-hot columns. 852 edges have no `surface` tag, and their 3 surface
+columns are all 0.
 
-The first cell makes the turn graph, the target (the `maxspeed_kmh` of each edge) and the features. The target must
-be in the order of the nodes, and the nodes of the turn graph are in the order of `edge_id`. So the SQL query reads
-the speeds `ORDER BY edge_id`.""")
-ch.code("""import torch                                                                    # PyTorch
-from torch_geometric.nn import GCNConv                                          # a graph convolution
+> **Warning:** the one-hot columns come from the values of the area. Another area can have another set of `highway`
+> values, so its `x` has other columns. Before you use a model on a second area, put its columns in the order of the
+> first area (`x_names` gives the names). A missing number also becomes 0, the same as a real 0. When this is a
+> problem, add a 0/1 column that tells if the value is there (the section "Add your own column" does this).""")
 
-turns = duckosm.ml.to_pyg(net.driving, graph="turns", features=["length_m", "lanes", "highway"])   # the turn graph
-speed = torch.tensor(net.sql("SELECT maxspeed_kmh FROM driving.edges ORDER BY edge_id").maxspeed_kmh.to_numpy(),
-                     dtype=torch.float32)                                       # the target, in the order of the nodes
-x = (turns.x - turns.x.mean(0)) / (turns.x.std(0) + 1e-6)                       # the features, scaled
-test = torch.rand(turns.num_nodes, generator=torch.Generator().manual_seed(0)) < 0.2    # 20 % of the edges to check
+ch.md("""### The rows and the ids
+
+A model gives one value for each row of `x` (or of `edge_attr`). To use the value, you must know which road or junction
+the row is. The rows are in a fixed order:
+
+| Graph | Row `i` of `x` | Arc `k` |
+|---|---|---|
+| junction graph | the junction `node_id[i]`, sorted by `node_id` | the edge `edge_id[k]`, sorted by `edge_id`, from junction `src[k]` to junction `dst[k]` |
+| turn graph | the edge `edge_id[i]`, sorted by `edge_id` | the turn from edge `edge_id[src[k]]` to edge `edge_id[dst[k]]` |
+
+The turn graph takes its arcs from the table `driving.edge_graph`. This table also has the turns of pedestrians, buses
+and private roads. `graph_arrays` keeps only the turns of the mode (the turns for cars in the driving network). The
+arc feature `cost` is the travel time of the first edge of the turn, in seconds.
+
+The cell makes a pandas Series that gives the row of each `edge_id`, then reads the first turn.""")
+ch.code("""import numpy as np                                                 # the arrays
+import pandas as pd                                                # the tables
+
+row_of = pd.Series(np.arange(turn_arrays["num_nodes"]), index=turn_arrays["edge_id"])   # edge_id -> row of x
+first_from = turn_arrays["edge_id"][turn_arrays["src"][0]]         # the first edge of turn 0
+first_to = turn_arrays["edge_id"][turn_arrays["dst"][0]]           # the second edge of turn 0
+first_from, first_to, row_of[first_to], turn_arrays["edge_attr"][0]""")
+ch.md("""Turn 0 goes from edge 414242052250797 (row 0, the smallest `edge_id`) to edge 4950030941241418106, which is row
+1542 of `x`. Its `cost` is 5.3 seconds, the travel time of the first edge.""")
+
+ch.md("""### Add your own column
+
+`features` takes only columns of `driving.edges`. Your own data, for example the traffic counts of chapter 4, joins
+by `edge_id`:
+
+1. Make a table with `edge_id` and your value.
+2. Put it in the order of the rows: `reindex` with the `edge_id` array of the graph. A road without a value gets NaN.
+3. Change NaN to 0, add a 0/1 column that tells which roads have a value, and add the two columns to `x`.
+
+The counts here are made up, in the same way as chapter 4: a random count from 100 to 999 vehicles per hour for each
+primary, secondary and tertiary edge.""")
+ch.code("""edges = net.sql("SELECT edge_id, highway FROM driving.edges")              # SQL: the id and the road class of each edge
+main = edges[edges.highway.isin(["primary", "secondary", "tertiary"])]      # the main roads
+rng = np.random.default_rng(1)                                              # the same numbers in each run
+counts = pd.DataFrame({"edge_id": main.edge_id,
+                       "vehicles_per_hour": rng.integers(100, 1000, len(main))})    # step 1: your data
+len(counts)""")
+ch.code("""vph = counts.set_index("edge_id").vehicles_per_hour.reindex(turn_arrays["edge_id"])   # step 2: in the order of the rows
+has_count = vph.notna().astype("float32")                                  # step 3: 1 where the road has a count
+x_own = np.column_stack([turn_arrays["x"], vph.fillna(0), has_count])      # x with two more columns
+x_own.shape, int(has_count.sum())""")
+ch.md("""1013 main-road edges have a count. `x_own` has 2840 rows and 17 columns: the 15 columns of `turn_arrays["x"]`,
+the count, and the 0/1 column. Row `i` is still the edge `turn_arrays["edge_id"][i]`, so a model can use `x_own` in
+place of `x`.""")
+
+ch.md("""## The graph formats
+
+Each graph library keeps a graph in its own object. `duckosm.ml` gives the arrays of `graph_arrays` in two of them,
+and the plain arrays serve any other library.
+
+### PyTorch Geometric: `to_pyg`
+
+[PyTorch Geometric](https://pyg.org) (PyG) is the graph library of PyTorch, and the most used library for graph
+neural networks. `duckosm.ml.to_pyg` takes the same arguments as `graph_arrays` and gives a
+`torch_geometric.data.Data` object. The `ml` extra installs `torch` and `torch_geometric`.
+
+| Attribute | Type | Shape, junction graph | Shape, turn graph | What it is |
+|---|---|---|---|---|
+| `edge_index` | tensor `int64` | (2, arcs) | (2, arcs) | row 0 is `src`, row 1 is `dst` |
+| `x` | tensor `float32` | (nodes, 2) | (nodes, features) | the node features |
+| `edge_attr` | tensor `float32` | (arcs, features) | (arcs, 1) | the arc features |
+| `num_nodes` | int | | | the number of nodes |
+| `edge_id` | tensor `int64` | (arcs,) | (nodes,) | the `edge_id` of each arc or of each node |
+| `node_id` | tensor `int64` | (nodes,) | no attribute | the `node_id` of each junction |
+| `x_names`, `edge_attr_names` | list of text | | | the names of the feature columns |
+
+`to_pyg` gives no target `y` and no masks. You add them for your task, as the model section shows.""")
+ch.code("""data = duckosm.ml.to_pyg(net.driving)        # the junction graph, the default features
+data                                         # the sizes of its attributes""")
+ch.code("""for key, value in data:                      # each attribute of the Data object
+    if hasattr(value, "dtype"):                  # a tensor: its type and shape
+        print(f"{key:16} {str(value.dtype):14} {tuple(value.shape)}")
+    else:                                        # a number or a list of names
+        print(f"{key:16} {value}")""")
+ch.md("""The `Data` object has the arrays of `graph_arrays` as tensors: 1768 junctions with 2 features, and 2840 arcs
+in `edge_index` with 3 features each. The names of the feature columns stay plain Python lists.
+
+The turn graph is the same call with `graph="turns"`. The model of the next section uses it, with three features:
+`length_m`, `lanes` and `highway`. The speed limit is not a feature, because it is the value that the model learns.""")
+ch.code("""turns = duckosm.ml.to_pyg(net.driving, graph="turns", features=["length_m", "lanes", "highway"])   # the turn graph
 turns""")
-ch.md("""The turn graph has 2840 nodes with 12 features and 5082 arcs with 1 feature, the
-same sizes as `graph_arrays` gave.
+ch.md("""The turn graph has 2840 nodes (edges) with 12 features: `length_m`, `lanes` and 10 `highway` columns. It has
+5082 arcs (turns) with 1 feature, `cost`. It has no `node_id`.""")
 
-The model has two graph convolutions (GCN). Each convolution mixes the features of an edge with the features of the
-edges that it connects to. After two of them, the value of an edge depends on the edges up to two turns away. A linear
-layer then gives one number, the speed. The loss is the mean absolute error, in km/h.""")
-ch.code("""class Model(torch.nn.Module):                                                   # two graph convolutions and a line
-    def __init__(self, n):
-        super().__init__()
-        self.a, self.b, self.out = GCNConv(n, 32), GCNConv(32, 32), torch.nn.Linear(32, 1)
+ch.md("""### DGL: `to_dgl`
 
-    def forward(self, x, edge_index):
-        x = torch.relu(self.a(x, edge_index))                                   # the edge and its neighbours
-        x = torch.relu(self.b(x, edge_index))                                   # and their neighbours
-        return self.out(x).squeeze(-1)                                          # the speed
+[DGL](https://www.dgl.ai) is another graph library for PyTorch. `duckosm.ml.to_dgl` takes the same arguments and gives
+a `dgl.DGLGraph`. A `DGLGraph` keeps the arcs inside, and the features in two dicts: `ndata` for the nodes and `edata`
+for the arcs.
 
-torch.manual_seed(0)                                                            # the same result at each run
-model = Model(x.shape[1])
-opt = torch.optim.Adam(model.parameters(), lr=0.01)
-for epoch in range(300):                                                        # train on the 80 %
-    opt.zero_grad()
-    loss = torch.nn.functional.l1_loss(model(x, turns.edge_index)[~test], speed[~test])
-    loss.backward()
-    opt.step()
-predicted = model(x, turns.edge_index).detach()                                 # the speed of each edge
-{"error of the model (km/h)": round(float((predicted - speed)[test].abs().mean()), 1),
- "error of the mean speed (km/h)": round(float((speed[~test].mean() - speed[test]).abs().mean()), 1)}    # on the 20 %""")
-ch.md("""**What the output shows.** On the 20 % of the edges that the model did not see, its mean error is 5.6 km/h.
-A guess of the mean speed for each edge has an error of 13.2 km/h. So the road class and the neighbours tell the model
-much about the speed limit.
+| Where | Junction graph | Turn graph |
+|---|---|---|
+| `g.ndata["x"]` | (nodes, 2), `float32` | (nodes, features), `float32` |
+| `g.edata["edge_attr"]` | (arcs, features), `float32` | (arcs, 1), `float32` |
+| `edge_id`, `int64` | in `g.edata`: one for each arc | in `g.ndata`: one for each node |
+| `g.ndata["node_id"]`, `int64` | one for each junction | no key |
+| `g.edges()` | the `src` and `dst` tensors | the `src` and `dst` tensors |
 
-> **Warning:** most edges of Monaco have 30, 20 or 50 km/h (955, 854 and 776 of the 2840 edges). Where OSM has no
-> `maxspeed` tag, duckOSM gives the default speed of the road class. So part of the target is a rule of the road
-> class, and a model learns that rule fast. Use a target that you measured (for example the flow of chapter 4) for a
-> real study.""")
-
-ch.md("""### The prediction on a map
-
-`turns.edge_id` gives the `edge_id` of each node, so a pandas Series of the predictions with this index is keyed by
-`edge_id`. `net.driving.map(color_by=...)` colors each road by the value of its `edge_id` (chapter 3).""")
-ch.code("""import pandas as pd                                                             # to key the result by edge_id
-
-net.driving.map(color_by=pd.Series(predicted.numpy(), index=turns.edge_id.numpy(), name="predicted km/h"))    # the map""")
-ch.md("""**What the output shows.** The main roads, along the coast and through the tunnel loop in the west, have predicted
-speeds of about 50 to 70 km/h. The small streets have about 20 to 30 km/h. Each color comes from the `edge_id` of its
-road, so the same Series can join to any other table of the file.""")
-
-ch.md("""## DGL
-
-[DGL](https://www.dgl.ai) is another graph library for PyTorch. `duckosm.ml.to_dgl` gives a `dgl.DGLGraph` with the
-same arrays:
-
-| Where | What |
-|---|---|
-| `g.ndata["x"]`, `g.edata["edge_attr"]` | the node features and the arc features |
-| `g.edata["edge_id"]` (`"nodes"`) or `g.ndata["edge_id"]` (`"turns"`) | the `edge_id` of each arc or node |
-| `g.ndata["node_id"]` | the `node_id` of each junction (`"nodes"` only) |
+The names of the feature columns are not in a `DGLGraph`. `graph_arrays` gives them (`x_names`, `edge_attr_names`).
 
 ```python
 g = duckosm.ml.to_dgl(net.driving, graph="turns", features=["length_m", "lanes", "highway"])   # needs dgl
-g.ndata["x"].shape, g.ndata["edge_id"][:3]
+g.num_nodes(), g.num_edges(), g.ndata["x"].shape, g.ndata["edge_id"][:3]
 ```
 
-> **Warning:** DGL has no wheel on PyPI for the new versions of PyTorch, so the `ml` extra does not install it, and
-> this notebook does not run the call. Install DGL from its own page (dgl.ai) for your version of PyTorch and CUDA.
-> `graph_arrays` gives the same arrays for any other library.""")
+> **Warning:** this notebook does not run the DGL cell. The `dgl` package on PyPI (version 2.2.1) has wheels for
+> Windows only, so `pip install dgl` fails on Linux and macOS, and the `ml` extra does not install it. DGL gives its
+> Linux wheels on its own page (dgl.ai), one for each version of PyTorch and CUDA.""")
+
+ch.md("""### Plain arrays for other libraries
+
+For a library without its own duckOSM call, use the NumPy arrays of `graph_arrays`:
+
+| Library | How to use the arrays |
+|---|---|
+| NumPy, SciPy | `src` and `dst` are the arc list. `scipy.sparse.coo_matrix((np.ones(len(src)), (src, dst)))` is the adjacency matrix |
+| JAX (jraph) | `jax.numpy.asarray(x)`. `senders=src`, `receivers=dst`, `nodes=x`, `edges=edge_attr` |
+| scikit-learn | `x` is a feature matrix with one row for each node, for a model that does not use the arcs |
+
+The cell adds a graph feature with NumPy only: the number of legal turns out of each edge. `np.bincount` counts how
+often each node index is in `src`.""")
+ch.code("""turns_out = np.bincount(turn_arrays["src"], minlength=turn_arrays["num_nodes"])   # the turns out of each edge
+pd.Series(turns_out).value_counts().sort_index()                                  # the number of edges for each count""")
+ch.md("""Most edges have one or two legal turns out of them (974 and 1424 of the 2840 edges). 26 edges have no turn:
+each is a dead end for cars or a road that leaves the area. You can add `turns_out` to `x` as a feature.""")
+
+ch.md("""## Train a model: the speed limits
+
+The model learns the speed limit of an edge from its length, its lanes, its road class and the edges that it connects
+to. It trains on 80 % of the edges, and the other 20 % test it.
+
+### The target and the split
+
+The target is the `maxspeed_kmh` of each edge, in the order of the rows of the turn graph. `reindex` with
+`turns.edge_id` puts the speeds in this order, as in "Add your own column". PyG keeps the target in `y` and the split
+in two masks, `train_mask` and `test_mask`. The features are scaled to a mean of 0 and a standard deviation of 1,
+because a network learns badly from columns of very different sizes (`length_m` is up to hundreds of meters, a one-hot
+column is 0 or 1).""")
+ch.code("""import torch                                                                    # PyTorch
+
+speeds = net.sql("SELECT edge_id, maxspeed_kmh FROM driving.edges")             # SQL: the speed limit of each edge
+y = speeds.set_index("edge_id").maxspeed_kmh.reindex(turns.edge_id.numpy())     # in the order of the rows
+turns.y = torch.tensor(y.to_numpy(), dtype=torch.float32)                       # the target
+turns.test_mask = torch.rand(turns.num_nodes, generator=torch.Generator().manual_seed(0)) < 0.2   # 20 % to test
+turns.train_mask = ~turns.test_mask                                             # 80 % to train
+turns.x = (turns.x - turns.x.mean(0)) / (turns.x.std(0) + 1e-6)                 # the features, scaled
+turns""")
+ch.md("""The `Data` object now has `y`, one speed for each of the 2840 edges, and the two masks.
+
+### The model
+
+The model has two graph convolutions (GCN). A convolution mixes the features of each edge with the features of the
+edges that it connects to. After two of them, the value of an edge depends on the edges up to two turns away. A linear
+layer then gives one number, the speed.""")
+ch.code("""from torch_geometric.nn import GCNConv                                          # a graph convolution
+
+class SpeedModel(torch.nn.Module):                                              # two graph convolutions and a line
+    def __init__(self, n_features):
+        super().__init__()
+        self.conv1 = GCNConv(n_features, 32)
+        self.conv2 = GCNConv(32, 32)
+        self.out = torch.nn.Linear(32, 1)
+
+    def forward(self, x, edge_index):
+        x = torch.relu(self.conv1(x, edge_index))                               # the edge and its neighbours
+        x = torch.relu(self.conv2(x, edge_index))                               # and their neighbours
+        return self.out(x).squeeze(-1)                                          # one speed for each edge
+
+torch.manual_seed(0)                                                            # the same result at each run
+model = SpeedModel(turns.num_node_features)
+model""")
+
+ch.md("""### Train
+
+Each step of the loop predicts all speeds, measures the mean absolute error on the training edges (in km/h), and moves
+the weights of the model a little to make the error smaller. The loop does 300 steps.""")
+ch.code("""opt = torch.optim.Adam(model.parameters(), lr=0.01)                             # the optimizer
+for step in range(300):
+    opt.zero_grad()
+    predicted = model(turns.x, turns.edge_index)                                # a speed for each edge
+    loss = torch.nn.functional.l1_loss(predicted[turns.train_mask], turns.y[turns.train_mask])   # the error on the 80 %
+    loss.backward()
+    opt.step()
+round(loss.item(), 1)                                                           # the last training error, km/h""")
+
+ch.md("""### Test against a simple guess
+
+A model is useful only when it is better than a simple guess. The simple guess here is the mean speed of the training
+edges, the same for each edge. Both errors are on the 20 % of the edges that the model did not see.""")
+ch.code("""predicted = model(turns.x, turns.edge_index).detach()                           # the final speed of each edge
+test = turns.test_mask
+model_error = (predicted[test] - turns.y[test]).abs().mean()                    # the error of the model
+mean_guess = turns.y[turns.train_mask].mean()                                   # the simple guess
+guess_error = (mean_guess - turns.y[test]).abs().mean()                         # the error of the guess
+{"test edges": int(test.sum()), "model error (km/h)": round(model_error.item(), 1),
+ "mean-speed guess error (km/h)": round(guess_error.item(), 1)}""")
+ch.md("""**What the output shows.** On the test edges, the mean error of the model is 5.6 km/h. The mean-speed guess
+has an error of 13.2 km/h. So the road class and the neighbours tell the model much about the speed limit.
+
+> **Warning:** most edges of Monaco have 30, 20 or 50 km/h (955, 854 and 776 of the 2840 edges). Where OSM has no
+> `maxspeed` tag, duckOSM gives the default speed of the road class. So part of the target is a rule of the road
+> class, and a model learns that rule fast. For a real study, use a target that you measured, for example traffic
+> counts (chapter 4) or sensor data on the edges (chapter 11).""")
+
+ch.md("""## The predictions back on the network
+
+Row `i` of `predicted` is the edge `turns.edge_id[i]`. So a table with the two columns `edge_id` and the prediction
+joins to any table of the network. The cell joins the predictions to the name, the road class and the speed limit of
+each edge, and shows the five test edges with the largest error.""")
+ch.code("""result = pd.DataFrame({"edge_id": turns.edge_id.numpy(),                    # the edge of each row
+                       "predicted_kmh": predicted.numpy().astype("float64").round(1),
+                       "test": test.numpy()})
+info = net.sql("SELECT edge_id, name, highway, maxspeed_kmh FROM driving.edges")    # SQL: the data of each edge
+result = result.merge(info, on="edge_id")                                       # the join by edge_id
+result["error_kmh"] = (result.predicted_kmh - result.maxspeed_kmh).abs()
+result[result.test].nlargest(5, "error_kmh")""")
+ch.md("""The five largest errors are on primary roads with a speed limit of 30 km/h, two of them on the Boulevard du
+Larvotto. Most primary roads of Monaco have 70 or 50 km/h (123 and 57 of 197 edges), so the model gives these roads
+62.5 to 71.5 km/h. The road class and the neighbours do not tell the model about a local limit of 30 km/h.""")
+
+ch.md("""`net.driving.map(color_by=...)` colors each road by a pandas Series whose index is the `edge_id` (chapter 3).
+The name of the Series is the title of the legend.""")
+ch.code("""predicted_speed = result.set_index("edge_id").predicted_kmh.rename("predicted km/h")   # keyed by edge_id
+net.driving.map(color_by=predicted_speed)                                                # the map""")
+ch.md("""**What the output shows.** The main roads along the coast and through the middle of the city have the highest
+predicted speeds (green and yellow). The small streets have the lowest (dark blue). The roads in tunnels are pale, for
+example the loop in the west. Each color comes from the `edge_id` of its road.""")
+
+ch.md("""## What to do next
+
+- Use a measured target: traffic counts or sensor data joined by `edge_id` (chapters 4 and 11).
+- Add your own columns to `x`, as in "Add your own column".
+- Try other layers of PyG, for example `SAGEConv` or `GATConv`, in place of `GCNConv`.
+- Train on one area and test on another. Put the feature columns of the two areas in the same order first.
+
+> **Tip:** for graph algorithms without a model (shortest paths, centrality, connected parts), use the networkx and
+> rustworkx graphs of chapter 7, "As a graph": `net.driving.to_networkx()` and `net.driving.to_rustworkx()`.
+> `duckosm.ml.to_networkx_nodes(net.driving)` gives the junction graph as a networkx `MultiDiGraph` in the layout of
+> OSMnx.
+
+This is the last chapter of the book. Each chapter is in the [notebook manual](index.md), and the
+[Python SDK reference](../reference/python.md) has every call.""")
 
 ch.exercises([
-    ("Make the turn graph with `weight=\"length\"` and find the shortest route in metres from `first` to `target`.",
-     """gl = duckosm.ml.to_networkx(net.driving, weight="length")
-nx.shortest_path_length(gl, first, target, weight="weight")    # metres, legal turns only"""),
-    ("Find the 5 junctions with the highest betweenness centrality in the junction graph. Use a sample of 300 nodes "
-     "to make it fast.",
-     """bc = nx.betweenness_centrality(nx.DiGraph(gn), k=300, seed=0)
-sorted(bc, key=bc.get, reverse=True)[:5]"""),
-    ("Make the arrays of the turn graph with the features `length_m`, `lanes` and `oneway`, and look at the names of "
-     "the columns.",
-     """a = duckosm.ml.graph_arrays(net.driving, graph="turns", features=["length_m", "lanes", "oneway"])
-a["x_names"], a["x"].shape"""),
+    ("Make the junction graph with the features `length_m` and `highway`. How many columns has `edge_attr`?",
+     """a = duckosm.ml.graph_arrays(net.driving, features=["length_m", "highway"])
+a["edge_attr"].shape, a["edge_attr_names"]"""),
+    ("Find the `edge_id` and the predicted speed of row 100 of the turn graph, and the name of its road.",
+     """e = int(turns.edge_id[100])
+e, float(predicted[100]), result.set_index("edge_id").loc[e, "name"]"""),
+    ("Make the turn graph again with the two count columns of \"Add your own column\" as more features, and scale "
+     "the features.",
+     """own = duckosm.ml.to_pyg(net.driving, graph="turns", features=["length_m", "lanes", "highway"])
+extra = torch.tensor(np.column_stack([vph.fillna(0), has_count]), dtype=torch.float32)
+own.x = torch.cat([own.x, extra], dim=1)                        # 12 + 2 columns
+own.x = (own.x - own.x.mean(0)) / (own.x.std(0) + 1e-6)
+own.num_node_features                                           # then train SpeedModel(14) on own"""),
 ])
 
 ch.glossary([
+    ("graph machine learning", "a model that learns a value for each node or arc of a graph from features and neighbours"),
     ("junction graph", "a graph whose nodes are junctions and whose arcs are edges (`graph=\"nodes\"`)"),
     ("turn graph", "a graph whose nodes are edges and whose arcs are legal turns (`graph=\"turns\"`)"),
     ("arc", "a directed link of a graph, from one node to another"),
     ("feature", "a number that describes a node or an arc, as input to a model"),
     ("one-hot column", "a 0/1 column for one value of a text column, for example `highway=primary`"),
-    ("strongly connected part", "a set of nodes where each node can reach each other node"),
     ("tensor", "an array of numbers in PyTorch"),
+    ("target", "the value that a model learns to predict (`y` in PyG)"),
+    ("mask", "a true/false array that selects the rows to train or to test"),
     ("graph convolution (GCN)", "a layer that mixes the features of a node with those of its neighbours"),
-    ("target", "the value that a model learns to predict"),
 ])
 
 ch.summary([
-    ("`net.driving.to_networkx()`, `duckosm.ml.to_networkx(net, weight=\"time\")`", "the turn graph as a `networkx.DiGraph`"),
-    ("`duckosm.ml.to_networkx_nodes(net)`", "the junction graph as a `networkx.MultiDiGraph`, as OSMnx"),
-    ("`net.driving.to_rustworkx()`, `duckosm.ml.to_rustworkx(net, graph=\"turns\", weight=\"time\")`", "either graph as a `rustworkx.PyDiGraph`; `attrs[\"index\"]` maps an id to its index"),
-    ("`duckosm.ml.graph_arrays(net, graph=\"nodes\", features=...)`", "the index and feature arrays, as numpy"),
-    ("`duckosm.ml.to_pyg(net, graph=\"nodes\", features=...)`", "a PyTorch Geometric `Data` object, with `edge_id`"),
-    ("`duckosm.ml.to_dgl(net, graph=\"nodes\", features=...)`", "a `dgl.DGLGraph` (needs dgl)"),
-], reference="[duckosm.ml](../reference/sdk/ml.md), and the page [networkx](../exports/networkx.md)")
-
-ch.md("""## The end of the book
-
-This is the last chapter. You can now get and build an area, look inside the file, draw it, join your data by
-`edge_id`, fix the OSM data, export the network, find routes, study the street network, use the OSM data in GIS,
-simulate traffic, plan transport, make lane maps and train a model on the road graph. Each chapter is in the
-[notebook manual](index.md). The [Python SDK reference](../reference/python.md) has every call.""")
+    ("`duckosm.ml.graph_arrays(net.driving, graph=\"nodes\", features=...)`", "the index and feature arrays as NumPy, with `edge_id` and `node_id`"),
+    ("`duckosm.ml.DEFAULT_FEATURES`", "the default features: `length_m`, `maxspeed_kmh`, `lanes`"),
+    ("`duckosm.ml.to_pyg(net.driving, graph=\"turns\", features=...)`", "a PyTorch Geometric `Data` object, with `edge_id`"),
+    ("`duckosm.ml.to_dgl(net.driving, graph=\"nodes\", features=...)`", "a `dgl.DGLGraph` (needs dgl)"),
+    ("`net.driving.map(color_by=series)`", "a map colored by a Series keyed by `edge_id`"),
+    ("`to_networkx`, `to_networkx_nodes`, `to_rustworkx`", "the graph for networkx and rustworkx (chapter 7)"),
+], reference="[duckosm.ml](../reference/sdk/ml.md)")
 
 ch.write(sys.argv[1])

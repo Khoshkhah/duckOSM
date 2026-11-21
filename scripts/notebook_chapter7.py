@@ -10,11 +10,11 @@ from notebook_book import IMAGES, Chapter  # noqa: E402
 
 ch = Chapter(7, "07_routing", "Routing",
              "The fastest route between two roads, two points or two names, in one mode or across modes",
-             learn="the turn graph; the three kinds of place; a route between edges, points and names; the fastest and "
-                   "the shortest route; the turn-by-turn steps; a route across modes; the graph in networkx and rustworkx",
+             learn="the turn graph; the three kinds of place; a route between edges, points and names; the "
+                   "turn-by-turn steps; a route across modes; the graph in networkx and rustworkx",
              time="about 3 minutes", extras="widget,viz,graph",
              next_=("08_routing_advanced", "8. Advanced routing",
-                    "the Route object, many routes, the k best routes, the matrix and isochrones"))
+                    "the Route object, the fastest or the shortest route, the k best routes, the matrix and isochrones"))
 
 ch.md(f"""## How duckOSM finds a route
 
@@ -34,7 +34,7 @@ edge 4. So a route cannot make that turn.
 
 <img src="{IMAGES}/turn-graph.svg" alt="A junction and its turn graph: each edge is a node, each legal turn is an arc, the forbidden left turn has no arc" width="100%">
 
-The search is a bidirectional Dijkstra search, in Rust. One route in Monaco takes about 40 ms.
+The search is a bidirectional Dijkstra search, in Rust.
 
 > **Key idea:** a route goes from edge to edge on the turn graph. Each arc is a legal turn, so every route of duckOSM
 > obeys the turn restrictions and the one-way rules of its mode.""")
@@ -128,7 +128,7 @@ A point is `(lon, lat)`, in this order, as in GeoJSON. Write a point with decima
 ch.md("""## One call, three ways to write it
 
 The routing calls are functions of the module `duckosm.routing`. Each function is also a method of the network and
-of a mode view. These three lines give the same route:
+of a mode view. These three forms give the same route:
 
 | Form | When to use it |
 |---|---|
@@ -149,7 +149,7 @@ end = int(net.sql(q, ["Avenue Princesse Grace"]).edge_id[0])     # one edge of A
 r = net.driving.route(start, end)                                # the fastest route from edge to edge
 r                                                                # a Route: the card shows the edges, the length and the time""")
 ch.md("""The route from Boulevard du Larvotto to Avenue Princesse Grace has 29 edges, 1,513 m,
-and takes 1.9 minutes (114 s). The card gives the time in minutes.
+and takes 114 s (1.9 minutes).
 
 The result is a `Route`. `r.edge_ids` is its list of edges, `r.time_s` and `r.length_m` are its sums. Chapter 8 shows
 all the parts of a `Route`. When no route connects the two places (for example an edge that has no exit), the call
@@ -181,7 +181,7 @@ ch.md("""### `route_points`: the options of the join
 
 The `Route` of `route_points` also has `start` and `end`: where each point joins the road.""")
 ch.code("""p = net.driving.route_points(a, b, radius_m=100, access_kmh=5)     # a larger radius, a faster walk
-{k: (round(v, 6) if isinstance(v, float) else v) for k, v in p["start"].items()}    # where the first point joins""")
+p["start"]                                                          # where the first point joins its road""")
 ch.md("""**What the output shows.** The first point joins the road at `road_point`, 10.3 m away (`access_m`). The walk
 to the road takes 7.4 s at 5 km/h (`access_s`). `edge_id` is the first edge of the route, and `fraction` is where the
 point joins it: 0.0 is the start of the edge, 1.0 its end.""")
@@ -198,22 +198,10 @@ ch.md("""The point of Boulevard Albert 1er is (7.4211, 43.7359), in the middle o
 edge of the street. The route by name has 33 edges, 1,350 m, and takes 122 s.
 
 > **Warning:** a name gives one point. A long street has many points, and the route starts at the middle of its
-> longest edge. Use a point or an edge id when the exact start is important.""")
+> longest edge. Use a point or an edge id when the exact start is important.
 
-ch.md("""## The fastest or the shortest route
-
-`weight` chooses what the search makes small:
-
-| `weight` | The cost of an edge | The route |
-|---|---|---|
-| `"time"` (the default) | `cost_s`, the travel time from the length and the speed | the fastest |
-| `"length"` | `length_m` | the shortest |""")
-ch.code("""fast = net.driving.route(a, b)                       # the fastest route
-short = net.driving.route(a, b, weight="length")     # the shortest route
-[(round(x.time_s), round(x.length_m)) for x in (fast, short)]    # seconds and metres of each""")
-ch.md("""**What the output shows.** The fastest route takes 229 s for 2,939 m. The shortest route is only 2 m shorter
-(2,937 m), but it takes 236 s, 7 s more. In a small city the two routes are almost the same. In a large area, the
-fastest route often takes a motorway that is longer but much faster.""")
+Nominatim needs the internet. When it finds nothing in the box of the network, the call stops with the error
+`no place ... in the network or in Nominatim inside the box of the network`.""")
 
 ch.md("""## Draw routes on the map
 
@@ -243,16 +231,6 @@ ch.md("""**What the output shows.** The car route has eleven steps, from "Head n
 "Arrive at your destination". A roundabout step gives the number of the exit. A new street name gives a "Continue
 onto" step, also in the tunnels.""")
 
-ch.md("""## The graph of each mode
-
-The table `<mode>.edge_graph` can hold arcs that the mode does not use, for example the turns that only a bus can make.
-`duckosm.routing.routed_graph(view)` gives the SQL of the arcs that the mode routes on. Use it in your own SQL to work
-on the same graph as the routes.""")
-ch.code("""g_sql = duckosm.routing.routed_graph(net.driving)             # the arcs that a car route can use
-net.sql(f"SELECT (SELECT count(*) FROM driving.edge_graph) AS all_arcs, (SELECT count(*) FROM {g_sql}) AS car_arcs")""")
-ch.md("""`driving.edge_graph` has 6,754 arcs, but a car can use only 5,082 of them. The other
-arcs are turns for buses and other vehicles. Every routing call of the driving mode uses the 5,082 arcs.""")
-
 ch.md("""## Across modes
 
 ### Between two points
@@ -271,7 +249,7 @@ ch.code("""m = net.route_multimodal_points(a, b)                                
 [(leg["mode"], len(leg["edges"]), round(leg["time_s"])) for leg in m["legs"]], round(m["time_s"])    # each leg; the total seconds""")
 ch.md("""**What the output shows.** The trip has three legs: a walk on 1 edge (3 s), a drive on 75 edges (220 s) and a walk
 on 1 edge (0 s). The total is 350 s. It includes two transfers of 60 s, into the car and out of it, and the
-walks from the points to the roads. Here the car-only route takes 229 s, so the trip across modes is slower:
+walks from the points to the roads. The car route `drive` takes 229 s, so the trip across modes is slower:
 the two transfers cost 120 s.
 
 > **Warning:** the multimodal graph has a car waiting at each shared junction, and no public transport (OSM has no
@@ -310,16 +288,22 @@ the turn. So the cost of a path in the graph does not include the last edge, and
 ch.code("""import networkx as nx
 
 g = net.driving.to_networkx()                                      # the turn graph of the driving network
-g.number_of_nodes(), g.number_of_edges(), nx.shortest_path(g, start, end, weight="weight") == r.edge_ids    # the same path as the route""")
-ch.md("""The networkx graph has 2,840 nodes (one for each driving edge) and 5,082 arcs (the turns
-that a car can make). Its shortest path between the two edges is the path of the route: `True`.""")
+g.number_of_nodes(), g.number_of_edges()                           # nodes (edges of the network) and arcs (turns)""")
+ch.code("""path = nx.shortest_path(g, start, end, weight="weight")           # the shortest path in networkx
+path == r.edge_ids                                                 # the same edges as the route r""")
+ch.md("""The networkx graph has 2,840 nodes (one for each driving edge) and 5,082 arcs. The table `driving.edge_graph` has
+6,754 arcs, but the graph keeps only the 5,082 turns that a car can make. The other arcs are for buses and other
+vehicles ([8. Advanced routing](08_routing_advanced.md), section "The graph of all calls: `routed_graph`").
+The shortest path between the two edges is the path of the route: `True`.""")
 ch.code("""import rustworkx as rx
 
 h = net.driving.to_rustworkx()                                     # the same graph in rustworkx
 ix = h.attrs["index"]                                              # the node index of each edge_id
-graph_s = rx.dijkstra_shortest_path_lengths(h, ix[start], edge_cost_fn=float, goal=ix[end])[ix[end]]    # the shortest time in the graph
-last_s = float(net.sql("SELECT cost_s FROM driving.edges WHERE edge_id = ?", [end]).cost_s[0])        # the time of the last edge
-round(graph_s, 1), round(graph_s + last_s, 1), round(r.time_s, 1)                                    # graph, graph + last edge, route""")
+lengths = rx.dijkstra_shortest_path_lengths(h, ix[start], edge_cost_fn=float, goal=ix[end])    # the search
+graph_s = lengths[ix[end]]                                         # the shortest time in the graph
+last = net.sql("SELECT cost_s FROM driving.edges WHERE edge_id = ?", [end])   # the last edge
+last_s = float(last.cost_s[0])                                     # its time in seconds
+round(graph_s, 1), round(graph_s + last_s, 1), round(r.time_s, 1)  # graph, graph + last edge, route""")
 ch.md("""The shortest time in the rustworkx graph is 113.2 s. With the time of the last edge, it
 is 114.1 s, the time of the route.
 
@@ -334,6 +318,7 @@ more:
 | Call | Gives |
 |---|---|
 | the `Route` object | the edges as a GeoDataFrame, the geometry, a map of the route |
+| `weight="length"` | the shortest route in place of the fastest |
 | `routes` | many routes, in parallel |
 | `k_shortest_paths` | the next best routes |
 | `matrix` | the travel time from each origin to each destination |
@@ -358,7 +343,6 @@ ch.glossary([
     ("turn graph", "the graph whose nodes are edges and whose arcs are legal turns (`<mode>.edge_graph`)"),
     ("arc", "one legal turn from an edge to the next edge"),
     ("place", "the start or the end of a route: an edge id, a `(lon, lat)` point or a name"),
-    ("weight", "what the search makes small: `time` (seconds) or `length` (metres)"),
     ("geocode", "to find the point of a place name"),
     ("multimodal graph", "the tables `mm.*`: the networks of the modes, joined at shared junctions"),
     ("leg", "the part of a trip in one mode"),
@@ -371,7 +355,6 @@ ch.summary([
     ("`duckosm.routing.geocode(view, name)`", "the `(lon, lat)` of a place name"),
     ("`route.directions()`, `duckosm.routing.directions(view, route)`", "the turn-by-turn steps"),
     ("`net.map(routes={...})`", "routes on the map"),
-    ("`duckosm.routing.routed_graph(view)`", "the SQL of the arcs that the mode routes on"),
     ("`net.route_multimodal_points(a, b, allowed_modes=None)`", "a trip across modes between two points"),
     ("`duckosm.routing.route_multimodal(net, src_node, dst_node)`", "a trip across modes between two junctions"),
     ("`net.driving.to_networkx()`, `net.driving.to_rustworkx()`", "the turn graph as a graph object"),

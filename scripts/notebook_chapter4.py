@@ -57,16 +57,25 @@ net                                                   # the card""")
 
 ch.md("""## Make the counts
 
-An external file gives one count for each direction of the main roads. Here the counts are made with random numbers
-that do not change from run to run: a primary road has approximately 900 vehicles per hour, a secondary road 500 and
-a tertiary road 250. The result is a table with two columns: `edge_id` and the count.""")
-ch.code("""import numpy as np
+In real work, a file from the city gives one count for each direction of the main roads. Here you make the counts
+yourself, in three steps:
 
-main = net.driving.edges(where="highway IN ('primary', 'secondary', 'tertiary')")      # the main roads
-base = main.highway.map({"primary": 900, "secondary": 500, "tertiary": 250})   # vehicles per hour, by road class
-rng = np.random.default_rng(1)                                                 # made-up numbers that do not change
-counts = main[["edge_id"]].assign(vehicles_per_hour=(base * rng.uniform(0.5, 1.5, len(main))).round().astype(int))
-counts.head()                                                                  # edge_id (int64) and the count""")
+1. Get the main roads: the primary, secondary and tertiary edges of the driving network.
+2. Give each edge a base count by its road class: 900 vehicles per hour for a primary road, 500 for a secondary road
+   and 250 for a tertiary road.
+3. Multiply each base count by a random number from 0.5 to 1.5. The seed `1` gives the same numbers in each run.
+
+The result is a table with two columns: `edge_id` and the count.""")
+ch.code("""import numpy as np
+import pandas as pd
+
+main = net.driving.edges(where="highway IN ('primary', 'secondary', 'tertiary')")    # step 1: the main roads
+base = main.highway.map({"primary": 900, "secondary": 500, "tertiary": 250})       # step 2: the base count of each edge""")
+ch.code("""rng = np.random.default_rng(1)                                   # step 3: random numbers, the same in each run
+vph = (base * rng.uniform(0.5, 1.5, len(main))).round().astype(int)
+counts = pd.DataFrame({"edge_id": main.edge_id, "vehicles_per_hour": vph})    # your data: edge_id and the count
+print(len(counts), "rows")
+counts.head()""")
 ch.md("""Each row is one edge: one direction of one part of a road. The table has 1013 rows,
 one for each primary, secondary and tertiary edge.""")
 
@@ -100,7 +109,14 @@ its base: approximately 900, 500 and 250.""")
 ch.md("""### Join in SQL
 
 The same join works in DuckDB. `con.register` gives your DataFrame a table name on the connection, so a query can join
-it to the tables of the file. DuckDB computes the join, and only the result comes to Python.""")
+it to the tables of the file. DuckDB computes the join, and only the result comes to Python.
+
+The query in the cell below:
+
+1. joins the driving edges (`driving.edges`, the name `e`) to your counts (`counts`, the name `c`) on `edge_id`
+   (`USING (edge_id)`);
+2. puts the rows in groups by road class (`GROUP BY e.highway`);
+3. gives for each class the number of edges, the mean count, and the sum of count × length in km.""")
 ch.code("""with net.connect() as con:                                      # a read-only connection to the file
     con.register("counts", counts)                              # your DataFrame as the table "counts"
     by_class = con.sql(\"\"\"
@@ -111,8 +127,8 @@ ch.code("""with net.connect() as con:                                      # a r
     \"\"\").df()
 by_class""")
 ch.md("""**What the output shows.** 197 primary, 429 secondary and 387 tertiary edges, with mean counts of 872, 507
-and 253 vehicles per hour. `vehicle_km_per_hour` is the count times the length: the distance that all vehicles drive
-on the class in one hour.""")
+and 253 vehicles per hour. `vehicle_km_per_hour` is the distance that all vehicles drive on the class in one hour: 9886 km on the
+primary roads.""")
 
 ch.md("""### Your data in a file
 
@@ -141,20 +157,20 @@ ch.md("""The color bar is the count in vehicles per hour. The dark lines are the
 roads with the largest counts. The thin gray lines are the edges without a count: the residential streets and the
 service roads.""")
 
-ch.md("""### The other forms of `color_by`
+ch.md("""### Show only some edges: `highlight`
 
-`color_by` also takes a DataFrame with `edge_id` and one value column, or the name of a column of the edges. Use
-`highlight` to show only some edges, for example the edges with more than 1000 vehicles per hour.""")
-ch.code("""net.driving.map(color_by=counts, cmap="magma_r")      # a DataFrame: edge_id and one value column""")
+`color_by` also takes a DataFrame with `edge_id` and one value column (`color_by=counts` gives the same map), or the
+name of a column of the edges. To show only some edges, give their ids to `highlight`. The cell shows the edges with
+more than 1000 vehicles per hour.""")
 ch.code("""busy = counts[counts.vehicles_per_hour > 1000].edge_id      # the edges with more than 1000 vehicles per hour
 print(len(busy), "busy edges")                              # the number of busy edges
 net.driving.map(highlight=busy)                                     # in orange, the rest gray""")
-ch.md("""The DataFrame gives the same map as the Series. 65 edges are busy, all on primary
-roads, because only a primary road can have more than 1000 vehicles per hour here.""")
+ch.md("""65 edges are busy, all on primary roads, because only a primary road can have more than 1000 vehicles per hour
+here (500 × 1.5 = 750 is the maximum of a secondary road).""")
 
 ch.md("""### Save the map
 
-`net.save_map` writes the same map as one HTML file, with the same options (chapter 3, "Save a map as a file"). Send
+`save_map` writes the same map as one HTML file, with the same options (chapter 3, "Save a map as a file"). Send
 the file to a person who has no Python.""")
 ch.code("""net.driving.save_map("out/counts.html", color_by=by_edge, cmap="magma_r")    # the same map as one HTML file""")
 
@@ -234,7 +250,7 @@ ch.exercises([
 ch.glossary([
     ("join", "putting two tables together on a key column"),
     ("key", "the column that tells which rows belong together: here `edge_id`"),
-    ("left join", "a join that keeps all rows of the first table; rows without a match get NULL or `NaN`"),
+    ("left join", "a join that keeps all rows of the first table. A row without a match gets NULL or `NaN`"),
     ("`int64`, `BIGINT`", "a 64-bit integer: the type of `edge_id` in pandas and in DuckDB"),
     ("Parquet", "a column file format that keeps the types of the columns"),
     ("`register`", "a DuckDB call that gives a DataFrame a table name on a connection"),
@@ -242,13 +258,13 @@ ch.glossary([
 ])
 
 ch.summary([
-    ("`net.edges(where=...)`", "the edges, filtered in SQL"),
+    ("`net.driving.edges(where=...)`", "the edges of one mode, filtered in SQL"),
     ("`edges.merge(data, on=\"edge_id\", how=\"left\")`", "your data on the edges, in pandas"),
     ("`con.register(\"name\", df)` in `net.connect()`", "your DataFrame as a table in SQL"),
     ("`net.sql(\"... JOIN 'file.parquet' USING (edge_id)\")`", "your data from a Parquet file, joined in SQL"),
     ("`net.map(color_by=series, cmap=...)`", "a map colored by your data"),
     ("`net.map(highlight=ids)`", "some edges in orange"),
-    ("`net.dashboard(color_by=series, cmap=...)`", "the dashboard colored by your data; the road card shows the value"),
+    ("`net.dashboard(color_by=series, cmap=...)`", "the dashboard colored by your data, with the value in the road card"),
     ("`net.save_map(path, color_by=...)`", "the map of your data as one HTML file"),
     ("`counts.edge_id.isin(other.edges().edge_id)`", "check that your data finds its edges in another file"),
 ], reference="[Python SDK, Maps](../reference/python.md#maps) and [Stable edge ids](../concepts/edge-ids.md)")

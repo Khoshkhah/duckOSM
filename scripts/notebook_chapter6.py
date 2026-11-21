@@ -46,7 +46,7 @@ The export calls of a `Network` have the same form:
 |---|---|
 | the first argument | the output: a folder (`to_sumo`) or a file (`to_matsim`, `to_gmns`, `to_opendrive`, `to_gis`) |
 | `mode` | the mode to export. `net.driving.to_sumo(...)` is the same as `net.to_sumo(..., mode="driving")` |
-| `progress` | the progress line; `False` shows nothing |
+| `progress` | the progress line. `False` shows nothing |
 | the other keywords | the options of the format, from the function of its module |
 | the result | a dict: the paths of the files and the numbers (nodes, edges, links, layers) |
 
@@ -56,13 +56,14 @@ one mode, and some take all modes:
 | Call | Without `mode` |
 |---|---|
 | `to_sumo`, `to_opendrive` | the driving network |
-| `to_matsim` | the driving network; `mode` can also be a list of modes |
+| `to_matsim` | the driving network. `mode` can also be a list of modes |
 | `to_gmns`, `to_gis` | all the modes of the file |""")
 
 ch.md("""## Open the network of chapter 1
 
-Chapter 1 builds Monaco with three modes (driving, walking and cycling) and saves it as `monaco.duckdb`. This chapter opens that file with `duckosm.open`: it builds nothing. Most exports take the driving network. The summary gives the number of edges and nodes, so you can compare
-each export with it.""")
+Chapter 1 builds Monaco with three modes (driving, walking and cycling) and saves it as `monaco.duckdb`. This chapter
+opens that file with `duckosm.open`. The exports of this chapter use the driving network. Its summary gives the number
+of edges and nodes, so you can compare each export with it.""")
 ch.code("""net = duckosm.open("monaco.duckdb")    # the network of chapter 1: Monaco, three modes
 net.driving.summary()                                         # the number of edges, to compare with each export""")
 ch.md("""The driving network of Monaco has 2,840 edges and 1,768 nodes, 96.2 km of road.
@@ -151,13 +152,18 @@ speed (m/s), its capacity and its lanes.
 |---|---|---|
 | `crs` | the UTM zone of the area | the coordinate system of the nodes (MATSim needs metres) |
 | `gzip` | `True` | writes `.xml.gz` |""")
-ch.code("""import gzip
-import xml.etree.ElementTree as ET                                   # to read the XML back
+ch.code("""matsim = net.driving.to_matsim("out/matsim_network.xml.gz")    # the MATSim network
+matsim                                                          # its numbers and its coordinate system""")
+ch.md("""The MATSim network has 1,768 nodes and 2,840 links, in UTM zone 32N (`EPSG:32632`, in metres).
 
-matsim = net.driving.to_matsim("out/matsim_network.xml.gz")                  # the MATSim network
-matsim, len(ET.parse(gzip.open("out/matsim_network.xml.gz")).findall(".//link"))    # its numbers, and the links in the file""")
-ch.md("""The MATSim network has 1,768 nodes and 2,840 links, in UTM zone 32N (`EPSG:32632`,
-in metres). The XML file has 2,840 `<link>` elements: one link for each edge.""")
+The check: Python's XML reader opens the file and counts its `<link>` elements. `gzip.open` reads the compressed
+file.""")
+ch.code("""import gzip
+import xml.etree.ElementTree as ET                              # Python's XML reader
+
+tree = ET.parse(gzip.open("out/matsim_network.xml.gz"))         # the XML of the file
+len(tree.findall(".//link"))                                    # the <link> elements""")
+ch.md("""The file has 2,840 `<link>` elements: one link for each edge.""")
 
 ch.md("""## OpenDRIVE (experimental)
 
@@ -169,10 +175,11 @@ is experimental: it writes one road for each edge, and the junctions only with `
 |---|---|---|
 | `crs` | the UTM zone of the area | the coordinate system (metres) |
 | `junctions` | `False` | `True`: also the OpenDRIVE junctions |""")
-ch.code("""odr = net.driving.to_opendrive("out/monaco.xodr")                    # the OpenDRIVE file
-odr, len(ET.parse("out/monaco.xodr").findall("road"))       # its numbers, and the roads in the file""")
-ch.md("""The OpenDRIVE file has 2,840 roads, in UTM zone 32N. The XML has 2,840 `<road>`
-elements: one road for each edge.""")
+ch.code("""odr = net.driving.to_opendrive("out/monaco.xodr")       # the OpenDRIVE file
+print(odr)                                              # its numbers
+len(ET.parse("out/monaco.xodr").findall("road"))        # the check: the <road> elements in the file""")
+ch.md("""The OpenDRIVE file has 2,840 roads, in UTM zone 32N. The XML has 2,840 `<road>` elements: one road for each
+edge.""")
 
 ch.md("""## GeoPackage, GeoParquet and shapefiles
 
@@ -185,22 +192,28 @@ layers (`edges_driving`, `nodes_driving` ...) and the boundary of the area.
 | `modes` | all | the modes (`mode` gives one) |
 | `boundary` | `True` | also the layer `boundary` |
 | `srs` | `"EPSG:4326"` | the coordinate system of the file |""")
-ch.code("""import duckdb                                                # to read the layers back
-
-gis = net.driving.to_gis("out/monaco.gpkg")                          # the GeoPackage
-con = duckdb.connect()                                       # DuckDB with the extension spatial
-con.load_extension("spatial")
-{layer: con.execute(f"SELECT count(*) FROM st_read('out/monaco.gpkg', layer='{layer}')").fetchone()[0]
- for layer in gis["layers"]}                                 # the rows of each layer, as DuckDB reads them""")
+ch.code("""gis = net.driving.to_gis("out/monaco.gpkg")    # the GeoPackage
+gis["layers"]                                  # the rows of each layer""")
 ch.md("""The GeoPackage has three layers: 2,840 edges, 1,768 nodes and the boundary (1 row).
-DuckDB reads each layer with the same number of rows as the network.""")
+
+The check: DuckDB reads each layer back and counts its rows. The function `st_read` of the DuckDB extension
+`spatial` reads one layer of a GIS file.""")
+ch.code("""import duckdb
+
+con = duckdb.connect()                     # a DuckDB in memory, to read the files back
+con.load_extension("spatial")              # the extension that reads GIS files
+for layer in gis["layers"]:
+    rows = con.sql(f"SELECT count(*) FROM st_read('out/monaco.gpkg', layer='{layer}')").fetchone()[0]
+    print(layer, rows)""")
+ch.md("""DuckDB reads each layer with the same number of rows as the network.""")
 ch.md("""GeoParquet is a Parquet file with a geometry column. It is fast to read for DuckDB, GeoPandas and the cloud data
 tools. `fmt="geoparquet"` writes one file for each layer into a folder.""")
-ch.code("""pq = net.driving.to_gis("out/geoparquet", fmt="geoparquet")         # a folder of GeoParquet files
-len(pq["files"]), pq["layers"]["edges_driving"], con.sql("SELECT count(*) FROM 'out/geoparquet/edges_driving.parquet'").fetchone()[0]""")
-ch.md("""**What the output shows.** The folder has 15 files. The edges file has 2,840 rows, also when DuckDB reads it.
-The folder also has the layers of the base map (`features_buildings`, `features_streets` ...), which the GeoPackage of
-the cell before does not have.
+ch.code("""pq = net.driving.to_gis("out/geoparquet", fmt="geoparquet")    # a folder of GeoParquet files
+print(len(pq["files"]), "files")
+con.sql("SELECT count(*) FROM 'out/geoparquet/edges_driving.parquet'").fetchone()[0]    # the check: the edges""")
+ch.md("""**What the output shows.** The folder has 15 files. DuckDB reads 2,840 rows from the edges file. The folder also
+has the layers of the base map (`features_buildings`, `features_streets` ...), which the GeoPackage of the cell before
+does not have.
 
 > **Tip:** a shapefile cuts each column name to 10 characters, and each layer is a set of files. Use GeoPackage or
 > GeoParquet when the tool can read them.""")
@@ -217,9 +230,17 @@ network, and gives all OSM features (nodes, ways, relations) with all their tags
 | `formats` | GeoParquet | the formats of the table: `"geoparquet"`, `"gpkg"` ... |
 | `gdal` | `False` | `True`: the five layers of GDAL's OSM driver in place of the table |
 | `fixes` | none | the fixes file (chapter 5) |""")
-ch.code("""area = duckosm.get(osm_id=2220322, name="monaco", out="data")                                          # the OSM file (from the cache)
+ch.code("""area = duckosm.get(osm_id=2220322, name="monaco", out="data")                     # the OSM file (from the cache)
 quack = duckosm.gis.quack(area, out="out", name="monaco", formats=["geoparquet"])    # the QuackOSM table
-con.sql(f"SELECT split_part(feature_id, '/', 1) AS type, count(*) AS features FROM '{quack[0]}' GROUP BY 1 ORDER BY 1").df()    # the features by OSM type""")
+quack                                                                             # the list of the files""")
+ch.md("""The result is the list of the files that `quack` wrote: here one GeoParquet file. Each row of the table is one
+OSM feature. Its `feature_id` is the OSM type and the id, for example `way/4230891`. The check counts the features of
+each OSM type: `split_part(feature_id, '/', 1)` is the text before the `/`.""")
+ch.code("""con.sql(f\"\"\"
+    SELECT split_part(feature_id, '/', 1) AS type, count(*) AS features
+    FROM '{quack[0]}'
+    GROUP BY type ORDER BY type
+\"\"\").df()                                                        # the features of each OSM type""")
 ch.md("""The QuackOSM table of Monaco has 3,994 nodes (points with tags: shops, stops,
 trees ...), 5,606 ways and 59 relations. This is all of the OSM data with tags, not only the roads: a building, a park
 and a bench are features too.
@@ -230,9 +251,12 @@ so the cell runs the command.""")
 ch.code("""import subprocess, sys
 from pathlib import Path
 
-subprocess.run([sys.executable, "-m", "duckosm", "quack", str(area.pbf), "--pmtiles", "-o", "out", "--name", "monaco"],
-               check=True)                                             # the command duckosm quack --pmtiles
-Path("out/monaco.pmtiles").stat().st_size, Path("out/monaco.pmtiles").read_bytes()[:7]    # the size; a PMTiles file starts with "PMTiles\"""")
+command = [sys.executable, "-m", "duckosm", "quack", str(area.pbf), "--pmtiles", "-o", "out", "--name", "monaco"]
+done = subprocess.run(command, check=True)            # the command: duckosm quack <OSM file> --pmtiles -o out --name monaco
+print("exit code", done.returncode)                   # 0: no error""")
+ch.code("""pmtiles = Path("out/monaco.pmtiles")
+print(pmtiles.stat().st_size, "bytes")
+pmtiles.read_bytes()[:7]                              # the check: a PMTiles file starts with the text "PMTiles\"""")
 ch.md("""The command made 59 tiles of 9,659 features. The file is 0.2 MB
 (219,713 bytes), and its first seven bytes are `PMTiles`.""")
 
@@ -258,43 +282,51 @@ ch.code('''Path("osm_fixes.yaml").write_text("""overrides:
     maxspeed: '10'
   note: road works
 """)                                                                                 # the fixes file of chapter 5
-fixed = area.build(modes=["driving"], output="data/monaco_fixed.duckdb", fixes="osm_fixes.yaml")    # the network with the fix
-edge = int(fixed.edges(where="osm_id = 4230891").edge_id[0])                        # one edge of Boulevard Louis II
-speeds = {"database (km/h)": float(fixed.edges(where=f"edge_id = {edge}").maxspeed_kmh[0])}     # its speed in each output''')
-ch.code("""import gzip
-import xml.etree.ElementTree as ET                                                  # to read the XML files back
-
-fixed.driving.to_gis("out/fixed.gpkg")                                                      # a GeoPackage
-speeds["GeoPackage (km/h)"] = con.execute(
-    "SELECT maxspeed_kmh FROM st_read('out/fixed.gpkg', layer='edges_driving') WHERE edge_id = ?", [edge]).fetchone()[0]
-sumo = fixed.driving.to_sumo("out/fixed_sumo", run_netconvert=False)                        # the plain SUMO files; speed in m/s
-speeds["SUMO (km/h)"] = round(float(ET.parse(sumo["edg"]).find(f".//edge[@id='{edge}']").get("speed")) * 3.6, 1)
-fixed.driving.to_matsim("out/fixed_matsim.xml.gz")                                          # the MATSim network; free speed in m/s
-speeds["MATSim (km/h)"] = round(float(ET.parse(gzip.open("out/fixed_matsim.xml.gz")).find(f".//link[@id='{edge}']").get("freespeed")) * 3.6, 1)
-fixed.driving.to_gmns("out/fixed_gmns.duckdb")                                              # the GMNS network
-speeds["GMNS (km/h)"] = duckdb.connect("out/fixed_gmns.duckdb", read_only=True).execute(
-    "SELECT free_speed FROM gmns_driving.link WHERE link_id = ?", [edge]).fetchone()[0]
-quack = duckosm.gis.quack(area, out="out", name="fixed", fixes="osm_fixes.yaml", formats=["geoparquet"])    # the OSM data with the fixes
-speeds["QuackOSM table (tag)"] = con.execute(
-    f"SELECT tags['maxspeed'] FROM '{quack[0]}' WHERE feature_id = 'way/4230891'").fetchone()[0]
-speeds                                                                              # the speed of the edge in each output""")
+fixed = area.build(modes=["driving"], output="data/monaco_fixed.duckdb", fixes="osm_fixes.yaml")    # the network with the fix''')
+ch.md("""The cell below takes one edge of Boulevard Louis II and starts the dict `speeds`: its speed in each output. The
+first entry is the database.""")
+ch.code("""louis = fixed.driving.edges(where="osm_id = 4230891")       # the edges of Boulevard Louis II
+edge = int(louis.edge_id.iloc[0])                            # one of them: its edge_id
+speeds = {"database (km/h)": float(louis.maxspeed_kmh.iloc[0])}
+speeds""")
+ch.md("""Each cell below writes one output and reads the speed of the edge back from it. SUMO and MATSim keep the speed
+in m/s, so the cells multiply it by 3.6 to get km/h. The `?` in a query is a parameter: DuckDB puts the value of the
+list (`[edge]`) in its place.""")
+ch.code("""fixed.driving.to_gis("out/fixed.gpkg")                                 # a GeoPackage
+query = "SELECT maxspeed_kmh FROM st_read('out/fixed.gpkg', layer='edges_driving') WHERE edge_id = ?"
+speeds["GeoPackage (km/h)"] = con.execute(query, [edge]).fetchone()[0]""")
+ch.code("""fixed_sumo = fixed.driving.to_sumo("out/fixed_sumo", run_netconvert=False)    # the plain SUMO files
+xml_edge = ET.parse(fixed_sumo["edg"]).find(f".//edge[@id='{edge}']")            # the <edge> with the edge_id as its id
+speeds["SUMO (km/h)"] = round(float(xml_edge.get("speed")) * 3.6, 1)""")
+ch.code("""fixed.driving.to_matsim("out/fixed_matsim.xml.gz")                          # the MATSim network
+tree = ET.parse(gzip.open("out/fixed_matsim.xml.gz"))
+link = tree.find(f".//link[@id='{edge}']")                                  # the <link> with the edge_id as its id
+speeds["MATSim (km/h)"] = round(float(link.get("freespeed")) * 3.6, 1)""")
+ch.code("""fixed.driving.to_gmns("out/fixed_gmns.duckdb")                              # the GMNS network
+gmns_db = duckdb.connect("out/fixed_gmns.duckdb", read_only=True)
+query = "SELECT free_speed FROM gmns_driving.link WHERE link_id = ?"        # the link with the edge_id as its id
+speeds["GMNS (km/h)"] = gmns_db.execute(query, [edge]).fetchone()[0]""")
+ch.code("""quack = duckosm.gis.quack(area, out="out", name="fixed", fixes="osm_fixes.yaml", formats=["geoparquet"])    # the OSM data with the fix
+query = f"SELECT tags['maxspeed'] FROM '{quack[0]}' WHERE feature_id = 'way/4230891'"    # the tag of the way
+speeds["QuackOSM table (tag)"] = con.sql(query).fetchone()[0]
+speeds                                                                     # the speed of the edge in each output""")
 ch.md("""**What the output shows.** Each output gives 10 km/h for the edge. The QuackOSM table has the OSM tag, so it
 shows the text `'10'`. One fixes file corrects all six outputs.""")
 
 ch.md("""## The files of the chapter
 
-Each export wrote its files into the folder `out`. The last cell lists them with their sizes.""")
-ch.code("""mine = ("out/sumo", "out/gmns", "out/matsim", "out/monaco", "out/geoparquet", "out/fixed")    # the files of this chapter
-sorted((str(p), round(p.stat().st_size / 1e6, 2)) for p in Path("out").rglob("*")
-       if p.is_file() and p.suffix != ".csv" and str(p).startswith(mine))    # path and MB""")
-ch.md("""**What the output shows.** The largest file is the GMNS database (9.2 MB): it has the lanes, the movements and a
-line for each lane. SUMO's `.net.xml` is 5.2 MB. The MATSim network is the smallest export of the network (0.1 MB),
-because it is compressed with gzip.""")
+Each export wrote its files into the folder `out`. The last cell gives the size of the main file of each export.""")
+ch.code("""files = ["out/sumo/network.edg.xml", "out/gmns.duckdb", "out/matsim_network.xml.gz", "out/monaco.xodr",
+         "out/monaco.gpkg", "out/geoparquet/edges_driving.parquet", "out/monaco_quack.parquet", "out/monaco.pmtiles"]
+for f in files:
+    print(f"{Path(f).stat().st_size / 1e6:6.2f} MB  {f}")       # the size in MB, and the file""")
+ch.md("""The largest file is the GMNS database (approximately 9 MB): it has the lanes, the movements and a line for each lane. The
+OpenDRIVE file (2.39 MB) has the reference line and the lanes of each road. The MATSim network is the smallest file
+(0.11 MB), because it is compressed with gzip.""")
 
 ch.exercises([
-    ("Export the walking network of Monaco to MATSim. Build it first with `modes=[\"walking\"]`.",
-     """walk = duckosm.open("monaco.duckdb")
-walk.walking.to_matsim("out/matsim_walking.xml.gz")"""),
+    ("Export the walking network of Monaco to MATSim, and compare its number of links with the number of walking edges.",
+     """net.walking.to_matsim("out/matsim_walking.xml.gz"), len(net.walking.edges())"""),
     ("Write the driving network as GeoParquet files in the coordinate system of UTM zone 32N (`EPSG:32632`), and read "
      "the edges with GeoPandas.",
      """import geopandas as gpd
@@ -314,7 +346,7 @@ ch.glossary([
     ("movement", "a turn from one link to another at a junction, in GMNS"),
     ("layer", "one table of a GIS file, for example `edges_driving`"),
     ("GeoParquet", "a Parquet file with a geometry column"),
-    ("vector tiles", "a map cut into small squares of geometry, for web maps; PMTiles holds them in one file"),
+    ("vector tiles", "a map cut into small squares of geometry, for web maps. PMTiles holds them in one file"),
 ])
 
 ch.summary([
