@@ -337,6 +337,28 @@ class Network(os.PathLike):
         return out
 
     @property
+    def osm_version(self) -> dict | None:
+        """The version of the OSM data that the network was built from (the table ``main.osm_source``): ``osm_timestamp``
+        (the time of the data), ``replication_sequence``, ``extract`` and ``extract_url`` (the Geofabrik extract of
+        ``duckosm get``; None for your own OSM file), ``downloaded_at`` and ``pbf_sha256``. None for a file from an older build.
+
+        >>> net.osm_version["osm_timestamp"]"""
+        if "main.osm_source" not in self.tables():
+            return None
+        rows = self.sql("SELECT * FROM main.osm_source LIMIT 1")
+        if not len(rows):
+            return None
+        import pandas as pd
+        return {k: (None if v is None or (not isinstance(v, str) and pd.isna(v)) else v.to_pydatetime() if hasattr(v, "to_pydatetime")
+                    else int(v) if k == "replication_sequence" else v) for k, v in rows.iloc[0].to_dict().items()}
+
+    def has_osm_source(self) -> bool:
+        """True when the file has the version of its OSM data (``main.osm_source``).
+
+        >>> net.has_osm_source()"""
+        return self.osm_version is not None
+
+    @property
     def boundary(self):
         """The boundary of the area as a GeoDataFrame (None when the file has none)."""
         if "main.boundary" not in self.tables():
@@ -360,8 +382,13 @@ class Network(os.PathLike):
         meta = self._meta()
         fixes = f"<code>{escape(str(meta['fixes']))}</code>" if meta.get("fixes") else "none"
         saved = "yes" if self.saved else 'no, it is in the work folder: <code>net.save("name.duckdb")</code> keeps it'
+        osm = self.osm_version
+        data = "unknown (a file from an older build)" if osm is None else (
+            (str(osm["osm_timestamp"])[:10] if osm["osm_timestamp"] is not None else "no date")
+            + (f" (Geofabrik {escape(osm['extract'])})" if osm["extract"] else " (your own OSM file)"))
         rows = "".join(f"<tr><td>{k}</td><td>{v}</td></tr>" for k, v in (
-            ("file", f"<code>{escape(shown(self.path))}</code> ({_size(self.path)})"), ("fixes", fixes), ("saved", saved)))
+            ("file", f"<code>{escape(shown(self.path))}</code> ({_size(self.path)})"), ("OSM data", data), ("fixes", fixes),
+            ("saved", saved)))
         return (f"<div><b>Network {escape(self.path.name.split('.')[0])}</b><table>{rows}</table>"
                 f"{self.summary().to_html(index=False)}</div>")
 

@@ -12,6 +12,7 @@ duckdb = { version = "=1.10506.1", features = ["bundled"] }
 clap = { version = "4", features = ["derive"] }
 # boundary: the place lookup and the GeoJSON writer of the build (place.rs)
 duckosm-build = { path = "../duckosm-build", features = ["get"] }
+duckosm-core = { path = "../duckosm-core" }      # the header of the region file (main.osm_source)
 # extract: the edge_id macros of each database
 duckosm-duckdb = { path = "../duckosm-duckdb" }
 serde_json = { version = "1", features = ["preserve_order"] }

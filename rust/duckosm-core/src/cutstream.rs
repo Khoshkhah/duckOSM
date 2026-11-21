@@ -475,6 +475,37 @@ pub fn header<R: Read + Send>(r: R) -> Result<(Option<i64>, bool), String> {
     }
 }
 
+/// The time of the OSM data of the `.osm.pbf` file `path` (`main.osm_source`): the replication time of the header in seconds
+/// since 1970, and the replication sequence number. When the header has no time, the time of the newest object of the file
+/// (a pass over all blocks).
+/// ponytail: the pass reads the whole file; only a file with no replication time in its header (not Geofabrik's, not a cut of duckOSM) needs it.
+pub fn data_time(path: &std::path::Path) -> Result<(Option<i64>, Option<i64>), String> {
+    let err = |e: osmpbf::Error| e.to_string();
+    let file = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let (time, seq) = match osmpbf::BlobReader::new(std::io::BufReader::new(file)).next().transpose().map_err(err)? {
+        Some(h) => match h.decode().map_err(err)? {
+            osmpbf::BlobDecode::OsmHeader(h) => (h.osmosis_replication_timestamp(), h.osmosis_replication_sequence_number()),
+            _ => (None, None),
+        },
+        None => return Err(format!("{}: the PBF file is empty", path.display())),
+    };
+    if time.is_some() {
+        return Ok((time, seq));
+    }
+    let newest = osmpbf::ElementReader::from_path(path).map_err(err)?.par_map_reduce(
+        |e| match e {
+            osmpbf::Element::Node(n) => n.info().milli_timestamp(),
+            osmpbf::Element::DenseNode(n) => n.info().map(|i| i.milli_timestamp()),
+            osmpbf::Element::Way(w) => w.info().milli_timestamp(),
+            osmpbf::Element::Relation(r) => r.info().milli_timestamp(),
+        }
+        .unwrap_or(0),
+        || 0,
+        i64::max,
+    ).map_err(err)?;
+    Ok(((newest > 0).then_some(newest / 1000), seq))
+}
+
 /// Cut the region file that `open` reads (a new reader for each pass) to `boundary`, and write the area to `out` as
 /// a `.osm.pbf` file. Gives `out` back, and the numbers of elements.
 pub fn cut_to_pbf<R: Read + Seek + Send, W: Write>(

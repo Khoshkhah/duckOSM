@@ -46,7 +46,7 @@ that names a module calls the function of that module, with the same other argum
 
 | Group | Methods and properties |
 |---|---|
-| Data | `sql(query, params=None)`, `connect()`, `schema(schema=None)`, `tables()`, `columns(table)`, `summarize(table)`, `summary()`, `modes`, `boundary`, `edges(mode, where=None, crs=None)`, `nodes(mode, crs=None)` |
+| Data | `osm_version`, `has_osm_source()`, `sql(query, params=None)`, `connect()`, `schema(schema=None)`, `tables()`, `columns(table)`, `summarize(table)`, `summary()`, `modes`, `boundary`, `edges(mode, where=None, crs=None)`, `nodes(mode, crs=None)` |
 | Maps | `map(mode=None, theme=None, color_by=None, highlight=None, routes=None, **style)`, `dashboard(mode=None, color_by=None, highlight=None, routes=None, **style)`, `save_map(path, mode=None, dashboard=False, **options)`, `plot(mode=None, color_by=None, highlight=None, routes=None, ax=None, **style)` |
 | [analysis](sdk/analysis.md) | `stats(mode, area_m2=None)` |
 | [routing](sdk/routing.md) | `route(a, b, mode, weight)`, `route_points(a, b, mode)`, `routes(origins, destinations, mode)`, `k_shortest_paths(a, b, k, mode)`, `matrix(origins, destinations, mode)`, `isochrones(origins, minutes, mode)`, `accessibility(origins, targets, minutes, mode)`, `route_multimodal_points(a, b)`, `directions(route, mode)` |

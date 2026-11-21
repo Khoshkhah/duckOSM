@@ -633,6 +633,41 @@ pub fn write_fixes_record<W: Write + Send>(p: &Params, built_at: i64, mut file: 
     duckosm_parquet::write_fixes_to(file("fixes_main.parquet")?, &r)
 }
 
+/// The side file of `duckosm get` beside the cut file `pbf` (`<name>.osm_source.json`): the Geofabrik extract, its address,
+/// when it came into the cache and its replication sequence number.
+pub fn osm_source_file(pbf: &Path) -> PathBuf {
+    let name = pbf.file_name().map(|n| n.to_string_lossy().trim_end_matches(".osm.pbf").to_string()).unwrap_or_default();
+    pbf.with_file_name(format!("{name}.osm_source.json"))
+}
+
+/// `osm_source_main.parquet`, the table `main.osm_source`: the version of the OSM data of the `.osm.pbf` file `pbf` (the time of its
+/// header, its SHA-256), with the facts of `duckosm get` from [`osm_source_file`] when the file is there. No path is in the table.
+pub fn write_osm_source<W: Write + Send>(pbf: &Path, mut file: impl FnMut(&str) -> Result<W, String>) -> Result<(), String> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+    let (time, seq) = duckosm_core::cutstream::data_time(pbf)?;
+    let mut h = Sha256::new();
+    let mut f = std::fs::File::open(pbf).map_err(|e| format!("{}: {e}", pbf.display()))?;
+    let mut buf = vec![0u8; 1 << 20];
+    loop {
+        let n = f.read(&mut buf).map_err(|e| format!("{}: {e}", pbf.display()))?;
+        if n == 0 {
+            break;
+        }
+        h.update(&buf[..n]);
+    }
+    let side: serde_json::Value = std::fs::read_to_string(osm_source_file(pbf)).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+    let r = duckosm_parquet::OsmSource {
+        osm_timestamp: time.map(|s| s * 1_000_000),
+        replication_sequence: seq.or(side["replication_sequence"].as_i64()),
+        extract: side["extract"].as_str().map(str::to_string),
+        extract_url: side["extract_url"].as_str().map(str::to_string),
+        downloaded_at: side["downloaded_at"].as_i64(),
+        pbf_sha256: h.finalize().iter().map(|b| format!("{b:02x}")).collect(),
+    };
+    duckosm_parquet::write_osm_source_to(file("osm_source_main.parquet")?, &r)
+}
+
 pub fn write_elevation_metadata<W: Write + Send>(
     p: &Params,
     resolution_m: f64,
@@ -2208,6 +2243,11 @@ pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String>
         }
         if let Some(f) = area_file.as_ref().filter(|f| f.starts_with(out) && f.ends_with("cut.osm.pbf")) {
             sum.files.push(("cut.osm.pbf".to_string(), f.clone()));
+        }
+        if p.tile.is_none() {
+            // the version of the OSM data (a tile does not: the build by tiles writes it after the union)
+            write_osm_source(pbf_path, |name| duckosm_core::fs::File::create(pq_dir.join(name)).map_err(|e| e.to_string()))?;
+            log.step("osm source");
         }
         if p.geoparquet {
             write_layers_json(&pq_dir, &sum)?;

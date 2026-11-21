@@ -290,6 +290,7 @@ Always empty: the virtual nodes are in `nodes`, with `node_id < 0`.
 | [`building_faces`](#building_faces) | a build from a PBF, with `options.building_faces` (off) and a boundary |
 | [`building_entrances`](#building_entrances) | `duckosm build` from a PBF, with `options.building_faces` (off) and a boundary |
 | [`fixes`](#fixes) | a build with a fixes file (`--fixes`, `osm_overrides`) |
+| [`osm_source`](#osm_source) | a build from a PBF |
 
 `main` also holds the macro `edge_id_hash(osm_id, source, target)`, the `edge_id` formula:
 [Compute or match an id](../concepts/edge-ids.md#compute-or-match-an-id).
@@ -322,6 +323,20 @@ with when the file moves, changes or is not there. Only a build writes this tabl
 | `path` | VARCHAR | the path of the file, as the build got it |
 | `sha256` | VARCHAR | the SHA-256 of `yaml`, in hexadecimal |
 | `built_at` | TIMESTAMP | when the database was built |
+
+### `osm_source`
+
+One row: the version of the OSM data that the database was built from. Only `duckosm get` and the build write it. The table
+has no path.
+
+| Column | Type | Description |
+|---|---|---|
+| `osm_timestamp` | TIMESTAMP | the time of the OSM data: the replication time in the header of the `.osm.pbf` file; without one, the time of the newest object of the file |
+| `replication_sequence` | BIGINT | the replication sequence number of the header (of the Geofabrik extract for a cut of `duckosm get`), or NULL |
+| `extract` | VARCHAR | the Geofabrik extract that `duckosm get` chose, for example `monaco`; NULL for your own OSM file |
+| `extract_url` | VARCHAR | the address of that extract; NULL for your own OSM file |
+| `downloaded_at` | TIMESTAMP | when the extract came into the cache of `duckosm get`; NULL when it is not known |
+| `pbf_sha256` | VARCHAR | the SHA-256 of the `.osm.pbf` file that the build read, in hexadecimal |
 
 ### `boundary`
 
