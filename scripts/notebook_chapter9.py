@@ -388,7 +388,7 @@ ch.code("""blocks["ha"] = blocks.area / 10_000                                # 
 classes = ["< 0.1 ha", "0.1-0.5 ha", "0.5-1 ha", "1-5 ha", "> 5 ha"]
 blocks["size"] = pd.cut(blocks.ha, [0, 0.1, 0.5, 1, 5, 1000], labels=classes)
 blocks["size"].value_counts().sort_index()                         # the blocks in each class""")
-ch.code("""fig, ax = plt.subplots(figsize=(8, 9))
+ch.code("""fig, ax = plt.subplots(figsize=(12, 13), dpi=200)          # a large picture with many pixels: zoom in to see each block
 streets.plot(ax=ax, color="lightgray", linewidth=0.4)              # the streets first, in light gray
 blocks.plot(ax=ax, column="size", cmap="viridis", legend=True,
             legend_kwds={"title": "block area", "loc": "lower right"})    # the blocks by size
