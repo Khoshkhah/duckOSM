@@ -116,3 +116,19 @@ def test_bad_weights(net, ids):
     with pytest.raises(Exception, match="0 or more"):
         routing.route(net.driving, ids[0], ids[5], weight={ids[0]: -1.0})
     assert math.isnan(routing.matrix(net.driving, [ids[0]], [ids[5]], weight={}, missing="skip").iloc[0, 0])
+
+
+def test_add_multimodal_node_costs(net):
+    """Network.add_multimodal(node_costs=..., only_listed_nodes=...): the cost of a change at each junction (the last
+    test: it changes mm.* of the file)."""
+    net.add_multimodal()
+    node = int(net.sql("SELECT min(node_id) AS n FROM mm.transfers").n[0])
+    net.add_multimodal(node_costs={node: 7})                                    # a dict: each change at the junction
+    rows = net.sql(f"SELECT DISTINCT cost_s FROM mm.transfers WHERE node_id = {node}").cost_s.tolist()
+    assert rows == [7.0] and net.sql("SELECT count(*) AS n FROM mm.transfers WHERE cost_s = 60").n[0] > 0
+    df = pd.DataFrame({"node_id": [node], "cost_s": [9], "from_mode": ["walking"], "to_mode": ["driving"]})
+    net.add_multimodal(node_costs=df, only_listed_nodes=True)
+    assert net.sql("SELECT node_id, from_mode, to_mode, cost_s FROM mm.transfers").values.tolist() == [
+        [node, "walking", "driving", 9.0]]
+    with pytest.raises(DuckOSMError, match="needs node_costs"):
+        net.add_multimodal(only_listed_nodes=True)
