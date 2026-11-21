@@ -622,6 +622,17 @@ fn write_h3_heights<W: Write + Send>(
 
 /// `elevation_metadata_main` (duckOSM's `main.elevation_metadata`): the DEM of `p`, its resolution, and the nodes with a height
 /// and with no height (of all modes). The build by tiles writes it after the union.
+/// `fixes_main.parquet`, the table `main.fixes`: the text, the path and the SHA-256 of the fixes file of the build (`osm_fixes`),
+/// so that the database keeps the rules that it was built with when the file moves or changes. No fixes file: no table.
+pub fn write_fixes_record<W: Write + Send>(p: &Params, built_at: i64, mut file: impl FnMut(&str) -> Result<W, String>) -> Result<(), String> {
+    use sha2::{Digest, Sha256};
+    let Some(path) = &p.osm_fixes else { return Ok(()) };
+    let yaml = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let sha256 = Sha256::digest(yaml.as_bytes()).iter().map(|b| format!("{b:02x}")).collect();
+    let r = duckosm_parquet::FixesRecord { yaml, path: path.display().to_string(), sha256, built_at };
+    duckosm_parquet::write_fixes_to(file("fixes_main.parquet")?, &r)
+}
+
 pub fn write_elevation_metadata<W: Write + Send>(
     p: &Params,
     resolution_m: f64,
@@ -1590,6 +1601,9 @@ pub fn run<W: Write + Send>(
         lookup: None,
     };
     write_area_tables(&area, &mut file)?;
+    if p.tile.is_none() {
+        write_fixes_record(p, built_at, &mut file)?;       // a tile does not: the union writes it for the whole area
+    }
     log.step("write the area tables");
     // the building faces and raw.* come last, on top of less: the raw part, the street segments and the ways
     drop((mode_nodes, junctions));

@@ -23,6 +23,8 @@ fn the_columns_have_the_descriptions_of_the_schema_page() {
     let sum = build(&data.join("monaco.osm.pbf"), &out, &p).unwrap();
     let db = sum.files.iter().find(|(k, _)| k == "duckdb").unwrap().1.clone();
     let con = duckdb::Connection::open(db).unwrap();
+    let fixes: i64 = con.query_row("SELECT count(*) FROM duckdb_tables() WHERE schema_name = 'main' AND table_name = 'fixes'", [], |r| r.get(0)).unwrap();
+    assert_eq!(fixes, 0, "a build with no fixes file has no main.fixes");
     let mut stmt = con
         .prepare("SELECT column_name, comment FROM duckdb_columns() WHERE schema_name = 'driving' AND table_name = 'edges'")
         .unwrap();

@@ -15,7 +15,9 @@ writes the loaded file.
 | `os.fspath(fixes)` | the saved file, or the loaded file when nothing changed, so each `fixes=` takes a `Fixes`. With changes that are not saved, a call stops: "save the fixes first: fixes.save('name.yaml')" |
 | `fixes.rules()` | the rules as a DataFrame |
 | `fixes` (last line of a cell) | a card with a table of the rules |
-| `net.fixes` | the `Fixes` of the file that the network was built with, or `None` |
+| `net.fixes` | the `Fixes` of the rules that the network was built with (the table `main.fixes`), or `None`. The rules are in memory with no save file: `net.fixes.save("name.yaml")` writes them. A file from an older build uses the path of the build |
+| `net.has_fixes()` | `True` when the network was built with a fixes file |
+| `net.fixes_changed()` | `True` when the fixes file at the path of the build is now different from `main.fixes` (compared by SHA-256): then build again. It stops with a message when the file is not there |
 | `net.rebuild(fixes=None, out=None)` | builds the area again with the same modes and `fixes`, from the OSM file and the boundary beside the database; `out` default `<name>_fixed.duckdb`. Returns the new `Network` |
 | `net.diff(other, mode=None)` = `diff(net, other)` | a DataFrame of the edges that are different in `other`, by `edge_id`: `mode`, `edge_id`, `change` (`added`, `removed`, `changed`), `changed` (the columns with a new value) |
 | `net.edit(load=None, save=None, port=8790)` | starts `duckosm edit` on the database in the background and returns the URL of the page. The page reads `load` and writes `save`; with no `save`, the first **Save** asks for the file. `fixes=F` is the old name of `load=F, save=F` (a `DeprecationWarning`) |

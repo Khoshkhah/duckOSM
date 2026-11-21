@@ -37,6 +37,13 @@ fn monaco_lane_profile_equals_duckosm() {
     assert_eq!(sum.lanes.as_deref(), Some("lane profile: 3255 lanes"));
 
     let con = duckdb::Connection::open(out.join("monaco.duckdb")).unwrap();
+    // main.fixes keeps the text of the fixes file and its SHA-256
+    let (yaml, path, sha): (String, String, String) =
+        con.query_row("SELECT yaml, path, sha256 FROM main.fixes", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
+    let text = std::fs::read_to_string(data.join("osm_fixes.yaml")).unwrap();
+    use sha2::Digest;
+    let want_sha: String = sha2::Sha256::digest(text.as_bytes()).iter().map(|b| format!("{b:02x}")).collect();
+    assert!(yaml == text && sha == want_sha && path.ends_with("osm_fixes.yaml"), "main.fixes: {path} {sha}");
     let mut stmt = con
         .prepare(
             "SELECT edge_id::VARCHAR, lane_num::VARCHAR, use, width_m::VARCHAR, coalesce(turn, ''), source, width_source \
