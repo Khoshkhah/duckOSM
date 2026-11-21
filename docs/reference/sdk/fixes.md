@@ -25,4 +25,4 @@ net.diff(fixed)
 ```
 
 The file is written again at each change: its comments are not kept. The other keys of the file (`new_ways`,
-`turn_restrictions`, `extra`) stay. Notebook: [2. Fix the OSM data once](../../notebooks/02_osm_fixes.md).
+`turn_restrictions`, `extra`) stay. Notebook: [2. Fix the OSM data once](../../notebooks/05_osm_fixes.md).

@@ -21,7 +21,7 @@ duckosm.planning.to_aequilibrae(net.driving, "out/aequilibrae")
 | `duckosm[planning]` | path4gmns (and requests, which path4gmns needs) |
 | none | AequilibraE: `pip install aequilibrae` (Python 3.11 or later) and SpatiaLite (`apt install libsqlite3-mod-spatialite`). AequilibraE 1.7 needs pandas 3, so it is not in an extra |
 
-Notebook: [8. Transport planning](../../notebooks/08_planning.md). Guide:
+Notebook: [8. Transport planning](../../notebooks/13_planning.md). Guide:
 [duckOSM for transport planning users](../../compare/for-planning-users.md).
 
 Pages: [GMNS](../../exports/gmns.md), [GMNS meso and micro](../../exports/gmns-meso-micro.md).

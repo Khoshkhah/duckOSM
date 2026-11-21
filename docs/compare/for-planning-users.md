@@ -2,7 +2,7 @@
 
 This page is for users of osm2gmns, path4gmns, DTALite and AequilibraE. Each table gives the call of your tool and the
 duckOSM call that does the same work. The module is `duckosm.planning`
-([reference](../reference/sdk/planning.md)). The notebook [8. Transport planning](../notebooks/08_planning.md) runs
+([reference](../reference/sdk/planning.md)). The notebook [8. Transport planning](../notebooks/13_planning.md) runs
 the GMNS and path4gmns calls on Monaco.
 
 ```bash
