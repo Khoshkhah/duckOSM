@@ -252,6 +252,70 @@ class Network(os.PathLike):
             self._modes_at = (at, sorted(rows, key=lambda m: (order.index(m) if m in order else len(order), m)))
         return list(self._modes_at[1])
 
+    def has_mode(self, *modes: str) -> bool:
+        """True when the file has each of these modes.
+
+        >>> net.has_mode("walking"), net.has_mode("driving", "cycling")"""
+        return self.path.is_file() and all(m in self.modes for m in modes)
+
+    def has_multimodal(self, schema: str = "mm") -> bool:
+        """True when the file has the multimodal graph (the tables ``mm.edges`` and ``mm.transfers``; see
+        :meth:`add_multimodal`).
+
+        >>> net.has_multimodal()"""
+        if not self.path.is_file():
+            return False
+        n = self.sql("SELECT count(*) AS n FROM information_schema.tables WHERE table_schema = ? "
+                     "AND table_name IN ('edges', 'transfers')", [schema]).n[0]
+        return int(n) == 2
+
+    def _has_table(self, schema: str, table: str | None = None) -> bool:
+        """True when the file has the table (or, with no table, any table in the schema)."""
+        if not self.path.is_file():
+            return False
+        q = "SELECT count(*) AS n FROM information_schema.tables WHERE table_schema = ?" + (" AND table_name = ?" if table else "")
+        return int(self.sql(q, [schema, table] if table else [schema]).n[0]) > 0
+
+    def has_features(self, *layers: str) -> bool:
+        """True when the file has the base map (the schema ``features``), and each of these layers if you give them,
+        for example ``net.has_features("buildings", "water_polygons")``. A build with ``features=False`` has none."""
+        return self._has_table("features") and all(self._has_table("features", t) for t in layers)
+
+    def has_levels(self) -> bool:
+        """True when the file has the drawing levels of the roads (``visualization.edge_levels``: bridges over
+        tunnels). A build with ``levels=False`` has none."""
+        return self._has_table("visualization", "edge_levels")
+
+    def has_bus_routes(self) -> bool:
+        """True when the file has the bus routes (``bus.routes`` and ``bus.route_edges``). A build with
+        ``bus_routes=False`` has none."""
+        return self._has_table("bus", "routes")
+
+    def has_admin(self) -> bool:
+        """True when the file has administrative areas (rows in ``main.admin_boundaries``; see
+        :func:`duckosm.gis.admin_boundaries`)."""
+        return self._has_table("main", "admin_boundaries") and int(
+            self.sql("SELECT count(*) AS n FROM main.admin_boundaries").n[0]) > 0
+
+    def has_raw(self) -> bool:
+        """True when the file has the OSM data of the cut (``raw.nodes``, ``raw.ways``, ``raw.relations``)."""
+        return self._has_table("raw", "ways")
+
+    def has_fixes(self) -> bool:
+        """True when the network was built with a fixes file (:attr:`fixes` gives it)."""
+        return self.fixes is not None
+
+    def has_elevation(self) -> bool:
+        """True when the file has heights: a row in ``main.elevation_metadata`` (a build with ``dem=``, or
+        :func:`duckosm.analysis.add_elevation`).
+
+        >>> net.has_elevation()"""
+        if not self.path.is_file():
+            return False
+        has = self.sql("SELECT count(*) AS n FROM information_schema.tables WHERE table_schema = 'main' "
+                       "AND table_name = 'elevation_metadata'").n[0]
+        return bool(has) and int(self.sql("SELECT count(*) AS n FROM main.elevation_metadata").n[0]) > 0
+
     def tables(self) -> list[str]:
         """The tables of the file, as ``schema.table``.
 
@@ -607,7 +671,9 @@ class Network(os.PathLike):
         else:
             gdf.plot(ax=ax, color="#bbbbbb", linewidth=0.6)
         if highlight is not None:
-            gdf[gdf.edge_id.isin(list(highlight))].plot(ax=ax, color=HIGHLIGHT, linewidth=3)
+            hl = gdf[gdf.edge_id.isin(list(highlight))]
+            if len(hl):                              # an empty selection draws nothing (geopandas cannot plot it)
+                hl.plot(ax=ax, color=HIGHLIGHT, linewidth=3)
         for i, (label, g) in enumerate(line.items()):
             color = ROUTE_COLORS[i % len(ROUTE_COLORS)]
             g.plot(ax=ax, color=color, linewidth=3.5)
@@ -700,13 +766,13 @@ class Network(os.PathLike):
         from duckosm import analysis
         return analysis.stats(self, area_m2=area_m2, mode=mode)
 
-    def route(self, a, b, mode: str | None = None, weight: str = "time") -> dict | None:
+    def route(self, a, b, mode: str | None = None, weight="time", **kwargs) -> dict | None:
         """The fastest route (``weight="length"``: the shortest) from ``a`` to ``b``: edge ids, ``(lon, lat)`` points or
         place names. A :class:`duckosm.routing.Route`. :func:`duckosm.routing.route`.
 
         >>> r = net.walking.route((7.4155, 43.7285), (7.4335, 43.7468))"""
         from duckosm import routing
-        return routing.route(self, a, b, mode=mode, weight=weight)
+        return routing.route(self, a, b, mode=mode, weight=weight, **kwargs)
 
     def route_points(self, a: tuple, b: tuple, mode: str | None = None, **kwargs) -> dict | None:
         """:func:`duckosm.routing.route_points`: the route between two ``(lon, lat)`` points.
@@ -743,12 +809,12 @@ class Network(os.PathLike):
         from duckosm import routing
         return routing.isochrones(self, origins, minutes, mode=mode, **kwargs)
 
-    def accessibility(self, origins, targets, minutes=15, mode: str | None = None):
+    def accessibility(self, origins, targets, minutes=15, mode: str | None = None, **kwargs):
         """:func:`duckosm.routing.accessibility`: the targets reached from each origin, and the nearest.
 
         >>> acc = net.walking.accessibility(homes, shops, minutes=[5, 10])"""
         from duckosm import routing
-        return routing.accessibility(self, origins, targets, minutes, mode=mode)
+        return routing.accessibility(self, origins, targets, minutes, mode=mode, **kwargs)
 
     def route_multimodal_points(self, a: tuple, b: tuple, **kwargs) -> dict:
         """:func:`duckosm.routing.route_multimodal_points`: a route across the modes (needs the multimodal graph ``mm``).
@@ -894,6 +960,28 @@ class Network(os.PathLike):
             elif src.is_file():
                 shutil.copy2(src, dst.with_name(new + ext))
         return Network(dst)
+
+    def add_multimodal(self, transfer_s: float = 60, pair_costs: dict | None = None, progress: Any = None) -> "Network":
+        """Add the multimodal graph to this file, with no new build: the schema ``mm`` with ``mm.edges`` (the edges of
+        all modes) and ``mm.transfers`` (the changes of mode at the shared junctions). It reads the modes that are in
+        the file, so it needs walking and one more mode. A file that has ``mm`` gets it again. ``transfer_s``: the
+        seconds of a change of mode; ``pair_costs``: another cost for one direction, ``{"walking->driving": 120}``.
+        Returns the network, so that a route across modes can follow (:meth:`route_multimodal_points`).
+
+        >>> net.add_multimodal().route_multimodal_points((7.4155, 43.7285), (7.4335, 43.7468))"""
+        from duckosm import _rust
+        from duckosm._progress import timed
+        modes = self.modes
+        if "walking" not in modes or len(modes) < 2:
+            raise DuckOSMError(f"{shown(self.path)} has the modes {', '.join(modes) or 'none'}: the multimodal graph needs "
+                               f"walking and one more mode. Build them with modes=[\"driving\", \"walking\"].")
+        args = ["duckosm", "multimodal", str(self.path), "--transfer-cost", str(transfer_s)]
+        for pair, seconds in (pair_costs or {}).items():
+            args += ["--pair-cost", f"{pair}={seconds}"]
+        code = timed(progress, "multimodal graph", lambda: _rust.cli(args))
+        if code:
+            raise DuckOSMError(f"duckosm multimodal stopped with exit code {code}")
+        return self
 
     def rebuild(self, fixes=None, out: str | os.PathLike | None = None, progress: Any = None) -> "Network":
         """Build the area again, with the same modes, from the OSM file and the boundary beside the file (where

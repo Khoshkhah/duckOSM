@@ -15,11 +15,15 @@ pub struct After {
     /// duckOSM `multimodal.transfer_s` and `transfer_costs` (`"walking->driving": 60`): the seconds of the transfers.
     pub transfer_s: f64,
     pub transfer_costs: Vec<(String, f64)>,
+    /// duckOSM `multimodal.node_costs` (a CSV or Parquet file: the cost of a change at some junctions) and
+    /// `only_listed_nodes` (the changes only at those junctions).
+    pub node_costs: Option<std::path::PathBuf>,
+    pub only_listed_nodes: bool,
 }
 
 impl Default for After {
     fn default() -> Self {
-        After { validation: None, report: None, multimodal: true, boundary_cells: None, transfer_s: 60.0, transfer_costs: Vec::new() }
+        After { validation: None, report: None, multimodal: true, boundary_cells: None, transfer_s: 60.0, transfer_costs: Vec::new(), node_costs: None, only_listed_nodes: false }
     }
 }
 
@@ -46,6 +50,9 @@ pub fn run(db: &std::path::Path, name: &str, modes: &[&str], a: &After) -> Resul
     use duckosm_duckdb::after as sql;
     if a.multimodal {
         sql::transfer_costs(db, a.transfer_s, &a.transfer_costs)?;
+        if let Some(f) = &a.node_costs {
+            sql::node_costs(db, f, a.only_listed_nodes)?;
+        }
     } else {
         sql::drop_multimodal(db)?;
     }

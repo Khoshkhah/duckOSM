@@ -59,12 +59,12 @@ one mode, and some take all modes:
 | `to_matsim` | the driving network; `mode` can also be a list of modes |
 | `to_gmns`, `to_gis` | all the modes of the file |""")
 
-ch.md("""## Build the network of Monaco
+ch.md("""## Open the network of chapter 1
 
-The chapter exports the driving network of Monaco. The summary gives the number of edges and nodes, so you can compare
+Chapter 1 builds Monaco with three modes (driving, walking and cycling) and saves it as `monaco.duckdb`. This chapter opens that file with `duckosm.open`: it builds nothing. Most exports take the driving network. The summary gives the number of edges and nodes, so you can compare
 each export with it.""")
-ch.code("""net = duckosm.network(osm_id=2220322, modes=["driving"], name="monaco")    # get and build the driving network of Monaco
-net.summary()                                         # the number of edges, to compare with each export""")
+ch.code("""net = duckosm.open("monaco.duckdb")    # the network of chapter 1: Monaco, three modes
+net.driving.summary()                                         # the number of edges, to compare with each export""")
 ch.md("""The driving network of Monaco has 2,840 edges and 1,768 nodes, 96.2 km of road.
 Each export below gives its own count, and the count must agree with these numbers.""")
 
@@ -74,19 +74,32 @@ ch.md("""## SUMO
 second. Its network file is `.net.xml`. SUMO's program `netconvert` makes it from three **plain XML** files: the
 nodes (`.nod.xml`), the edges (`.edg.xml`) and the connections between lanes (`.con.xml`).
 
-`to_sumo` writes the three plain files, then runs `netconvert` on them. The extra `sim` installs `netconvert` (the
-Python package `eclipse-sumo`).
+`to_sumo` makes the SUMO network in two steps:
+
+1. It writes the three plain files and a **netconvert config** (`.netccfg`). The config is the input of `netconvert`:
+   it names the three plain files, the output file and the options of the conversion.
+2. It runs `netconvert -c network.netccfg`. `netconvert` reads the config and the files that it names, and writes
+   `.net.xml`.
+
+```text
+network.nod.xml ─┐
+network.edg.xml ─┼─ named in network.netccfg ──> netconvert -c network.netccfg ──> network.net.xml
+network.con.xml ─┘
+```
+
+The extra `sim` installs `netconvert` (the Python package `eclipse-sumo`).
 
 | Argument | Default | Does |
 |---|---|---|
 | `net_name` | `"network"` | the start of each file name |
 | `run_netconvert` | `True` | `False`: only the plain XML, with no SUMO program |
 | `connections` | `True` | writes the connections of the lanes at each junction (from the turn graph and the turn lanes) |
-| `config` | none | a netconvert config file of your own |""")
-ch.code("""sumo = net.to_sumo("out/sumo")    # the plain XML files, and the .net.xml of netconvert
+| `config` | none | your own netconvert config (a `.netccfg` path, or a dict of options), in place of the default options |""")
+ch.code("""sumo = net.driving.to_sumo("out/sumo")    # the plain XML files, and the .net.xml of netconvert
 sumo                              # the paths and the numbers""")
-ch.md("""**What the output shows.** The dict has the paths of the three plain files, of the netconvert config
-(`.netccfg`) and of SUMO's network (`.net.xml`). The plain files have 1,768 nodes, 2,840 edges and 5,082
+ch.md("""**What the output shows.** The line `running: netconvert -c out/sumo/network.netccfg` is step 2. The dict has the
+paths of the three plain files, of the netconvert config (`.netccfg`, the input of netconvert) and of SUMO's network
+(`.net.xml`, its output). The plain files have 1,768 nodes, 2,840 edges and 5,082
 connections: the same nodes and edges as the network, and one connection for each arc of the turn graph that a car
 can use (chapter 7).""")
 ch.md("""The check: SUMO's own network file must have each edge of duckOSM. `duckosm.sim.edge_map` reads the `.net.xml`
@@ -115,7 +128,7 @@ each table as a CSV file, the form of the standard.
 | `modes` | all | the modes, when you call it on the network (`mode` gives one) |
 | `lane_geometry` | `True` | a line for each lane |
 | `combined` | `False` | also one network of all modes together |""")
-ch.code("""gmns = net.to_gmns("out/gmns.duckdb", to_csv="out/gmns")         # the GMNS tables in a DuckDB file and as CSV
+ch.code("""gmns = net.driving.to_gmns("out/gmns.duckdb", to_csv="out/gmns")         # the GMNS tables in a DuckDB file and as CSV
 gmns["modes"]                                                     # the rows of each table""")
 ch.md("""**What the output shows.** The GMNS network of driving has 1,772 nodes, 2,858 links, 3,318 lanes and 3,755
 movements. It has 18 links more than `driving.edges`: for example the other direction of a one-way road that a bus
@@ -141,7 +154,7 @@ speed (m/s), its capacity and its lanes.
 ch.code("""import gzip
 import xml.etree.ElementTree as ET                                   # to read the XML back
 
-matsim = net.to_matsim("out/matsim_network.xml.gz")                  # the MATSim network
+matsim = net.driving.to_matsim("out/matsim_network.xml.gz")                  # the MATSim network
 matsim, len(ET.parse(gzip.open("out/matsim_network.xml.gz")).findall(".//link"))    # its numbers, and the links in the file""")
 ch.md("""The MATSim network has 1,768 nodes and 2,840 links, in UTM zone 32N (`EPSG:32632`,
 in metres). The XML file has 2,840 `<link>` elements: one link for each edge.""")
@@ -156,7 +169,7 @@ is experimental: it writes one road for each edge, and the junctions only with `
 |---|---|---|
 | `crs` | the UTM zone of the area | the coordinate system (metres) |
 | `junctions` | `False` | `True`: also the OpenDRIVE junctions |""")
-ch.code("""odr = net.to_opendrive("out/monaco.xodr")                    # the OpenDRIVE file
+ch.code("""odr = net.driving.to_opendrive("out/monaco.xodr")                    # the OpenDRIVE file
 odr, len(ET.parse("out/monaco.xodr").findall("road"))       # its numbers, and the roads in the file""")
 ch.md("""The OpenDRIVE file has 2,840 roads, in UTM zone 32N. The XML has 2,840 `<road>`
 elements: one road for each edge.""")
@@ -174,7 +187,7 @@ layers (`edges_driving`, `nodes_driving` ...) and the boundary of the area.
 | `srs` | `"EPSG:4326"` | the coordinate system of the file |""")
 ch.code("""import duckdb                                                # to read the layers back
 
-gis = net.to_gis("out/monaco.gpkg")                          # the GeoPackage
+gis = net.driving.to_gis("out/monaco.gpkg")                          # the GeoPackage
 con = duckdb.connect()                                       # DuckDB with the extension spatial
 con.load_extension("spatial")
 {layer: con.execute(f"SELECT count(*) FROM st_read('out/monaco.gpkg', layer='{layer}')").fetchone()[0]
@@ -183,7 +196,7 @@ ch.md("""The GeoPackage has three layers: 2,840 edges, 1,768 nodes and the bound
 DuckDB reads each layer with the same number of rows as the network.""")
 ch.md("""GeoParquet is a Parquet file with a geometry column. It is fast to read for DuckDB, GeoPandas and the cloud data
 tools. `fmt="geoparquet"` writes one file for each layer into a folder.""")
-ch.code("""pq = net.to_gis("out/geoparquet", fmt="geoparquet")         # a folder of GeoParquet files
+ch.code("""pq = net.driving.to_gis("out/geoparquet", fmt="geoparquet")         # a folder of GeoParquet files
 len(pq["files"]), pq["layers"]["edges_driving"], con.sql("SELECT count(*) FROM 'out/geoparquet/edges_driving.parquet'").fetchone()[0]""")
 ch.md("""**What the output shows.** The folder has 15 files. The edges file has 2,840 rows, also when DuckDB reads it.
 The folder also has the layers of the base map (`features_buildings`, `features_streets` ...), which the GeoPackage of
@@ -251,14 +264,14 @@ speeds = {"database (km/h)": float(fixed.edges(where=f"edge_id = {edge}").maxspe
 ch.code("""import gzip
 import xml.etree.ElementTree as ET                                                  # to read the XML files back
 
-fixed.to_gis("out/fixed.gpkg")                                                      # a GeoPackage
+fixed.driving.to_gis("out/fixed.gpkg")                                                      # a GeoPackage
 speeds["GeoPackage (km/h)"] = con.execute(
     "SELECT maxspeed_kmh FROM st_read('out/fixed.gpkg', layer='edges_driving') WHERE edge_id = ?", [edge]).fetchone()[0]
-sumo = fixed.to_sumo("out/fixed_sumo", run_netconvert=False)                        # the plain SUMO files; speed in m/s
+sumo = fixed.driving.to_sumo("out/fixed_sumo", run_netconvert=False)                        # the plain SUMO files; speed in m/s
 speeds["SUMO (km/h)"] = round(float(ET.parse(sumo["edg"]).find(f".//edge[@id='{edge}']").get("speed")) * 3.6, 1)
-fixed.to_matsim("out/fixed_matsim.xml.gz")                                          # the MATSim network; free speed in m/s
+fixed.driving.to_matsim("out/fixed_matsim.xml.gz")                                          # the MATSim network; free speed in m/s
 speeds["MATSim (km/h)"] = round(float(ET.parse(gzip.open("out/fixed_matsim.xml.gz")).find(f".//link[@id='{edge}']").get("freespeed")) * 3.6, 1)
-fixed.to_gmns("out/fixed_gmns.duckdb")                                              # the GMNS network
+fixed.driving.to_gmns("out/fixed_gmns.duckdb")                                              # the GMNS network
 speeds["GMNS (km/h)"] = duckdb.connect("out/fixed_gmns.duckdb", read_only=True).execute(
     "SELECT free_speed FROM gmns_driving.link WHERE link_id = ?", [edge]).fetchone()[0]
 quack = duckosm.gis.quack(area, out="out", name="fixed", fixes="osm_fixes.yaml", formats=["geoparquet"])    # the OSM data with the fixes
@@ -271,23 +284,25 @@ shows the text `'10'`. One fixes file corrects all six outputs.""")
 ch.md("""## The files of the chapter
 
 Each export wrote its files into the folder `out`. The last cell lists them with their sizes.""")
-ch.code("""sorted((str(p), round(p.stat().st_size / 1e6, 2)) for p in Path("out").rglob("*") if p.is_file() and p.suffix != ".csv")    # path and MB""")
+ch.code("""mine = ("out/sumo", "out/gmns", "out/matsim", "out/monaco", "out/geoparquet", "out/fixed")    # the files of this chapter
+sorted((str(p), round(p.stat().st_size / 1e6, 2)) for p in Path("out").rglob("*")
+       if p.is_file() and p.suffix != ".csv" and str(p).startswith(mine))    # path and MB""")
 ch.md("""**What the output shows.** The largest file is the GMNS database (9.2 MB): it has the lanes, the movements and a
 line for each lane. SUMO's `.net.xml` is 5.2 MB. The MATSim network is the smallest export of the network (0.1 MB),
 because it is compressed with gzip.""")
 
 ch.exercises([
     ("Export the walking network of Monaco to MATSim. Build it first with `modes=[\"walking\"]`.",
-     """walk = duckosm.network(osm_id=2220322, modes=["walking"], name="monaco_walk")
+     """walk = duckosm.open("monaco.duckdb")
 walk.walking.to_matsim("out/matsim_walking.xml.gz")"""),
     ("Write the driving network as GeoParquet files in the coordinate system of UTM zone 32N (`EPSG:32632`), and read "
      "the edges with GeoPandas.",
      """import geopandas as gpd
-net.to_gis("out/utm", fmt="geoparquet", srs="EPSG:32632")
+net.driving.to_gis("out/utm", fmt="geoparquet", srs="EPSG:32632")
 gpd.read_parquet("out/utm/edges_driving.parquet").crs"""),
     ("Write only the plain XML of SUMO, with no netconvert, into the folder `out/plain`, and count the `<edge>` "
      "elements of the `.edg.xml`.",
-     """plain = net.to_sumo("out/plain", run_netconvert=False)
+     """plain = net.driving.to_sumo("out/plain", run_netconvert=False)
 len(ET.parse(plain["edg"]).findall("edge"))"""),
 ])
 

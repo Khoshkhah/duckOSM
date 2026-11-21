@@ -846,6 +846,8 @@ class DuckOSM:
         logger.info("Building multimodal transfer graph (mm.*)...")
         start = time.time()
         pairs = [a for k, v in (mm.transfer_costs or {}).items() for a in ("--pair-cost", f"{k}={v}")]
+        if mm.node_costs:
+            pairs += ["--node-costs", str(mm.node_costs)] + (["--only-listed-nodes"] if mm.only_listed_nodes else [])
         try:
             self._rust_step("multimodal", "--transfer-cost", mm.transfer_s, *pairs)
             self.stats['mm_edge_count'] = self.con.execute("SELECT count(*) FROM mm.edges").fetchone()[0]

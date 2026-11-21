@@ -452,9 +452,18 @@ fn edge_view(c: &Ctx, mode: &str, has_raw: bool) -> Result<()> {
     }
     let raw_join = if has_raw { "LEFT JOIN s.raw.ways w ON w.osm_id = abs(p.osm_id)" } else { "" };
     let b = if bike.is_empty() { "false".to_string() } else { bike.join(" OR ") };
+    // the columns of driving.edges that private_edges does not have (for example z_from and z_to after
+    // `duckosm elevation`, which writes only the edges) are NULL on a bus-only edge, so one query reads both
+    let cols = |t: &str| {
+        c.strings(&format!(
+            "SELECT column_name FROM duckdb_columns() WHERE database_name = 's' AND schema_name = 'driving' AND table_name = '{t}'"
+        ))
+    };
+    let have = cols("private_edges")?;
+    let missing: String = cols("edges")?.iter().filter(|n| !have.contains(n)).map(|n| format!(", NULL AS \"{n}\"")).collect();
     c.exec(&format!(
         "CREATE OR REPLACE TEMP VIEW _edges_bus AS
-      SELECT p.*, true AS _bus, COALESCE({b}, false) AS _bike
+      SELECT p.*{missing}, true AS _bus, COALESCE({b}, false) AS _bike
       FROM s.driving.private_edges p {raw_join} WHERE p.access = 'bus'"
     ))?;
     c.exec("CREATE OR REPLACE TEMP VIEW _edges AS SELECT * FROM _edges_car UNION ALL BY NAME SELECT * FROM _edges_bus")

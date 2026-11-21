@@ -50,10 +50,10 @@ DuckDB makes the index arrays of each graph in SQL. Python only puts them into t
 > **Key idea:** each graph keeps the `edge_id`. A model predicts a value for each node or arc, and the `edge_id` takes
 > each value back to its road. Then the value joins to the network, to a map and to your own data (chapter 4).""")
 
-ch.md("""## Build Monaco
+ch.md("""## Open the network of chapter 1
 
-The graphs of this chapter use the driving network. The build is the same as in chapter 1.""")
-ch.code("""net = duckosm.network(osm_id=2220322, modes=["driving"], name="monaco")    # get and build the driving network of Monaco
+Chapter 1 builds Monaco with three modes (driving, walking and cycling) and saves it as `monaco.duckdb`. This chapter opens that file with `duckosm.open`: it builds nothing. The graphs use the driving network.""")
+ch.code("""net = duckosm.open("monaco.duckdb")    # the network of chapter 1: Monaco, three modes
 net                                                   # the card""")
 ch.md("""The driving network of Monaco has 2840 edges. Each edge is one node of the turn
 graph and one arc of the junction graph.""")

@@ -61,11 +61,41 @@ own data can join to it (chapter 5).
 > **Tip:** you can open the file with any DuckDB tool (the `duckdb` program, DBeaver, Python's `duckdb`), not only
 > with duckOSM.""")
 
+ch.md("""### Four calls: `get`, `build`, `network` and `open`
+
+Each call of the SDK does one step. Learn these four first:
+
+| Call | You give | It does | You get |
+|---|---|---|---|
+| `duckosm.get(...)` | an area: a name, an OSM id, a box, a point ... | finds the boundary, downloads the OSM data and cuts it to the boundary | an **Area**: the files `monaco.osm.pbf` and `monaco.geojson` |
+| `area.build(modes=...)` | an Area | makes the road networks from the OSM file | a **Network**: the file `monaco.duckdb` |
+| `duckosm.network(...)` | an area, and the modes | `get` and `build` in one call | a **Network** |
+| `duckosm.open("monaco.duckdb")` | a network file that you built before | reads the file: no download and no build | a **Network** |
+
+```text
+duckosm.get(...) ──> Area (.osm.pbf + .geojson) ──> area.build(...) ──> Network (.duckdb)
+└──────────────────────────── duckosm.network(...) ───────────────────────────┘
+
+duckosm.open("monaco.duckdb") ──> Network                    (a file that you built before)
+```
+
+| You want to | Use |
+|---|---|
+| get the network of an area in one step | `duckosm.network` |
+| look at the area or the OSM file before the build, or build the same area again with other options | `duckosm.get`, then `area.build` |
+| use a network that you built before | `duckosm.open`. It needs only the file: no OSM id and no modes |
+
+`duckosm.build(pbf=..., boundary=...)` is the same as `area.build`, but it takes the two files directly, not an Area
+(section "Your own PBF file").
+
+> **Key idea:** build one time, open many times. A build reads the OSM data and takes time. `duckosm.open` reads the
+> finished file at once, so the next chapters of this book open `monaco.duckdb` and build nothing.""")
+
 ch.md("""## Quick start: one call
 
 `duckosm.network` gets the area and builds it. Here the area is the city of Monaco, OSM relation 2220322. The
-argument `modes` chooses the networks: driving and walking.""")
-ch.code("""net = duckosm.network(osm_id=2220322, modes=["driving", "walking"], name="monaco")    # get and build Monaco
+argument `modes` chooses the networks: driving, walking and cycling.""")
+ch.code("""net = duckosm.network(osm_id=2220322, modes=["driving", "walking", "cycling"], name="monaco")    # get and build Monaco
 net                                                                                 # the card of the network""")
 ch.md("""**What the output shows.** The progress lines name each step: the boundary from Nominatim, the extract and the
 cut, then the build. The card at the end shows the file and, for each mode, the number of edges and nodes and the
@@ -250,6 +280,10 @@ kept""")
 ch.md("""**What the output shows.** The card of the copy has no "not saved" note: `monaco.duckdb` is in your folder.
 `monaco.osm.pbf` and `monaco.geojson` are beside it, so `kept.rebuild(...)` and `kept.edit()` still work. `kept.saved`
 is `True`.
+
+> **Key idea:** `monaco.duckdb` is the network of this book. Each next chapter opens it with
+> `duckosm.open("monaco.duckdb")` and builds nothing. To read a saved network, you need only its file: no OSM id, no
+> modes.
 
 > **Warning:** a network that you do not save stays in the work folder only until you clean it with
 > `duckosm.clear_work`. Save each network that you want to keep.""")

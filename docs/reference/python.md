@@ -124,6 +124,16 @@ net = duckosm.build(pbf="my.osm.pbf", config={"options": {"bus_routes": False}, 
 | `net` (the last line of a cell) | a card: the file, its size, the build time, the fixes file, and one row for each mode |
 | `net.path`, `net.modes`, `net.boundary` | the file, the list of modes, the boundary (`GeoDataFrame`) |
 | `net.summary()` | a DataFrame, one row for each mode: `edges`, `nodes`, `km`, `oneway_km` |
+| `net.has_mode(*modes)` | `True` when the file has each of these modes, for example `net.has_mode("walking")` |
+| `net.has_multimodal()` | `True` when the file has the multimodal graph (`mm.edges` and `mm.transfers`) |
+| `net.has_elevation()` | `True` when the file has heights (a row in `main.elevation_metadata`) |
+| `net.has_features(*layers)` | `True` when the file has the base map (schema `features`), and each layer that you give |
+| `net.has_levels()` | `True` when the file has the drawing levels of the roads (`visualization.edge_levels`) |
+| `net.has_bus_routes()` | `True` when the file has the bus routes (`bus.routes`) |
+| `net.has_admin()` | `True` when the file has administrative areas (`main.admin_boundaries`) |
+| `net.has_raw()` | `True` when the file has the OSM data of the cut (`raw.*`) |
+| `net.has_fixes()` | `True` when the network was built with a fixes file |
+| `net.add_multimodal(transfer_s=60, pair_costs=None)` | adds the multimodal graph to the file, with no new build; needs walking and one more mode |
 | `net.schema()`, `net.schema("driving")` | one row for each table: the schema, the table, the number of rows and of columns, and the description |
 | `net.tables()`, `net.columns("driving.edges")` | the tables of the file; the columns of one table, with their types and descriptions |
 | `net.summarize("driving.edges")` | DuckDB's `SUMMARIZE`: for each column the minimum, the maximum, the distinct values, the quartiles and the NULL percentage |
@@ -185,6 +195,8 @@ base map until `roadstyle.duckosm.page` takes them.
 The plan of each module and its decision: [Python SDK: the modules](python-modules.md). Each module takes a
 `Network`, a `ModeView`, a path or a DuckDB connection. The methods of `Network` call them:
 `net.walking.route(a, b)` is `duckosm.routing.route(net.walking, a, b)`.
+In each routing call, `weight` is `"time"`, `"length"`, the name of a numeric column of `<mode>.edges`, or your own
+cost of each edge as a pandas Series keyed by `edge_id` ([Your own cost](sdk/routing.md#your-own-cost)).
 
 | Module | Users | Functions and classes |
 |---|---|---|

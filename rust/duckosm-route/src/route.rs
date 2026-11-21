@@ -86,6 +86,61 @@ pub fn routing_graph(con: &Connection, mode: &str, weight: &str, uses: &[String]
     Ok(g.finish())
 }
 
+/// Your own cost of each edge (tolls, CO2, danger): it replaces the time of the edge. `skip`: an edge with no own cost is
+/// not used; else it costs its time (`cost_s`).
+#[derive(Default, Clone)]
+pub struct Own {
+    pub costs: std::collections::HashMap<i64, f64>,
+    pub skip: bool,
+}
+
+/// The values of a numeric column of `<mode>.edges` (not NULL) as own costs: `weight="<column>"`.
+pub fn column_costs(con: &Connection, mode: &str, column: &str) -> Result<std::collections::HashMap<i64, f64>> {
+    let numeric: Option<bool> = con
+        .query_row(
+            "SELECT data_type IN ('TINYINT','SMALLINT','INTEGER','BIGINT','HUGEINT','UTINYINT','USMALLINT','UINTEGER','UBIGINT',
+                                  'FLOAT','DOUBLE','REAL') OR data_type LIKE 'DECIMAL%'
+             FROM information_schema.columns WHERE table_schema = ? AND table_name = 'edges' AND column_name = ?",
+            [mode, column],
+            |r| r.get(0),
+        )
+        .ok();
+    match numeric {
+        None => return Err(format!("weight {column:?}: not 'time', 'length' or a column of {mode}.edges")),
+        Some(false) => return Err(format!("weight {column:?}: the column of {mode}.edges is not numeric")),
+        Some(true) => {}
+    }
+    let q = column.replace('"', "\"\"");
+    let mut st = con.prepare(&format!("SELECT edge_id, \"{q}\"::DOUBLE FROM {mode}.edges WHERE \"{q}\" IS NOT NULL")).map_err(err)?;
+    let mut rows = st.query([]).map_err(err)?;
+    let mut out = std::collections::HashMap::new();
+    while let Some(r) = rows.next().map_err(err)? {
+        out.insert(r.get(0).map_err(err)?, r.get(1).map_err(err)?);
+    }
+    Ok(out)
+}
+
+/// The routing graph with own costs: an arc costs the own cost of its from-edge (an arc of `time` costs the time of its
+/// from-edge). An edge with no own cost: its arcs keep their time, or with `skip` no arc goes into or out of the edge.
+pub fn routing_graph_own(con: &Connection, mode: &str, uses: &[String], own: &Own) -> Result<Graph> {
+    if let Some((e, c)) = own.costs.iter().find(|(_, c)| c.is_nan() || **c < 0.0) {
+        return Err(format!("edge {e}: the cost {c} is not 0 or more; a route needs costs of 0 or more"));
+    }
+    let graph = routed_graph(con, mode, uses)?;
+    let mut st = con.prepare(&format!("SELECT from_edge, to_edge, cost::DOUBLE FROM {graph}")).map_err(err)?;
+    let mut rows = st.query([]).map_err(err)?;
+    let mut g = duckosm_router::graph::GraphBuilder::default();
+    while let Some(r) = rows.next().map_err(err)? {
+        let (a, b): (i64, i64) = (r.get(0).map_err(err)?, r.get(1).map_err(err)?);
+        let time: Option<f64> = r.get(2).map_err(err)?;
+        if own.skip && !(own.costs.contains_key(&a) && own.costs.contains_key(&b)) {
+            continue;
+        }
+        g.add_arc(a, b, own.costs.get(&a).copied().unwrap_or(time.unwrap_or(f64::NAN)));
+    }
+    Ok(g.finish())
+}
+
 /// Open a database read-only with the spatial extension.
 pub fn open(db: &std::path::Path) -> Result<Connection> {
     let con = duckosm_tools::open_read_only(db)?;

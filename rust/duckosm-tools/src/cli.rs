@@ -36,6 +36,13 @@ enum Cmd {
         /// Another cost for one direction, FROM->TO=SECONDS (for example walking->driving=120). Repeat for more.
         #[arg(long = "pair-cost", value_name = "FROM->TO=SECONDS")]
         pair_costs: Vec<String>,
+        /// A CSV or Parquet file of the cost of a change at some junctions: the columns node_id and cost_s, and optionally
+        /// from_mode and to_mode (empty: each mode). A row with modes wins over a row without.
+        #[arg(long = "node-costs", value_name = "FILE")]
+        node_costs: Option<PathBuf>,
+        /// Keep the changes of mode only at the junctions of --node-costs (for example, park only at car parks).
+        #[arg(long = "only-listed-nodes", requires = "node_costs")]
+        only_listed_nodes: bool,
         /// The schema of the mm.edges and mm.transfers tables.
         #[arg(long, default_value = "mm")]
         schema: String,
@@ -251,7 +258,7 @@ pub fn run(args: &[String]) -> Result<()> {
             let c = duckosm_duckdb::steps::bus_routes(&db)?;
             println!("{} bus routes, {} route edges, {} with gaps; wrote bus.routes and bus.route_edges", c.routes, crate::info::thousands(c.edges as i64), c.with_gaps);
         }
-        Cmd::Multimodal { db, transfer_cost, pair_costs, schema } => {
+        Cmd::Multimodal { db, transfer_cost, pair_costs, node_costs, only_listed_nodes, schema } => {
             need_db(&db)?;
             let pairs = pair_costs
                 .iter()
@@ -261,7 +268,7 @@ pub fn run(args: &[String]) -> Result<()> {
                         .ok_or_else(|| format!("--pair-cost {p}: give FROM->TO=SECONDS"))
                 })
                 .collect::<Result<Vec<_>>>()?;
-            let (e, t) = duckosm_duckdb::steps::multimodal(&db, transfer_cost, &pairs, &schema)?;
+            let (e, t) = duckosm_duckdb::steps::multimodal(&db, transfer_cost, &pairs, node_costs.as_deref(), only_listed_nodes, &schema)?;
             println!("wrote {schema}.edges ({e} edges) and {schema}.transfers ({t} arcs)");
         }
         Cmd::InitConfig { path, force } => {

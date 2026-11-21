@@ -122,6 +122,10 @@ class Multimodal:
     # optional per-direction overrides, keyed "from->to" e.g. {"walking->driving": 60,
     # "driving->walking": 30}; any pair not listed falls back to `transfer_s`.
     transfer_costs: Optional[dict] = None
+    # optional CSV or Parquet file: the cost of a change at some junctions (node_id, cost_s, and optionally from_mode,
+    # to_mode); only_listed_nodes keeps the changes only at those junctions (for example, park only at car parks)
+    node_costs: Optional[str] = None
+    only_listed_nodes: bool = False
 
 
 @dataclass

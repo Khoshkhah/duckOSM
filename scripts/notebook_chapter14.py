@@ -51,10 +51,10 @@ exception: it can also read the network file directly.
 > **Warning:** Lanelet2, the lane graph and OpenDRIVE are experimental in duckOSM. The sections below show what each
 > output has today and what it does not have.""")
 
-ch.md("""## Build Monaco
+ch.md("""## Open the network of chapter 1
 
-The lane maps need the driving network. The build is the same as in chapter 1.""")
-ch.code("""net = duckosm.network(osm_id=2220322, modes=["driving"], name="monaco")    # get and build the driving network of Monaco
+Chapter 1 builds Monaco with three modes (driving, walking and cycling) and saves it as `monaco.duckdb`. This chapter opens that file with `duckosm.open`: it builds nothing. The lane maps use the driving network.""")
+ch.code("""net = duckosm.open("monaco.duckdb")    # the network of chapter 1: Monaco, three modes
 net                                                                         # the card""")
 ch.md("""The progress lines name the cut and the build. The card shows the driving network:
 the edges, the nodes and the length.""")
