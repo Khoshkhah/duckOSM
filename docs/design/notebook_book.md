@@ -13,8 +13,9 @@ cd docs/notebooks && IPYTHONDIR=../../book/ipython DUCKOSM_MAP_SHOW=plot jupyter
 ```
 
 `IPYTHONDIR=book/ipython` gives the matplotlib pictures two times the pixels at the same size (retina). In the book,
-a click on a picture opens it full screen (`lightbox: auto` in `book/_quarto.yml`). There, the mouse wheel or two
-fingers zoom in, a drag moves the picture and a double click resets it (`book/zoom.html`, with `book/panzoom.min.js`).
+a click on a picture opens it full screen (`lightbox: auto` in `book/_quarto.yml`). There, a click zooms in where
+you click and a second click shows the whole picture. The mouse wheel, two fingers and the buttons +, - and Fit also
+zoom, and a drag moves the picture (`book/zoom.html`, with `book/panzoom.min.js`).
 
 ## What Colab draws
 
