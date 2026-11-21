@@ -139,13 +139,14 @@ How it works:
 2. The `features` columns become numbers (`float32`). The next section tells how each type of column changes.
 3. The arrays go into a dict, with the names of the feature columns and the duckOSM id of each row number.
 
-`graph_arrays` has three arguments, the inputs of the call. The table says what each one is:
+`graph_arrays` has four arguments, the inputs of the call. The table says what each one is:
 
 | Argument | Default | What it does |
 |---|---|---|
 | `net` | (you must give it) | the network of one mode, for example `net.driving`. A `Network` or the path of a `.duckdb` file also works |
 | `graph` | `"nodes"` | the graph: `"nodes"` gives the junction graph (each node is a vertex), `"turns"` gives the turn graph (each edge is a vertex) |
 | `features` | `length_m`, `maxspeed_kmh`, `lanes` | the columns of the edges that become numbers. In the junction graph they describe the arcs, in the turn graph the vertices |
+| `node_features` | `lon`, `lat` | the vertex features of the junction graph: also `in_degree`, `out_degree`, `degree` (the edges that arrive at, leave or touch each node), or a column of the nodes, for example `ele` after `duckosm.analysis.add_elevation` |
 
 Three examples:
 
@@ -173,8 +174,15 @@ column "Shape" gives the size of each array: (rows,) for a list of numbers, and 
 
 In the junction graph, `x` has only two columns, `lon` and `lat`: the place of each node. The `features` argument
 chooses columns of the **edges**, so in the junction graph they describe the arcs (`edge_attr`), not the vertices. A
-node of duckOSM has no other columns that describe it. To give the vertices more features, for example the number of
-edges at each node, add your own columns to `x` with NumPy, as section "Add your own column" shows for the turn graph.
+node of duckOSM has no other columns that describe it, so the default is its place. `node_features` adds more, for
+example the number of edges at each node:
+
+```python
+duckosm.ml.graph_arrays(net.driving, node_features=["lon", "lat", "in_degree", "out_degree"])   # x: (vertices, 4)
+```
+
+For other vertex features, add your own columns to `x` with NumPy, as section "Add your own column" shows for the turn
+graph.
 In the turn graph, each vertex is an edge, so `x` has one column for each feature that you choose.
 
 The cell makes the junction graph with the default features and prints the type and the shape of each array.""")

@@ -45,3 +45,13 @@ def test_to_dgl(net):
     pytest.importorskip("dgl")
     g = duckosm.ml.to_dgl(net.driving)
     assert g.num_nodes() == net.driving.summary().nodes[0] and "edge_id" in g.edata
+
+
+def test_node_features_of_the_junction_graph(net):
+    """node_features: the computed degrees, and the default lon, lat; not for the turn graph."""
+    a = duckosm.ml.graph_arrays(net.driving, node_features=["lon", "lat", "in_degree", "out_degree", "degree"])
+    assert a["x"].shape == (a["num_nodes"], 5) and a["x_names"] == ["lon", "lat", "in_degree", "out_degree", "degree"]
+    assert a["x"][:, 2].sum() == a["x"][:, 3].sum() == len(a["src"])          # each arc arrives once and leaves once
+    assert duckosm.ml.graph_arrays(net.driving)["x_names"] == ["lon", "lat"]
+    with pytest.raises(ValueError, match="junction graph"):
+        duckosm.ml.graph_arrays(net.driving, graph="turns", node_features=["degree"])
