@@ -59,11 +59,11 @@ the OSMnx graph of the same area.
 > **Key idea:** the `osmnx` view gives the numbers that OSMnx gives for the same roads. The `duckosm` view counts
 > the rows of the file. Use the `osmnx` view to compare cities, and the `duckosm` view to plan your own data.""")
 
-ch.md("""## Build the driving network of Monaco
+ch.md("""## Open the network of chapter 1
 
-The chapter uses the driving network of the city of Monaco. `an` is the short name of the module.""")
+Chapter 1 builds Monaco with three modes (driving, walking and cycling) and saves it as `monaco.duckdb`. This chapter opens that file with `duckosm.open`: it builds nothing. The analysis uses the driving network. `an` is the short name of the module.""")
 ch.code("""from duckosm import analysis as an                                           # the module of this chapter
-net = duckosm.network(osm_id=2220322, modes=["driving"], name="monaco")    # get and build the driving network
+net = duckosm.open("monaco.duckdb")    # the network of chapter 1: Monaco, three modes
 drive = net.driving                                                         # the driving mode
 drive                                                                       # the card""")
 
@@ -120,10 +120,10 @@ The chart counts the nodes of each class. The map shows the dead ends, the T jun
 ch.code("""import matplotlib.pyplot as plt
 
 spn = an.streets_per_node(drive)                                             # node_id -> streets
-nodes = net.nodes().merge(spn.rename("streets").reset_index(), on="node_id")  # the nodes with their count
+nodes = net.driving.nodes().merge(spn.rename("streets").reset_index(), on="node_id")  # the nodes with their count
 fig, (a, b) = plt.subplots(1, 2, figsize=(12, 5), gridspec_kw={"width_ratios": [1, 2]})    # a chart and a map
 spn.value_counts().sort_index().plot.bar(ax=a, color="#1f6feb", xlabel="streets at the node", ylabel="nodes")    # the counts
-net.edges().plot(ax=b, color="#cccccc", linewidth=0.6)                       # the roads in gray
+net.driving.edges().plot(ax=b, color="#cccccc", linewidth=0.6)                       # the roads in gray
 for k, color, label in [(1, "#d1242f", "dead end"), (3, "#bf8700", "T junction"), (4, "#2ea043", "crossing")]:    # 3 classes
     nodes[nodes.streets == k].plot(ax=b, color=color, markersize=6, label=label)    # the nodes of the class
 b.legend(loc="lower right"); b.set_axis_off(); plt.tight_layout(); plt.show()   # the picture""")
@@ -182,9 +182,9 @@ keeps the nodes, the edges and the turn tables of that component. The other mode
 before an analysis that needs a connected graph, for example a matrix of all pairs. The map shows the edges outside
 the largest part in orange.""")
 ch.code("""big = an.largest_component(drive, out="data/monaco_largest.duckdb")       # a new network file with the largest part
-edges = net.edges()                                                       # all edges
-print(len(big.edges()), "of", len(edges), "edges are in the largest part")
-net.plot(highlight=edges.edge_id[~edges.edge_id.isin(big.edges().edge_id)])    # the edges outside the largest part""")
+edges = net.driving.edges()                                                       # all edges
+print(len(big.driving.edges()), "of", len(edges), "edges are in the largest part")
+net.driving.plot(highlight=edges.edge_id[~edges.edge_id.isin(big.driving.edges().edge_id)])    # the edges outside the largest part""")
 ch.md("""The largest part has 2,622 of the 2,840 edges. The 218 orange edges are outside it: garage ramps, private service roads, and short roads at the boundary of the city that you can enter but not leave (or leave but not enter).""")
 
 ch.md("""## From points to the network
@@ -200,13 +200,13 @@ Here the points are ten random points in the box of the network (black). The edg
 ch.code("""import numpy as np
 
 rng = np.random.default_rng(1)                                    # random points that do not change
-w, south, e, north = net.edges().total_bounds                     # the box of the network
+w, south, e, north = net.driving.edges().total_bounds                     # the box of the network
 xs, ys = rng.uniform(w, e, 10), rng.uniform(south, north, 10)     # 10 points (lon, lat)
 ids, dist = an.nearest_edges(drive, xs, ys, return_dist=True)     # the nearest edge of each point
 node_ids = an.nearest_nodes(drive, xs, ys)                        # the nearest node of each point
 print({"edge_id": ids[:3], "distance_m": dist[:3].round(1), "node_id": node_ids[:3]})    # the first three
 ax = plt.subplots(figsize=(7, 7))[1]                              # a new picture
-net.plot(highlight=ids, ax=ax)                                    # the edges of the points in orange
+net.driving.plot(highlight=ids, ax=ax)                                    # the edges of the points in orange
 ax.scatter(xs, ys, color="black", s=20, zorder=3); plt.show()     # the points""")
 ch.md("""The arrays have the `edge_id` and the `node_id` of each point, and the distance to the edge in metres. The first two points are 375 m and 618 m from a road: they are in the sea, in the box of the network but outside the city. The third point is 12 m from its road. The map shows each point and its edge.
 
@@ -226,8 +226,8 @@ ch.md("""## A smaller area: `clip`
 An edge that crosses the border stays whole, as in a build (chapter [1. Get and build an area](01_area_to_network.md)).
 Here the area is 500 m around the casino square.""")
 ch.code("""small = an.clip(net, point=(7.4280, 43.7393), dist_m=500, out="data/monaco_casino.duckdb")    # a new network file
-print(len(small.edges()), "of", len(net.edges()), "edges")      # the size
-small.plot()                                                    # its roads by class""")
+print(len(small.driving.edges()), "of", len(net.driving.edges()), "edges")      # the size
+small.driving.plot()                                                    # its roads by class""")
 ch.md("""The circle of 500 m around the casino square holds 702 of the 2,840 edges. The new file is a full network, with its own nodes and turn tables, so every call of this chapter and of the routing chapters works on it.""")
 
 ch.md("""## Random points on the roads: `sample_points`
@@ -239,7 +239,7 @@ starts or to test a sensor plan.""")
 ch.code("""pts = an.sample_points(drive, 200, seed=1)                  # a GeoDataFrame of points with edge_id
 print(len(pts), "points on", pts.edge_id.nunique(), "edges")
 ax = plt.subplots(figsize=(7, 7))[1]                         # a new picture
-net.plot(ax=ax)                                              # the roads
+net.driving.plot(ax=ax)                                              # the roads
 pts.plot(ax=ax, color="#2ea043", markersize=8); plt.show()   # the points""")
 
 ch.md("""## Heights and grades
@@ -250,8 +250,8 @@ ch.md("""## Heights and grades
 changes the file in place. `dem=` takes a DEM file (GeoTIFF) of your own. Without it, the call finds a source for the
 area (`source="auto"`) and downloads its tiles into the cache. For Monaco the source is Copernicus.
 [Add elevation](../guides/elevation.md) gives the sources and the options.""")
-ch.code("""an.add_elevation(net)                                       # the heights of a DEM source for the area
-net.nodes()["ele"].describe().round(1)                      # the heights of the nodes in metres""")
+ch.code("""an.add_elevation(drive)                                     # the heights of a DEM source for the area
+net.driving.nodes()["ele"].describe().round(1)                      # the heights of the nodes in metres""")
 ch.md("""The progress lines show the source (Copernicus, one tile of 12.6 MB) and the 1,768 nodes that got a height. The heights go from -0.5 m at the sea to 336 m, and the median is 34 m. Monaco rises fast from the coast.""")
 
 ch.md("""### The grade of each edge: `grades`
@@ -259,7 +259,7 @@ ch.md("""### The grade of each edge: `grades`
 `grades(view)` gives `(z_to - z_from) / length_m` for each edge, as a Series with the `edge_id` as its index. 0.05 is
 5 % up, and -0.05 is 5 % down. It needs `add_elevation` first.""")
 ch.code("""g = an.grades(drive)                                                       # edge_id -> grade
-e = net.edges().set_index("edge_id")                                       # the edge columns
+e = net.driving.edges().set_index("edge_id")                                       # the edge columns
 ok = g[(e.length_m >= 50) & e.tunnel.isna() & e.bridge.isna()]             # edges of 50 m or more, on the ground
 print(f"all edges: {g.abs().max():.0%} the steepest; on the ground and 50 m or more: {ok.abs().max():.0%}")
 ok.abs().describe(percentiles=[0.5, 0.9]).round(3)                          # the spread of the grades""")
@@ -304,7 +304,7 @@ ch.md("""## Try it yourself
 <details><summary>Show the answer</summary>
 
 ```python
-walk = duckosm.network(osm_id=2220322, modes=["walking"], name="monaco_walk")
+walk = duckosm.open("monaco.duckdb")
 an.stats(walk.walking).loc[["n", "m", "streets_per_node_avg"]]
 ```
 </details>

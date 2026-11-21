@@ -40,11 +40,10 @@ edges and the nodes make a directed graph.
 > **Key idea:** a network file is a normal DuckDB database. Everything in this chapter is a read of its tables. You
 > can read the same tables with SQL, with pandas or GeoPandas, or with any other DuckDB tool.""")
 
-ch.md("""## Build the network of this chapter
+ch.md("""## Open the network of chapter 1
 
-The chapter uses the three modes of Monaco, so that you can compare them.
-The OSM extract stays in the cache from chapter 1.""")
-ch.code("""net = duckosm.network(osm_id=2220322, modes=["driving", "walking", "cycling"], name="monaco")    # three modes
+Chapter 1 builds Monaco with three modes (driving, walking and cycling) and saves it as `monaco.duckdb`. This chapter opens that file with `duckosm.open`: it builds nothing. The chapter compares the three modes.""")
+ch.code("""net = duckosm.open("monaco.duckdb")    # the network of chapter 1: Monaco, three modes
 net                                                                                               # the card""")
 ch.md("""The card names the file, its size (36.5 MB) and the build time. The table has one
 row for each mode: driving has 2840 edges, walking 11938 and cycling 11305.""")

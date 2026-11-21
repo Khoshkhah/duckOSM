@@ -57,6 +57,7 @@ format:
     number-depth: 3
     toc: true
     toc-depth: 3
+    toc-expand: 1          # the subsections of a section show only when you read that section
     toc-location: right
     toc-title: "In this chapter"
     code-copy: true

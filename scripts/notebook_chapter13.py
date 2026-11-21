@@ -52,11 +52,11 @@ GMNS has three levels. duckOSM makes all three in one DuckDB file.
 > **Tip:** the page [duckOSM for transport planning users](../compare/for-planning-users.md) compares each call with
 > osm2gmns, path4gmns and AequilibraE.""")
 
-ch.md("""## Build the network
+ch.md("""## Open the network of chapter 1
 
-The chapter uses the driving network of Monaco. The extra `sim` installs SUMO, because `to_gmns` takes the lanes
+Chapter 1 builds Monaco with three modes (driving, walking and cycling) and saves it as `monaco.duckdb`. This chapter opens that file with `duckosm.open`: it builds nothing. The planning tools use the driving network. The extra `sim` installs SUMO, because `to_gmns` takes the lanes
 and the movements from SUMO's `netconvert`. The extra `planning` installs path4gmns.""")
-ch.code("""net = duckosm.network(osm_id=2220322, modes=["driving"], name="monaco")    # get and build the driving network of Monaco
+ch.code("""net = duckosm.open("monaco.duckdb")    # the network of chapter 1: Monaco, three modes
 net.driving                                                                # the card of the driving mode""")
 ch.md("""The driving network of Monaco has 2840 edges and 1768 nodes, 96.2 km of roads.""")
 
@@ -97,8 +97,8 @@ gmns.sql(\"\"\"SELECT 'link' AS table_name, count(*) AS rows FROM gmns_driving.l
             UNION ALL SELECT 'node', count(*) FROM gmns_driving.node
             UNION ALL SELECT 'lane', count(*) FROM gmns_driving.lane
             UNION ALL SELECT 'movement', count(*) FROM gmns_driving.movement\"\"\").df()    # the rows of the main tables""")
-ch.md("""2840 links allow `auto`: they are the driving edges. 10 links allow only `bus`, and 8
-allow `bus,bike`. The four main tables have 2858 links, 1772 nodes, 3318 lanes and 3755 movements.""")
+ch.md("""2840 links allow `auto`: they are the driving edges. 2 links allow only `bus`, and 16
+allow `bus,bike`: a bus-only edge allows bikes too when it is in the cycling network of the file. The four main tables have 2858 links, 1772 nodes, 3318 lanes and 3755 movements.""")
 ch.code("""kinds = gmns.sql(\"\"\"SELECT type, count(*) AS movements FROM gmns_driving.movement GROUP BY 1 ORDER BY 2 DESC\"\"\").df()   # the kinds of turn
 gmns.close()                                                 # close the file: the next calls write to it
 kinds""")
@@ -168,8 +168,8 @@ ch.md("""### The same shortest path in two tools
 The node ids of path4gmns are the OSM node ids, and its link ids are the edge ids. So a route of duckOSM (chapter 7)
 can go to path4gmns. This cell finds the shortest route by length in duckOSM, gives its first and last node to
 path4gmns, and compares the two routes.""")
-ch.code("""route = net.route((7.4155, 43.7285), (7.4335, 43.7468), weight="length")    # the shortest route in duckOSM
-ends = net.edges(where=f"edge_id IN ({route['edges'][0]}, {route['edges'][-1]})").set_index("edge_id")
+ch.code("""route = net.driving.route((7.4155, 43.7285), (7.4335, 43.7468), weight="length")    # the shortest route in duckOSM
+ends = net.driving.edges(where=f"edge_id IN ({route['edges'][0]}, {route['edges'][-1]})").set_index("edge_id")
 start, end = int(ends.source[route["edges"][0]]), int(ends.target[route["edges"][-1]])    # its first and last node
 found = pnet.find_shortest_path(start, end, mode="auto", seq_type="link", cost_type="distance")    # the same in path4gmns
 links = [int(x) for x in found.split("link path: ")[1].split(";")]                            # its links (edge ids)
@@ -177,7 +177,7 @@ round(route["length_m"]), found.split(" | ")[0], links == route["edges"]    # th
 ch.md("""**What the output shows.** The two tools find the same edges (`True`). The duckOSM length, 2937 m, includes about
 22 m from the two points to the road. The edges alone are 2916 m long, and path4gmns gives 2918 m for the same links,
 from the lengths of the GMNS links.""")
-ch.code("""net.map(routes={"duckOSM": route, "path4gmns": {"edges": links}})    # the two routes on the map""")
+ch.code("""net.driving.map(routes={"duckOSM": route, "path4gmns": {"edges": links}})    # the two routes on the map""")
 ch.md("""The two routes are on the same edges, so the map shows one line from the south-west
 to the north-east of Monaco.""")
 
@@ -213,7 +213,7 @@ AequilibraE, the call prints the folder of the project, its links (one for each 
 ch.exercises([
     ("Write the GMNS tables of driving and walking in one file, with the combined network `gmns_all`. Build a "
      "network with the two modes first.",
-     """both = duckosm.network(osm_id=2220322, modes=["driving", "walking"], name="monaco_dw")
+     """both = duckosm.open("monaco.duckdb")
 r = both.to_gmns("out/gmns_dw.duckdb", combined=True)       # gmns_driving, gmns_walking and gmns_all
 r["modes"].keys(), r["combined"]"""),
     ("Make the micro network with cells of 14 m, and compare the number of cells with the 7 m cells.",

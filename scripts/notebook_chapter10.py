@@ -40,11 +40,11 @@ The work is in Rust (`duckosm quack`, `duckosm admin`) and in DuckDB SQL. Python
 > the buildings, the shops and the roads of your area agree, and an OSM fix that you give to both (chapter
 > [5. Fix the OSM data once](05_osm_fixes.md)) is in both.""")
 
-ch.md("""## Build the driving network of Monaco
+ch.md("""## Open the network of chapter 1
 
-`duckosm.network` writes the cut OSM file `monaco.osm.pbf` beside the network file. `features` and
+Chapter 1 builds Monaco with three modes (driving, walking and cycling) and saves it as `monaco.duckdb`. This chapter opens that file with `duckosm.open`: it builds nothing. `net.save` in chapter 1 put the cut OSM file `monaco.osm.pbf` beside the network file. `features` and
 `admin_boundaries` read it.""")
-ch.code("""net = duckosm.network(osm_id=2220322, modes=["driving"], name="monaco")    # get and build Monaco; the OSM file stays beside it
+ch.code("""net = duckosm.open("monaco.duckdb")    # the network of chapter 1: Monaco, three modes
 net                                                                         # the card""")
 
 ch.md("""## OSM features: `features`
@@ -162,7 +162,7 @@ ch.md("""**What the output shows.** The area has 10 administrative areas: the ci
 ch.code("""quarters = admin[admin.admin_level == 10]                     # level 10: the quarters
 ax = quarters.plot(column="name", alpha=0.5, edgecolor="black", legend=True, figsize=(8, 8),
                    legend_kwds={"loc": "upper left", "fontsize": 8})    # each quarter in its own color
-net.edges().plot(ax=ax, color="#d1242f", linewidth=0.5)       # the roads on them
+net.driving.edges().plot(ax=ax, color="#d1242f", linewidth=0.5)       # the roads on them
 ax.set_axis_off()                                             # no axes""")
 
 ch.md("""### Which quarter is each road in
@@ -171,7 +171,7 @@ The quarters are polygons, so a spatial join gives the quarter of each edge. Her
 each edge.""")
 ch.code("""import geopandas as gpd
 
-edges = net.edges()                                                               # the driving edges
+edges = net.driving.edges()                                                               # the driving edges
 mid = edges.set_geometry(edges.geometry.representative_point())                  # a point on each edge
 q = quarters[["name", "geometry"]].rename(columns={"name": "quarter"})            # the quarters, with the column quarter
 inq = gpd.sjoin(mid, q, predicate="within")                                       # the quarter of each middle point
@@ -243,7 +243,7 @@ shops["shop"].value_counts().head()
 <details><summary>Show the answer</summary>
 
 ```python
-walk = duckosm.network(osm_id=2220322, modes=["walking"], name="monaco_walk")
+walk = duckosm.open("monaco.duckdb")
 duckosm.gis.to_osm_xml(walk.walking, "out/monaco_walk.osm")["ways"]
 ```
 </details>

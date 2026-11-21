@@ -49,11 +49,11 @@ def styled(source):
     return "\n\n".join(out)
 
 
-def install_cell(extras, more=""):
+def install_cell(extras, more="", book_network=False):
     """The first code cell: in Colab (no duckosm), the newest nightly wheel with the extras of the chapter."""
     return f'''# Install duckOSM when it is not installed (for example in Colab). It takes approximately 1 minute.
 # Until duckOSM 0.9.0 is on PyPI, the SDK of these notebooks is in the nightly wheel of main (the GitHub pre-release "nightly").
-import importlib.util, json, urllib.request
+import importlib.util, json, os, urllib.request
 def nightly_wheel():       # the address of the newest nightly wheel
     release = json.load(urllib.request.urlopen("https://api.github.com/repos/{REPO}/releases/tags/nightly"))
     return next(a["browser_download_url"] for a in release["assets"] if a["name"].endswith(".whl"))
@@ -63,7 +63,11 @@ import duckosm             # the SDK
 if not hasattr(duckosm, "network"):                    # an old duckOSM (0.8.0 or older), without the SDK
     %pip install -q --force-reinstall --no-deps "duckosm @ {{nightly_wheel()}}"
     raise SystemExit("duckOSM is updated: restart the session (in Colab: Runtime > Restart session), then run this cell again")
-print("duckosm", duckosm.__version__)    # the version'''
+print("duckosm", duckosm.__version__)    # the version''' + ('''
+# The network of chapter 1 (monaco.duckdb). The chapter opens it. When you run this chapter alone (in Colab), the file
+# is not there, so this cell makes it one time.
+if not os.path.exists("monaco.duckdb") or not duckosm.open("monaco.duckdb").has_mode("driving", "walking", "cycling"):
+    duckosm.network(osm_id=2220322, modes=["driving", "walking", "cycling"], path="monaco.duckdb")''' if book_network else "")
 
 
 class Chapter:
@@ -85,7 +89,7 @@ class Chapter:
                       f'<img src="{IMAGES}/banner-{number}.svg" alt="duckOSM notebook manual, chapter {number}: {html.escape(title)}" width="100%">\n\n'
                       + "\n".join([rows[0], "|---|---|", *rows[1:]]))
         self.cells.append(nbformat.v4.new_markdown_cell(self._head))
-        self.cells.append(nbformat.v4.new_code_cell(install_cell(extras, more_install)))
+        self.cells.append(nbformat.v4.new_code_cell(install_cell(extras, more_install, number > 1)))
 
     def md(self, text):
         """A Markdown cell; its box paragraphs become boxes."""

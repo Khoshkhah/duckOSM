@@ -39,20 +39,7 @@ The search is a bidirectional Dijkstra search, in Rust. One route in Monaco take
 > **Key idea:** a route goes from edge to edge on the turn graph. Each arc is a legal turn, so every route of duckOSM
 > obeys the turn restrictions and the one-way rules of its mode.""")
 
-ch.md("""## The three kinds of place
-
-Each routing call takes its start and its end as a **place**. A place is one of three things:
-
-| Place | Example | How it joins the network |
-|---|---|---|
-| an edge id | `240162084728701473` | that edge: the route starts at the start of the edge and ends at the end of the edge |
-| a `(lon, lat)` point | `(7.4155, 43.7285)` | the nearest road within `radius_m`, plus the walk from the point to the road |
-| a place name | `"Boulevard Albert 1er"` | the middle of the longest edge with that name; else the first answer of Nominatim in the box of the network |
-
-A point is `(lon, lat)`, in this order, as in GeoJSON. Write a point with decimals: two integers, for example
-`(7, 43)`, are not a point.""")
-
-ch.md("""## Build Monaco with three modes and the multimodal graph
+ch.md("""## The routing graphs and the network of this chapter
 
 ### The routing graphs in the file
 
@@ -90,20 +77,53 @@ make, from one edge to the next edge:
 A route across modes uses `mm.edges` to move in each mode and `mm.transfers` to change mode, for example to park the
 car and walk on. The graphs of the modes stay as they are.
 
-### The build
+### Open the network of chapter 1 and add the multimodal graph
 
-This chapter routes by car, on foot and across modes, so the build makes the multimodal graph too. The cell gives
-`config=` with `multimodal: {enabled: true}` (chapter 1, "Every other option").""")
-ch.code("""net = duckosm.network(osm_id=2220322, modes=["driving", "walking", "cycling"], name="monaco",
-                      config={"multimodal": {"enabled": True}})       # three modes and the multimodal graph
-net.summary()                                                         # one row for each mode""")
+Chapter 1 builds Monaco with three modes and saves it as `monaco.duckdb`. This chapter opens that file with
+`duckosm.open`: it builds nothing. The file has no multimodal graph yet, so `net.add_multimodal()` adds it to the same
+file. It reads the three networks that are in the file and writes `mm.edges` and `mm.transfers`. It needs walking and
+one more mode: `net.has_mode("walking")` tells you if the file has walking.""")
+ch.code("""net = duckosm.open("monaco.duckdb")                       # the network of chapter 1: Monaco, three modes
+net.has_mode("walking"), net.has_multimodal()               # walking: yes; the multimodal graph: not yet""")
+ch.code("""if not net.has_multimodal():                               # add it one time; the next run finds it
+    net.add_multimodal(transfer_s=60)                      # mm.edges and mm.transfers; a change of mode costs 60 s
+net.has_multimodal(), net.summary()                        # the multimodal graph: yes; the three modes stay""")
 ch.md("""The file has three networks: 2,840 driving edges, 11,938 walking edges and 11,305
 cycling edges. The `mm` tables are not in the summary, because they join the three modes and are not a mode. To see
 them, use `net.tables()` and `net.columns("mm.transfers")` (chapter 2).
 
-> **Tip:** the same build from a config file: write the keys to `monaco.yaml` (`modes: [driving, walking, cycling]`,
+#### The cost of a change of mode
+
+A route across modes can change mode at a junction that two modes share: you park the car and walk on, or you take
+your bike. Each change has a cost in seconds. It stands for the time to park, to lock the bike or to walk to the car.
+The router adds it to the time of the route, so a change is only worth it when it saves more time than it costs.
+
+| Argument | Default | Does |
+|---|---|---|
+| `transfer_s` | `60` | the cost of each change of mode, in seconds |
+| `pair_costs` | none | another cost for one direction, for example `{"walking->driving": 120}`: to take the car costs 120 s, and the other changes keep `transfer_s` |
+
+The costs go into the column `cost_s` of `mm.transfers`: one row for each junction and each change. A high cost
+(300 s) gives routes that change mode less often. A cost of 0 lets a route change mode at almost every junction,
+which is not real.
+
+> **Tip:** a build can also make the multimodal graph at once: `duckosm.network(..., config={"multimodal":
+> {"enabled": True}})`. The same build from a config file: write the keys to `monaco.yaml` (`modes: [driving, walking, cycling]`,
 > `multimodal: {enabled: true}`) and call `duckosm.build(config="monaco.yaml")`. The file `config/template.yaml` of
 > the repository lists every key.""")
+
+ch.md("""## The three kinds of place
+
+Each routing call takes its start and its end as a **place**. A place is one of three things:
+
+| Place | Example | How it joins the network |
+|---|---|---|
+| an edge id | `240162084728701473` | that edge: the route starts at the start of the edge and ends at the end of the edge |
+| a `(lon, lat)` point | `(7.4155, 43.7285)` | the nearest road within `radius_m`, plus the walk from the point to the road |
+| a place name | `"Boulevard Albert 1er"` | the middle of the longest edge with that name; else the first answer of Nominatim in the box of the network |
+
+A point is `(lon, lat)`, in this order, as in GeoJSON. Write a point with decimals: two integers, for example
+`(7, 43)`, are not a point.""")
 
 ch.md("""## One call, three ways to write it
 

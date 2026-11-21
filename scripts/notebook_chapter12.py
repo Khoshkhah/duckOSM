@@ -43,11 +43,11 @@ the duckOSM edges.
 > **Tip:** the page [duckOSM for traffic simulation users](../compare/for-simulation-users.md) compares each call with
 > netconvert, sumolib and MATSim's own tools.""")
 
-ch.md("""## Build the network
+ch.md("""## Open the network of chapter 1
 
-The chapter uses the driving network of Monaco. The extra `sim` installs SUMO (with its program `netconvert`) and
+Chapter 1 builds Monaco with three modes (driving, walking and cycling) and saves it as `monaco.duckdb`. This chapter opens that file with `duckosm.open`: it builds nothing. The simulation uses the driving network. The extra `sim` installs SUMO (with its program `netconvert`) and
 sumolib.""")
-ch.code("""net = duckosm.network(osm_id=2220322, modes=["driving"], name="monaco")    # get and build the driving network of Monaco
+ch.code("""net = duckosm.open("monaco.duckdb")    # the network of chapter 1: Monaco, three modes
 net.driving                                                                # the card of the driving mode""")
 ch.md("""The driving network of Monaco has 2840 edges and 1768 nodes, 96.2 km of roads.""")
 
@@ -197,7 +197,7 @@ minutes, and some have none. The busiest edge has 145 cars.""")
 ch.code("""net.driving.map(color_by=cars)    # the edges colored by the number of cars (a picture here; live when you run it)""")
 ch.md("""The main roads and the tunnels have the most cars (green and yellow): the random trips cross Monaco
 on them. The small streets have few cars or none.""")
-ch.code("""top = net.edges(where=f"edge_id IN ({','.join(map(str, cars.nlargest(3).index))})")[["edge_id", "name", "highway"]]
+ch.code("""top = net.driving.edges(where=f"edge_id IN ({','.join(map(str, cars.nlargest(3).index))})")[["edge_id", "name", "highway"]]
 top.assign(cars=top.edge_id.map(cars)).sort_values("cars", ascending=False)        # the three edges with the most cars""")
 ch.md("""**What the output shows.** The busiest edges are on the Place d'Armes (145 cars), the roundabout Giratoire
 Aureglia (126) and the Boulevard Albert 1er (126): primary and secondary roads. The names come from the duckOSM
@@ -219,7 +219,7 @@ The id of each MATSim link is the `edge_id` too, so `edge_map` reads the MATSim 
 ch.code("""stats = net.driving.to_matsim("out/matsim_network.xml.gz")              # the MATSim network
 links = duckosm.sim.edge_map("out/matsim_network.xml.gz")              # the link id and the edge_id of each link
 print(stats)                                                           # the counts and the CRS
-len(links), set(links.edge_id) == set(net.edges().edge_id)             # one link for each edge""")
+len(links), set(links.edge_id) == set(net.driving.edges().edge_id)             # one link for each edge""")
 ch.md("""**What the output shows.** The MATSim network has 1768 nodes and 2840 links, in the CRS EPSG:32632 (UTM zone
 32N, the zone of Monaco). `edge_map` reads 2840 links, and their ids are the edge ids of the network.""")
 
@@ -251,7 +251,7 @@ sorted(k for k in f if not k.startswith("n_"))"""),
      """speed = counts.merge(edges, on="id").groupby("edge_id").speed.mean()
 speed.nlargest(5) * 3.6                                                     # km/h"""),
     ("Write one MATSim network for driving and walking. Build a network with the two modes first.",
-     """both = duckosm.network(osm_id=2220322, modes=["driving", "walking"], name="monaco_dw")
+     """both = duckosm.open("monaco.duckdb")
 duckosm.sim.to_matsim(both, "out/matsim_dw.xml.gz", mode=["driving", "walking"])"""),
 ])
 

@@ -49,10 +49,10 @@ each time that you need it. The join is the same in pandas, in SQL and on the ma
 The counts in this chapter are made up. Real counts come from sensors: chapter 11 shows how to put GPS points and
 sensor data onto the edges.""")
 
-ch.md("""## Build the network of this chapter
+ch.md("""## Open the network of chapter 1
 
-The chapter uses the driving network of Monaco.""")
-ch.code("""net = duckosm.network(osm_id=2220322, modes=["driving"], name="monaco")    # get and build the driving network of Monaco
+Chapter 1 builds Monaco with three modes (driving, walking and cycling) and saves it as `monaco.duckdb`. This chapter opens that file with `duckosm.open`: it builds nothing. The counts are on the driving network.""")
+ch.code("""net = duckosm.open("monaco.duckdb")    # the network of chapter 1: Monaco, three modes
 net                                                   # the card""")
 
 ch.md("""## Make the counts
@@ -62,7 +62,7 @@ that do not change from run to run: a primary road has approximately 900 vehicle
 a tertiary road 250. The result is a table with two columns: `edge_id` and the count.""")
 ch.code("""import numpy as np
 
-main = net.edges(where="highway IN ('primary', 'secondary', 'tertiary')")      # the main roads
+main = net.driving.edges(where="highway IN ('primary', 'secondary', 'tertiary')")      # the main roads
 base = main.highway.map({"primary": 900, "secondary": 500, "tertiary": 250})   # vehicles per hour, by road class
 rng = np.random.default_rng(1)                                                 # made-up numbers that do not change
 counts = main[["edge_id"]].assign(vehicles_per_hour=(base * rng.uniform(0.5, 1.5, len(main))).round().astype(int))
@@ -88,7 +88,7 @@ ch.md("""## Join on `edge_id`
 
 `pandas.merge` joins the counts to the edges. `how="left"` keeps all edges: an edge without a count gets `NaN`. Then
 you have all columns of the edge next to its count.""")
-ch.code("""gdf = net.edges().merge(counts, on="edge_id", how="left")                    # the edges with their counts
+ch.code("""gdf = net.driving.edges().merge(counts, on="edge_id", how="left")                    # the edges with their counts
 gdf.nlargest(5, "vehicles_per_hour")[["edge_id", "name", "highway", "vehicles_per_hour"]]    # the five largest counts""")
 ch.md("""**What the output shows.** The five largest counts (1307 to 1324) are on primary roads, near the top of their
 range (900 × 1.5 = 1350): the Boulevard du Larvotto, the tunnels Pasteur and Albert II, and two edges without a name. `gdf` is still a GeoDataFrame: it has the geometry of each edge.""")
@@ -136,7 +136,7 @@ ch.md("""## Color the map by the counts
 as its index is the short form. The edges without a count are gray. Run the cell to see the live map: you can zoom,
 and click a road to see its columns. This page shows the static picture of the map.""")
 ch.code("""by_edge = counts.set_index("edge_id").vehicles_per_hour    # the counts as a Series keyed by edge_id
-net.map(color_by=by_edge, cmap="magma_r")                  # a map, colored by the count""")
+net.driving.map(color_by=by_edge, cmap="magma_r")                  # a map, colored by the count""")
 ch.md("""The color bar is the count in vehicles per hour. The dark lines are the primary
 roads with the largest counts. The thin gray lines are the edges without a count: the residential streets and the
 service roads.""")
@@ -145,10 +145,10 @@ ch.md("""### The other forms of `color_by`
 
 `color_by` also takes a DataFrame with `edge_id` and one value column, or the name of a column of the edges. Use
 `highlight` to show only some edges, for example the edges with more than 1000 vehicles per hour.""")
-ch.code("""net.map(color_by=counts, cmap="magma_r")      # a DataFrame: edge_id and one value column""")
+ch.code("""net.driving.map(color_by=counts, cmap="magma_r")      # a DataFrame: edge_id and one value column""")
 ch.code("""busy = counts[counts.vehicles_per_hour > 1000].edge_id      # the edges with more than 1000 vehicles per hour
 print(len(busy), "busy edges")                              # the number of busy edges
-net.map(highlight=busy)                                     # in orange, the rest gray""")
+net.driving.map(highlight=busy)                                     # in orange, the rest gray""")
 ch.md("""The DataFrame gives the same map as the Series. 65 edges are busy, all on primary
 roads, because only a primary road can have more than 1000 vehicles per hour here.""")
 
@@ -156,7 +156,7 @@ ch.md("""### Save the map
 
 `net.save_map` writes the same map as one HTML file, with the same options (chapter 3, "Save a map as a file"). Send
 the file to a person who has no Python.""")
-ch.code("""net.save_map("out/counts.html", color_by=by_edge, cmap="magma_r")    # the same map as one HTML file""")
+ch.code("""net.driving.save_map("out/counts.html", color_by=by_edge, cmap="magma_r")    # the same map as one HTML file""")
 
 ch.md("""## A dashboard of your data
 
@@ -166,7 +166,7 @@ look at one road. It is the same colored map, with a panel at its left. When you
 
 `net.dashboard()` takes the same `color_by` and `cmap` as `net.map()`. The cell below gives the dashboard of the
 counts.""")
-ch.code("""net.dashboard(color_by=by_edge, cmap="magma_r")    # the dashboard, colored by the count; click a road for its card""")
+ch.code("""net.driving.dashboard(color_by=by_edge, cmap="magma_r")    # the dashboard, colored by the count; click a road for its card""")
 ch.md("""On this page the output is a picture, so you cannot click it. In your notebook the dashboard is live. The picture
 below shows it after a click on Boulevard du Larvotto:
 
@@ -196,10 +196,9 @@ To keep the dashboard as a file that opens in any browser, use
 ch.md("""## The same data in more modes
 
 A street with a sidewalk has the same `edge_id` in the driving and in the walking network. So counts that you join to
-the driving network are also on the walking network, without a second join key. Here the walking network of Monaco is
-built into a second file.""")
-ch.code("""walk = duckosm.network(osm_id=2220322, modes=["walking"], name="monaco_walk")   # the walking network
-on_walk = counts.edge_id.isin(walk.edges().edge_id)                            # the counts that find a walking edge
+the driving network are also on the walking network, without a second join key. The walking network is in the same
+file, `monaco.duckdb`.""")
+ch.code("""on_walk = counts.edge_id.isin(net.walking.edges().edge_id)                    # the counts that find a walking edge
 print(on_walk.sum(), "of", len(counts), "counted edges are also walking edges")""")
 ch.md("""**What the output shows.** 612 of the 1013 counted edges are also in the walking network: the main roads with
 a sidewalk. The other 401 edges have no walking twin. 55 of them are in tunnels, where walking is not allowed. On
@@ -209,7 +208,7 @@ ch.md("""## The ids stay after a rebuild
 
 Build Monaco again into a new file. The same counts join to the same edges, with no change.""")
 ch.code("""again = duckosm.network(osm_id=2220322, modes=["driving"], name="monaco_again")    # the same area, built again into a new file
-counts.edge_id.isin(again.edges().edge_id).all()                              # each count still finds its edge""")
+counts.edge_id.isin(again.driving.edges().edge_id).all()                              # each count still finds its edge""")
 ch.md("""**What the output shows.** `True`: each of the 1013 counts finds its edge in the new file. When the OSM data
 changes (a new extract, or a fix of chapter 5), only the edges of the changed ways get new ids. Chapter 5 shows how to
 list them with `net.diff`, and chapter 11 shows `duckosm.mobility.edge_id_map`, which connects old ids to new ids.
@@ -220,9 +219,9 @@ list them with `net.diff`, and chapter 11 shows `duckosm.mobility.edge_id_map`, 
 ch.exercises([
     ("Give each driving edge a made-up speed (for example `maxspeed_kmh` times a random number from 0.6 to 1.0) and "
      "draw the map of the speeds.",
-     'edges = net.edges()\nrng = np.random.default_rng(2)\n'
+     'edges = net.driving.edges()\nrng = np.random.default_rng(2)\n'
      'speed = edges.set_index("edge_id").maxspeed_kmh * rng.uniform(0.6, 1.0, len(edges))\n'
-     'net.map(color_by=speed.rename("speed_kmh"), cmap="RdYlGn")'),
+     'net.driving.map(color_by=speed.rename("speed_kmh"), cmap="RdYlGn")'),
     ("Write the counts to a CSV file, read it again with pandas, and check that the ids are the same.",
      'counts.to_csv("out/counts.csv", index=False)\nimport pandas as pd\n'
      'back = pd.read_csv("out/counts.csv")\nback.edge_id.dtype, back.edge_id.equals(counts.edge_id)'),

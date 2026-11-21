@@ -59,10 +59,10 @@ can be one of three things.
 
 An edge id is the fastest place: it needs no search for the nearest edge.""")
 
-ch.md("""## Build Monaco with two modes
+ch.md("""## Open the network of chapter 1
 
-The chapter uses the driving network and the walking network of the city of Monaco.""")
-ch.code("""net = duckosm.network(osm_id=2220322, modes=["driving", "walking"], name="monaco")    # get and build Monaco
+Chapter 1 builds Monaco with three modes (driving, walking and cycling) and saves it as `monaco.duckdb`. This chapter opens that file with `duckosm.open`: it builds nothing. The routes use the driving network and the walking network.""")
+ch.code("""net = duckosm.open("monaco.duckdb")    # the network of chapter 1: Monaco, three modes
 net                                                                                 # the card of the network""")
 
 ch.md("""## The Route object
