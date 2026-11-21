@@ -225,6 +225,16 @@ pub fn transfer_costs(db: &Path, transfer_s: f64, per_pair: &[(String, f64)]) ->
     con.execute_batch(&sql).map_err(|e| format!("mm.transfers: {e}"))
 }
 
+/// duckOSM `multimodal.node_costs` and `only_listed_nodes` on `mm.transfers` (see [`crate::steps::apply_node_costs`]).
+pub fn node_costs(db: &Path, file: &Path, only_listed: bool) -> Result<(), String> {
+    let con = Connection::open(db).map_err(err)?;
+    if !has_table(&con, "mm", "transfers")? {
+        return Ok(());
+    }
+    crate::steps::apply_node_costs(&con, "mm", file, only_listed)?;
+    con.execute_batch("CHECKPOINT;").map_err(err)
+}
+
 /// No `mm.*`: duckOSM makes them only with `multimodal.enabled`.
 pub fn drop_multimodal(db: &Path) -> Result<(), String> {
     let con = Connection::open(db).map_err(err)?;

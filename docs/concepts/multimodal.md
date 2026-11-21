@@ -35,6 +35,30 @@ driving, `bike_park` and `bike_unpark` for cycling. Every change of mode goes th
 (`duckosm multimodal --transfer-cost`, or `multimodal.transfer_s` and `multimodal.transfer_costs` in a config, for
 example `"driving->walking": 30`).
 
+### The cost at each junction
+
+A file of junctions sets the cost of a change at those junctions only. It is a CSV or Parquet file with these columns:
+
+| Column | Contents |
+|---|---|
+| `node_id` | the junction |
+| `cost_s` | the cost of a change of mode at the junction, in seconds (0 or more) |
+| `from_mode`, `to_mode` | optional: the change that the row is for. Empty: each change at the junction |
+
+A row with modes wins over a row without modes. The other junctions keep `transfer_s` and the pair costs. With "only
+the listed junctions", the changes at the other junctions are removed: for example, a car can park only at a car park.
+
+| Where | How |
+|---|---|
+| command line | `duckosm multimodal DB --node-costs FILE.csv [--only-listed-nodes]` |
+| config | `multimodal.node_costs: FILE.csv` and `multimodal.only_listed_nodes: true` |
+
+```text
+node_id,cost_s,from_mode,to_mode
+25219418,120,walking,driving
+25219418,30,driving,walking
+```
+
 ## The trip
 
 A trip is a sequence of edges and transfers, and its time is the sum of their `cost_s`. With `enforce_sequence=True` (the

@@ -195,6 +195,8 @@ base map until `roadstyle.duckosm.page` takes them.
 The plan of each module and its decision: [Python SDK: the modules](python-modules.md). Each module takes a
 `Network`, a `ModeView`, a path or a DuckDB connection. The methods of `Network` call them:
 `net.walking.route(a, b)` is `duckosm.routing.route(net.walking, a, b)`.
+In each routing call, `weight` is `"time"`, `"length"`, the name of a numeric column of `<mode>.edges`, or your own
+cost of each edge as a pandas Series keyed by `edge_id` ([Your own cost](sdk/routing.md#your-own-cost)).
 
 | Module | Users | Functions and classes |
 |---|---|---|

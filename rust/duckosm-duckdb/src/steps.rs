@@ -161,8 +161,10 @@ const NOT_MODES: [&str; 4] = ["information_schema", "pg_catalog", "main", "raw"]
 /// at each node that walking shares with another mode, a change to that mode and a change back) of `db`, in place of what
 /// is there (docs/concepts/multimodal.md). `transfer_s` is the cost of a change in seconds; `per_pair` (`"from->to"`,
 /// seconds) gives another cost to a direction. A database without walking or without a second mode gets an empty
-/// `transfers`. Returns the number of rows of the two tables.
-pub fn multimodal(db: &Path, transfer_s: f64, per_pair: &[(String, f64)], schema: &str) -> Result<(i64, i64), String> {
+/// `transfers`. `node_costs`: a CSV or Parquet file of the cost of a change at some junctions ([`apply_node_costs`]).
+/// Returns the number of rows of the two tables.
+pub fn multimodal(db: &Path, transfer_s: f64, per_pair: &[(String, f64)], node_costs: Option<&Path>, only_listed: bool, schema: &str)
+                  -> Result<(i64, i64), String> {
     if !schema.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') || schema.is_empty() {
         return Err(format!("not a schema name: {schema}"));
     }
@@ -237,8 +239,73 @@ pub fn multimodal(db: &Path, transfer_s: f64, per_pair: &[(String, f64)], schema
             );
         }
     }
-    sql += "CHECKPOINT;";
     con.execute_batch(&sql).map_err(|e| format!("{schema}: {e}"))?;
+    if let Some(f) = node_costs {
+        apply_node_costs(&con, schema, f, only_listed)?;
+    } else if only_listed {
+        return Err("only the listed junctions: give the junctions (node costs)".into());
+    }
+    con.execute_batch("CHECKPOINT;").map_err(err)?;
     let count = |t: &str| con.query_row(&format!("SELECT count(*) FROM {schema}.{t}"), [], |r| r.get::<_, i64>(0)).map_err(err);
     Ok((count("edges")?, count("transfers")?))
+}
+
+/// The cost of a change of mode at some junctions, on `{schema}.transfers`. `file` is a CSV or Parquet file with the columns
+/// `node_id` and `cost_s`, and optionally `from_mode` and `to_mode` (empty: each mode). A row sets the cost of the changes at
+/// its junction; a row with modes wins over a row without. `only_listed`: the changes at the other junctions are removed (for
+/// example, park only at car parks).
+pub fn apply_node_costs(con: &Connection, schema: &str, file: &Path, only_listed: bool) -> Result<(), String> {
+    let f = file.display().to_string();
+    let read = if f.ends_with(".parquet") { "read_parquet" } else { "read_csv" };
+    let name = |e: String| format!("node costs {f}: {e}");
+    con.execute_batch(&format!("CREATE OR REPLACE TEMP TABLE _node_costs_in AS SELECT * FROM {read}('{}')", f.replace('\'', "''")))
+        .map_err(|e| name(e.to_string()))?;
+    let has = |c: &str| -> Result<bool, String> {
+        con.query_row("SELECT count(*) FROM duckdb_columns() WHERE table_name = '_node_costs_in' AND column_name = ?", [c], |r| r.get::<_, i64>(0))
+            .map(|n| n > 0)
+            .map_err(err)
+    };
+    for c in ["node_id", "cost_s"] {
+        if !has(c)? {
+            return Err(name(format!("no column {c} (the columns: node_id, cost_s, and optionally from_mode, to_mode)")));
+        }
+    }
+    let m = |c: &str| -> Result<String, String> { Ok(if has(c)? { format!("nullif(trim({c}::VARCHAR), '')") } else { "NULL::VARCHAR".into() }) };
+    con.execute_batch(&format!(
+        "CREATE OR REPLACE TEMP TABLE _node_costs AS SELECT node_id::BIGINT AS node_id, cost_s::DOUBLE AS cost_s, {} AS from_mode,
+         {} AS to_mode FROM _node_costs_in; DROP TABLE _node_costs_in;",
+        m("from_mode")?,
+        m("to_mode")?
+    ))
+    .map_err(|e| name(e.to_string()))?;
+    let bad: i64 = con
+        .query_row("SELECT count(*) FROM _node_costs WHERE node_id IS NULL OR cost_s IS NULL OR isnan(cost_s) OR cost_s < 0", [], |r| r.get(0))
+        .map_err(err)?;
+    if bad > 0 {
+        return Err(name(format!("{bad} row(s) with no node_id, or with a cost_s that is not 0 or more")));
+    }
+    let twice: i64 = con
+        .query_row(
+            "SELECT count(*) FROM (SELECT node_id, from_mode, to_mode FROM _node_costs GROUP BY ALL HAVING count(DISTINCT cost_s) > 1)",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(err)?;
+    if twice > 0 {
+        return Err(name(format!("{twice} junction(s) with two costs for the same change")));
+    }
+    // the rows with fewer modes first: a row with modes then writes over them
+    let matches = "t.node_id = n.node_id AND (n.from_mode IS NULL OR n.from_mode = t.from_mode) AND (n.to_mode IS NULL OR n.to_mode = t.to_mode)";
+    let mut sql = String::new();
+    for k in 0..3 {
+        sql += &format!(
+            "UPDATE {schema}.transfers t SET cost_s = n.cost_s FROM (SELECT DISTINCT * FROM _node_costs
+             WHERE (from_mode IS NOT NULL)::INT + (to_mode IS NOT NULL)::INT = {k}) n WHERE {matches};\n"
+        );
+    }
+    if only_listed {
+        sql += &format!("DELETE FROM {schema}.transfers t WHERE NOT EXISTS (SELECT 1 FROM _node_costs n WHERE {matches});\n");
+    }
+    sql += "DROP TABLE _node_costs;";
+    con.execute_batch(&sql).map_err(|e| format!("{schema}.transfers: {e}"))
 }
