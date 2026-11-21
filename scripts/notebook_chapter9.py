@@ -449,7 +449,9 @@ kind.value_counts()                                                             
 ch.md("""Monaco has 4,184 footways and steps, 1,210 streets and 721 main roads. Most lines are footways and steps:
 Monaco has many of them between its streets, on the slopes.
 
-The second cell makes a function, `block_map`, that draws blocks. The two maps below use it. Each block is a
+The second cell makes a function, `block_map`, that draws blocks. The two maps below use it. The maps draw the
+footways, but not the roads for cars: `block_map(blocks, roads=True)` also draws the center lines of the main roads
+and the streets. Each block is a
 half-transparent polygon with a border inside it, on top of the buildings. The border is a band of 1 m inside the
 polygon, so it does not make the block larger. Two blocks that touch never have the same color: `mapclassify.greedy`
 gives each block one of six colors in this way. The map is an SVG, a vector picture: click it and zoom in to one
@@ -473,8 +475,9 @@ from matplotlib.patches import Patch
 six = ListedColormap(["#1b9e77", "#d95f02", "#7570b3", "#e7298a", "#66a61e", "#e6ab02"])    # the six block colors
 
 
-def block_map(blks, space=None):
-    \"\"\"The map of the blocks blks, with the street space space (a polygon) if you give it, as an SVG.\"\"\"
+def block_map(blks, space=None, roads=False):
+    \"\"\"The map of the blocks blks as an SVG: with the street space space (a polygon) if you give it, and with the
+    center lines of the main roads and the streets if roads is True.\"\"\"
     color = mapclassify.greedy(blks, min_colors=6)                               # 0 to 5: blocks that touch differ
     fig, ax = plt.subplots(figsize=(12, 13))                                     # a large map
     ax.set_facecolor("#e8e8e8")                                                  # the background in light gray
@@ -483,6 +486,9 @@ def block_map(blks, space=None):
         gpd.GeoSeries([space], crs=blks.crs).plot(ax=ax, color="white")         # the street space
         legend.append(Patch(facecolor="white", edgecolor="#bbbbbb", label="street space"))
     streets[kind == "footway, steps"].plot(ax=ax, color="#8b4513", linewidth=0.25, linestyle=(0, (4, 3)))    # footways
+    if roads:
+        streets[kind != "footway, steps"].plot(ax=ax, color="#666666", linewidth=0.4)    # the roads for cars
+        legend.append(Line2D([], [], color="#666666", linewidth=0.8, label="road (center line)"))
     buildings.plot(ax=ax, color="#9e9e9e", edgecolor="#6e6e6e", linewidth=0.2)  # the buildings
     blks.plot(ax=ax, color=[six(c) for c in color], alpha=0.45)                 # each block: a half-transparent polygon
     border = blks.difference(blks.buffer(-1))                                    # a band of 1 m inside each block
