@@ -1,7 +1,7 @@
 """``duckosm.hdmap``: automated driving and HD maps (docs/proposals/python-sdk.md, section 5.7).
 
-``to_opendrive``, ``to_lanelet2``, ``lane_graph`` (``build_lane_graph``), ``route_lanes`` and ``to_commonroad`` (a
-CommonRoad map, with commonroad-io). Lanelet2, CommonRoad and the lane graph read a GMNS database
+``to_opendrive``, ``to_lanelet2``, ``lane_graph`` (``build_lane_graph``), ``route_lanes``, ``to_commonroad`` (a
+CommonRoad map, with commonroad-io) and ``surfaces`` (the road surface of each lane and each junction). Lanelet2, CommonRoad and the lane graph read a GMNS database
 (:func:`duckosm.planning.to_gmns`). pip extra: ``duckosm[hdmap]``.
 """
 from duckosm._api import build_lane_graph, route_lanes, to_lanelet2  # noqa: F401
@@ -52,6 +52,49 @@ def _local(geoms, lon0, lat0):
     import shapely
     kx, ky = 111_320.0 * math.cos(math.radians(lat0)), 110_574.0
     return shapely.transform(geoms, lambda c: np.column_stack([(c[:, 0] - lon0) * kx, (c[:, 1] - lat0) * ky]))
+
+
+def surfaces(gmns_db, mode="driving"):
+    """The road surfaces of a GMNS database (:func:`duckosm.planning.to_gmns`) as two GeoDataFrames (EPSG:4326):
+    ``(lanes, junctions)``. ``lanes``: one polygon for each lane, its center line to the edge of the junction
+    (``geom_cut``) with the width of the lane (3.25 m if the lane has no width), with flat ends. Columns ``lane_id``,
+    ``edge_id``, ``lane_num``, ``width``, ``allowed_uses``, ``geometry``. ``junctions``: one polygon for each junction
+    node, the union of its lane connectors with their widths. Columns ``node_id``, ``connectors``, ``geometry``. DuckDB
+    computes the polygons in the UTM zone of the area.
+
+    >>> lanes, junctions = duckosm.hdmap.surfaces("out/gmns.duckdb")"""
+    import duckdb
+    import geopandas as gpd
+
+    g = f"gmns_{mode}"
+    con = duckdb.connect(str(gmns_db), read_only=True)
+    try:
+        con.load_extension("spatial")
+        lon, lat = con.execute(f"SELECT avg(x_coord), avg(y_coord) FROM {g}.node").fetchone()
+        utm = f"EPSG:{(32600 if lat >= 0 else 32700) + int((lon + 180) // 6) + 1}"
+
+        def surface(line, width):              # the line in metres, with the width, back in degrees
+            return (f"ST_AsWKB(ST_Transform(ST_Buffer(ST_Transform({line}, 'EPSG:4326', '{utm}', always_xy := true), "
+                    f"{width} / 2, 8, 'CAP_FLAT', 'JOIN_ROUND', 5.0), '{utm}', 'EPSG:4326', always_xy := true))")
+        lanes = con.execute(f"""SELECT lane_id, link_id AS edge_id, lane_num, coalesce(width, 3.25) AS width, allowed_uses,
+                                       {surface("geom_cut", "coalesce(width, 3.25)")} AS wkb
+                                FROM {g}.lane WHERE geom_cut IS NOT NULL ORDER BY lane_id""").df()
+        has = {t for (t,) in con.execute(f"SELECT table_name FROM duckdb_tables() WHERE schema_name = '{g}'").fetchall()}
+        if {"lane_connector", "movement"} <= has:
+            junctions = con.execute(f"""WITH c AS (SELECT m.node_id, ST_Transform(ST_Buffer(ST_Transform(c.geom, 'EPSG:4326', '{utm}',
+                                                       always_xy := true), coalesce(c.width, 3.25) / 2, 8, 'CAP_FLAT', 'JOIN_ROUND', 5.0),
+                                                       '{utm}', 'EPSG:4326', always_xy := true) AS g
+                                                FROM {g}.lane_connector c JOIN {g}.movement m USING (mvmt_id) WHERE c.geom IS NOT NULL)
+                                        SELECT node_id, count(*) AS connectors, ST_AsWKB(ST_Union_Agg(g)) AS wkb
+                                        FROM c GROUP BY node_id ORDER BY node_id""").df()
+        else:
+            junctions = lanes.iloc[:0][["lane_id", "wkb"]].rename(columns={"lane_id": "node_id"}).assign(connectors=0)
+    finally:
+        con.close()
+
+    def gdf(df):
+        return gpd.GeoDataFrame(df.drop(columns="wkb"), geometry=gpd.GeoSeries.from_wkb(df.wkb.map(bytes)), crs="EPSG:4326")
+    return gdf(lanes), gdf(junctions)
 
 
 def to_commonroad(gmns_db, path, mode="driving", country_id="ZAM", map_name=None, author="duckOSM", affiliation=""):
