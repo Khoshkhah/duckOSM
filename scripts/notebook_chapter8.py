@@ -349,13 +349,40 @@ ch.md("""The dark edges are near a target, and the yellow edges are about 9 minu
 
 ch.md("""## The graph of all calls: `routed_graph`
 
-`duckosm.routing.routed_graph` gives the SQL relation of the arcs that a mode routes on: the rows of
-`<mode>.edge_graph` for that mode. Use it in your own SQL, for example to count the arcs or to find the edges where a
-route can start.""")
-ch.code("""g = duckosm.routing.routed_graph(net.driving)                     # an SQL relation, as text
-print(g)
-net.sql(f"SELECT count(*) AS arcs, count(DISTINCT from_edge) AS edges FROM {g}")    # the size of the graph""")
-ch.md("""The driving graph is the rows of `driving.edge_graph` with `uses = 'car'`. It has 5,082 arcs (legal turns) that start on 2,814 edges. The network has 2,840 driving edges, so 26 edges have no turn out: a route can end on them, but it cannot start there.""")
+### The turns that a mode can use
+
+All the routing calls of this chapter search one graph: the turns of the mode, in the table `<mode>.edge_graph`
+(chapter 7). But not every row of that table is for the mode. The column `uses` says who can make each turn. The
+cell counts the rows of `driving.edge_graph` by `uses`.""")
+ch.code('''net.sql("""SELECT uses, count(*) AS turns
+           FROM driving.edge_graph GROUP BY uses ORDER BY turns DESC""")    # who can make each turn''')
+ch.md("""The table has 6,754 turns. A car can make 5,082 of them (`car`). The others go onto or from an edge that is not
+open to all cars: a pedestrian street (`pedestrian`), a private road (`private`) or a bus lane (`bus`). A car route
+uses only the `car` turns.
+
+### `routed_graph`: those turns, for your own SQL
+
+`duckosm.routing.routed_graph(view)` gives the turns that the mode routes on. It gives them as a piece of SQL text, so
+you can put it into your own query, in place of a table name.""")
+ch.code("""g = duckosm.routing.routed_graph(net.driving)     # the turns that a car route uses, as SQL text
+print(g)""")
+ch.md("""The text selects the rows of `driving.edge_graph` with `uses = 'car'`. The next cell puts it into a query, after
+`FROM`, and counts the turns and the edges where a car route can start: an edge with at least one turn to a next
+edge.""")
+ch.code("""net.sql(f"SELECT count(*) AS turns, count(DISTINCT from_edge) AS start_edges FROM {g}")""")
+ch.md("""A car can make 5,082 turns, and a car route can start on 2,814 edges.
+
+### The edges where a route cannot start
+
+Monaco has 2,840 driving edges, so 26 edges have no turn to a next edge. The cell finds them and counts their road
+classes.""")
+ch.code('''net.sql(f"""SELECT highway, count(*) AS edges FROM driving.edges
+           WHERE edge_id NOT IN (SELECT from_edge FROM {g})
+           GROUP BY highway ORDER BY edges DESC""")                 # the 26 edges with no turn out''')
+ch.md("""13 of the 26 edges are service roads and 8 are residential streets: the end of a dead-end street, or a garage
+exit. The 5 main roads end at the boundary of the area: the road goes on in OSM, but the cut file stops there. A route
+cannot leave such an edge, so `route` gives `None` for a route that starts on it, as in "Many routes in parallel"
+above.""")
 
 ch.md("""## Try it yourself
 
