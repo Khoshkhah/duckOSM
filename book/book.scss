@@ -403,3 +403,10 @@ body.quarto-dark div.sourceCode code { color: #9cdcfe !important; }
 .sidebar-navigation .sidebar-link .menu-text .chapter-number { text-indent: 0; }
 // the chapter links: a little smaller and closer lines, so that a title fits on one line or wraps neatly
 .sidebar-navigation .sidebar-item-container .sidebar-link { font-size: .88rem; line-height: 1.3; padding: .4rem .6rem; }
+// the table of contents at the right: smaller text, closer lines, and a title that wraps under its title, not under
+// its number (the number has a fixed width)
+#TOC a.nav-link { display: block; font-size: .84rem; line-height: 1.3; padding-top: .28rem; padding-bottom: .28rem;
+  padding-left: 2.95rem !important; text-indent: -2.45rem; }
+#TOC a.nav-link .header-section-number { display: inline-block; width: 2.2rem; text-indent: 0; }
+#TOC ul ul a.nav-link { padding-left: 3.55rem !important; text-indent: -3.05rem; font-size: .8rem; }
+#TOC ul ul a.nav-link .header-section-number { width: 2.8rem; }
