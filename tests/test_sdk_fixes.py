@@ -67,7 +67,7 @@ def test_rebuild_and_diff(tmp_path):
     rec = fixed.sql("SELECT yaml, sha256 FROM main.fixes")
     assert rec.yaml[0] == text and rec.sha256[0] == hashlib.sha256(text.encode()).hexdigest()
     assert fixed.has_fixes() and not fixed.fixes_changed()
-    Fixes(load=tmp_path / "osm_fixes.yaml").drop(way=int(slow)).save()
+    Fixes(load=tmp_path / "osm_fixes.yaml").drop(way=int(slow)).save(tmp_path / "osm_fixes.yaml")
     assert fixed.fixes_changed() and len(fixed.fixes) == 2, "fixes_changed sees the edit; net.fixes keeps the rules of the build"
     (tmp_path / "osm_fixes.yaml").unlink()
     assert len(fixed.fixes) == 2 and fixed.fixes.path is None
