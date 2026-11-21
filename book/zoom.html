@@ -54,7 +54,8 @@ window.addEventListener("load", () => {
   lightboxQuarto.on("slide_after_load", ({ slideNode }) => {
     const img = slideNode.querySelector(".gslide-image img");
     if (!img || img._pz) return;
-    const pz = Panzoom(img, { maxScale: 8, minScale: 1, contain: "outside" });
+    const vector = /\.svg($|\?)/.test(img.src);         // an SVG stays sharp: more zoom
+    const pz = Panzoom(img, { maxScale: vector ? 20 : 8, minScale: 1, contain: "outside" });
     img._pz = pz; current = pz;
     img.parentElement.style.touchAction = "none";
     img.parentElement.style.overflow = "visible";      // the zoomed picture can fill the whole screen

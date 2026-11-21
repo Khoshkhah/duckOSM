@@ -437,15 +437,18 @@ The map has four layers, from the bottom to the top:
 | The footways and the steps | brown dashed lines |
 | The buildings | gray |
 | The blocks | half-transparent, with a border in the same color; two blocks that touch never have the same color |""")
-ch.code("""import geopandas as gpd
+ch.code("""import io
+
+import geopandas as gpd
 import mapclassify
+from IPython.display import SVG
 from matplotlib.colors import ListedColormap
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 
 shown["color"] = mapclassify.greedy(shown, min_colors=6)                       # 0 to 5: blocks that touch differ
 six = ListedColormap(["#1b9e77", "#d95f02", "#7570b3", "#e7298a", "#66a61e", "#e6ab02"])    # the six block colors
-fig, ax = plt.subplots(figsize=(12, 13), dpi=200)          # a large picture with many pixels: zoom in to see each block
+fig, ax = plt.subplots(figsize=(12, 13))                   # a large map
 ax.set_facecolor("#e8e8e8")                                # the background in light gray
 gpd.GeoSeries([space], crs=streets.crs).plot(ax=ax, color="white")             # the street space
 streets[kind == "footway, steps"].plot(ax=ax, color="#8b4513", linewidth=0.5, linestyle="--")    # the footways
@@ -459,7 +462,12 @@ legend = [Patch(facecolor=(0.11, 0.62, 0.47, 0.35), edgecolor="#1b9e77", linewid
 ax.legend(handles=legend, title="Blocks of Monaco", loc="lower right", facecolor="#e8e8e8")
 ax.set_xticks([])
 ax.set_yticks([])
-plt.show()""")
+svg = io.StringIO()
+fig.savefig(svg, format="svg", bbox_inches="tight")       # SVG: a vector picture, sharp at any zoom
+plt.close(fig)
+SVG(svg.getvalue())                                        # show the SVG""")
+ch.md("""The cell saves the map as SVG, not as a PNG picture. An SVG keeps the lines and the polygons, so the map stays
+sharp at any zoom: click it, and zoom in to one block.""")
 
 
 ch.md("""## Try it yourself
