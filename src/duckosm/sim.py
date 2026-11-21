@@ -46,10 +46,12 @@ def sumo_net(path):
     (``sumolib.net.readNet``), with the internal edges.
 
     >>> sn = duckosm.sim.sumo_net(net.driving.to_sumo("out/sumo", run_netconvert=True))"""
-    from duckosm.errors import require
+    from duckosm.errors import DuckOSMError, require
     require("sumolib", "duckosm.sim.sumo_net")
     import sumolib
     if isinstance(path, dict):
+        if "net" not in path:
+            raise DuckOSMError("this SUMO export has no .net.xml: give run_netconvert=True, or run netconvert -c on its .netccfg")
         path = path["net"]
     return sumolib.net.readNet(str(path), withInternal=True)
 
