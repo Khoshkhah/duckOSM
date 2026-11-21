@@ -97,7 +97,7 @@ def test_data(net, one):
 
 
 def test_cards(net):
-    assert "<table" in net._repr_html_() and "no fixes file" in net._repr_html_()
+    assert "<table" in net._repr_html_() and "<td>fixes</td><td>none</td>" in net._repr_html_()
     assert "driving 2" in repr(net) and "walking" in repr(net.walking) and "<table" in net.walking._repr_html_()
     area = duckosm.Area(DATA / "monaco.osm.pbf", DATA / "monaco.geojson")
     assert "<table>" in area._repr_html_()
@@ -131,6 +131,8 @@ def test_live_maps(net, tmp_path, monkeypatch):
     assert hasattr(net.driving.map(color_by="maxspeed_kmh", cmap="viridis"), "_repr_html_")
     assert hasattr(net.map("walking", routes=[r]), "_repr_html_")
     assert hasattr(net.dashboard(), "_repr_html_")
+    import pandas as pd
+    assert hasattr(net.dashboard("walking", color_by=pd.Series({int(r["edges"][0]): 1.0}), cmap="viridis"), "_repr_html_")   # your data
     assert hasattr(net.map(layers=False), "_repr_html_") and hasattr(net.map(layers=["water"]), "_repr_html_")
     monkeypatch.setenv("DUCKOSM_MAP_SHOW", "plot")                              # a file is the live map also then
     out = net.save_map(tmp_path / "monaco.html")

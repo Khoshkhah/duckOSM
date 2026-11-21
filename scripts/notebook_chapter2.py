@@ -42,11 +42,11 @@ edges and the nodes make a directed graph.
 
 ch.md("""## Build the network of this chapter
 
-The chapter uses the three modes of Monaco, so that you can compare them. The build takes approximately 30 seconds.
+The chapter uses the three modes of Monaco, so that you can compare them.
 The OSM extract stays in the cache from chapter 1.""")
 ch.code("""net = duckosm.network(osm_id=2220322, modes=["driving", "walking", "cycling"], name="monaco")    # three modes
 net                                                                                               # the card""")
-ch.md("""**What the output shows.** The card names the file, its size (36.5 MB) and the build time. The table has one
+ch.md("""The card names the file, its size (36.5 MB) and the build time. The table has one
 row for each mode: driving has 2840 edges, walking 11938 and cycling 11305.""")
 
 ch.md("""## The file and its modes
@@ -57,7 +57,7 @@ GeoDataFrame.""")
 ch.code("""print(net.path.name)       # the name of the file
 print(net.modes)           # the modes in the file
 net.boundary               # the polygon of the area, with its name, OSM id and area in km2""")
-ch.md("""**What the output shows.** The boundary is one row: the relation 2220322, "Monaco", 2.39 km2, from Nominatim. The
+ch.md("""The boundary is one row: the relation 2220322, "Monaco", 2.39 km2, from Nominatim. The
 `geometry` column is a MultiPolygon in longitude and latitude (EPSG:4326).""")
 
 ch.md("""## The tables: `net.tables()` and `net.schema()`
@@ -119,7 +119,7 @@ differences.""")
 ch.code("""cols = {m: set(net.columns(f"{m}.edges").column_name) for m in net.modes}   # the column names of each mode
 print("walking only:", cols["walking"] - cols["driving"])
 print("cycling only:", cols["cycling"] - cols["driving"])""")
-ch.md("""**What the output shows.** Walking adds `walk_type` (for example a sidewalk or a crossing). Cycling adds
+ch.md("""Walking adds `walk_type` (for example a sidewalk or a crossing). Cycling adds
 `cycle_type` and `dismount` (`true` where you must push the bicycle). Every other column is the same in the three
 modes, so one query works on each mode.""")
 
@@ -150,7 +150,7 @@ ch.md("""## The view of one mode
 ch.code("""net.summary()          # one row for each mode""")
 ch.code("""walk = net["walking"]     # the same as net.walking
 walk.summary()            # the row of one mode""")
-ch.md("""**What the output shows.** Walking has 11938 edges and 4589 nodes, 260.6 km in all. Driving and cycling have
+ch.md("""Walking has 11938 edges and 4589 nodes, 260.6 km in all. Driving and cycling have
 35.5 km of one-way roads. Walking has 0.0 km: a person on foot can walk in both directions on each road.
 
 > **Warning:** a call that needs one network (a route, a graph, an export) stops with a `DuckOSMError` when the file
@@ -171,7 +171,7 @@ for the nodes). You can then use all of pandas and GeoPandas.
 ch.code("""edges = net.driving.edges()                     # all driving edges
 print(edges.shape, edges.crs)                   # rows and columns, the coordinate system
 edges[["edge_id", "edge_ref", "osm_id", "highway", "name", "length_m", "maxspeed_kmh", "cost_s"]].head()""")
-ch.md("""**What the output shows.** 2840 rows and 28 columns, in EPSG:4326 (longitude and latitude). The first rows are
+ch.md("""2840 rows and 28 columns, in EPSG:4326 (longitude and latitude). The first rows are
 the smallest `edge_id` values.""")
 
 ch.md("""### Filter with `where`
@@ -180,7 +180,7 @@ ch.md("""### Filter with `where`
 in pandas on a large file.""")
 ch.code("""primary = net.edges("driving", where="highway IN ('primary', 'primary_link')")   # the primary roads
 print(len(primary), "edges,", round(primary.length_m.sum() / 1000, 1), "km")""")
-ch.md("""**What the output shows.** 218 edges, 12.3 km: the `primary` and `primary_link` rows of the SQL table in the
+ch.md("""218 edges, 12.3 km: the `primary` and `primary_link` rows of the SQL table in the
 section "SQL on the file" below.
 
 > **Warning:** the text of `where` goes into the query as it is. Give only text that you write yourself, never text
@@ -194,7 +194,7 @@ ch.code("""utm = net.edges("driving", crs="utm")                        # the sa
 print(utm.crs)                                               # the UTM zone of Monaco
 print(round(utm.length.sum() / 1000, 1), "km from the geometry")
 print(round(utm.length_m.sum() / 1000, 1), "km from length_m")""")
-ch.md("""**What the output shows.** The geometry gives 96.3 km and `length_m` gives 96.2 km. The small difference comes
+ch.md("""The geometry gives 96.3 km and `length_m` gives 96.2 km. The small difference comes
 from the UTM projection: `length_m` is measured on the sphere.""")
 
 ch.md("""### All modes in one table
@@ -203,7 +203,7 @@ With more modes in the file and no `mode`, `net.edges()` gives the edges of all 
 `mode` column. A road that more modes can use is in it once for each mode, with the same `edge_id`.""")
 ch.code("""all_edges = net.edges()                  # the three modes, with a "mode" column
 all_edges["mode"].value_counts()""")
-ch.md("""**What the output shows.** 26083 rows: 11938 walking, 11305 cycling and 2840 driving. The table has the
+ch.md("""26083 rows: 11938 walking, 11305 cycling and 2840 driving. The table has the
 columns of all modes. `walk_type` is empty for driving and cycling.""")
 
 ch.md("""### The nodes
@@ -226,7 +226,7 @@ ch.code("""net.sql(\"\"\"
     GROUP BY highway
     ORDER BY edges DESC
 \"\"\")                                                     # the road classes of driving""")
-ch.md("""**What the output shows.** Residential streets (919 edges, 31.7 km) and service roads (855 edges, 23.7 km) are
+ch.md("""Residential streets (919 edges, 31.7 km) and service roads (855 edges, 23.7 km) are
 more than half of the driving network. The primary roads have 197 edges and 11.2 km.""")
 
 ch.md("""### Values in a query: `params`
@@ -250,7 +250,7 @@ ch.code("""net.sql(\"\"\"
     WHERE ST_DWithin(ST_Transform(geometry, 'EPSG:4326', 'EPSG:32632', always_xy := true),
                      ST_Transform(ST_Point(7.4280, 43.7393), 'EPSG:4326', 'EPSG:32632', always_xy := true), 200)
 \"\"\")                                                     # the edges near the casino square""")
-ch.md("""**What the output shows.** The boundary has 2.39 km2, the same value as the `area_km2` column of
+ch.md("""The boundary has 2.39 km2, the same value as the `area_km2` column of
 `net.boundary`. 223 driving edges are within 200 m of the casino square.
 
 > **Tip:** `always_xy := true` tells DuckDB that the points are longitude first. Without it, `ST_Transform` reads
@@ -267,7 +267,7 @@ ch.code("""with net.connect() as con:                                          #
     print(rel.filter("highway = 'steps'").count("*").fetchone()[0], "of them are steps")
     table = rel.limit(5).to_arrow_table()                                    # an Arrow table, no pandas
 print(type(table).__name__, table.num_rows, "rows")""")
-ch.md("""**What the output shows.** 11938 walking edges, and 1038 of them are steps. The Arrow table has 5 rows. The
+ch.md("""11938 walking edges, and 1038 of them are steps. The Arrow table has 5 rows. The
 relation reads nothing until you ask for a result. The two counts run in
 DuckDB, and only the numbers come to Python. `to_arrow_table()` gives a pyarrow `Table` for tools that read Arrow.
 
@@ -306,7 +306,7 @@ ch.code("""net.sql(\"\"\"
     SELECT edge_id, edge_ref, source, target, is_reverse
     FROM driving.edges WHERE osm_id = 4230114 ORDER BY edge_ref
 \"\"\")                                                     # the edges of one way""")
-ch.md("""**What the output shows.** Three parts of the way give six edges. The two edges of each part have the same
+ch.md("""Three parts of the way give six edges. The two edges of each part have the same
 nodes in the other order, and two very different numbers: `4230114#3f` is 4950030941241418106, `4230114#3r` is
 414242052250797. `is_reverse` is `true` for the `r` edges.""")
 
@@ -318,7 +318,7 @@ ch.code("""row = edges.iloc[0]                                                  
 print(row.edge_id, duckosm.edge_id_hash(row.osm_id, row.source, row.target))   # the same number
 print(duckosm.edge_id_expr())                                          # the formula as SQL""")
 ch.code("""net.sql("SELECT count(*) AS different FROM driving.edges WHERE edge_id <> edge_id_hash(osm_id, source, target)")""")
-ch.md("""**What the output shows.** The Python function gives the same number as the column. The SQL macro agrees for
+ch.md("""The Python function gives the same number as the column. The SQL macro agrees for
 all 2840 driving edges: 0 are different.
 
 | Call | Gives |
@@ -344,7 +344,7 @@ ch.code("""net.sql(\"\"\"
     FROM (SELECT edge_id FROM driving.edges UNION ALL SELECT edge_id FROM walking.edges
           UNION ALL SELECT edge_id FROM cycling.edges)
 \"\"\")                                                     # the roads that the modes share""")
-ch.md("""**What the output shows.** 2201 of the 2840 driving edges are also walking edges, and 2829 are also cycling
+ch.md("""2201 of the 2840 driving edges are also walking edges, and 2829 are also cycling
 edges. The three modes have 13302 different edges in all, less than the 26083 rows of the three tables, because most
 roads are in two or three modes.""")
 

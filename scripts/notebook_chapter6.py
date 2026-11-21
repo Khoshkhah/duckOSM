@@ -65,7 +65,7 @@ The chapter exports the driving network of Monaco. The summary gives the number 
 each export with it.""")
 ch.code("""net = duckosm.network(osm_id=2220322, modes=["driving"], name="monaco")    # get and build the driving network of Monaco
 net.summary()                                         # the number of edges, to compare with each export""")
-ch.md("""**What the output shows.** The driving network of Monaco has 2,840 edges and 1,768 nodes, 96.2 km of road.
+ch.md("""The driving network of Monaco has 2,840 edges and 1,768 nodes, 96.2 km of road.
 Each export below gives its own count, and the count must agree with these numbers.""")
 
 ch.md("""## SUMO
@@ -74,19 +74,32 @@ ch.md("""## SUMO
 second. Its network file is `.net.xml`. SUMO's program `netconvert` makes it from three **plain XML** files: the
 nodes (`.nod.xml`), the edges (`.edg.xml`) and the connections between lanes (`.con.xml`).
 
-`to_sumo` writes the three plain files, then runs `netconvert` on them. The extra `sim` installs `netconvert` (the
-Python package `eclipse-sumo`).
+`to_sumo` makes the SUMO network in two steps:
+
+1. It writes the three plain files and a **netconvert config** (`.netccfg`). The config is the input of `netconvert`:
+   it names the three plain files, the output file and the options of the conversion.
+2. It runs `netconvert -c network.netccfg`. `netconvert` reads the config and the files that it names, and writes
+   `.net.xml`.
+
+```text
+network.nod.xml ─┐
+network.edg.xml ─┼─ named in network.netccfg ──> netconvert -c network.netccfg ──> network.net.xml
+network.con.xml ─┘
+```
+
+The extra `sim` installs `netconvert` (the Python package `eclipse-sumo`).
 
 | Argument | Default | Does |
 |---|---|---|
 | `net_name` | `"network"` | the start of each file name |
 | `run_netconvert` | `True` | `False`: only the plain XML, with no SUMO program |
 | `connections` | `True` | writes the connections of the lanes at each junction (from the turn graph and the turn lanes) |
-| `config` | none | a netconvert config file of your own |""")
+| `config` | none | your own netconvert config (a `.netccfg` path, or a dict of options), in place of the default options |""")
 ch.code("""sumo = net.to_sumo("out/sumo")    # the plain XML files, and the .net.xml of netconvert
 sumo                              # the paths and the numbers""")
-ch.md("""**What the output shows.** The dict has the paths of the three plain files, of the netconvert config
-(`.netccfg`) and of SUMO's network (`.net.xml`). The plain files have 1,768 nodes, 2,840 edges and 5,082
+ch.md("""**What the output shows.** The line `running: netconvert -c out/sumo/network.netccfg` is step 2. The dict has the
+paths of the three plain files, of the netconvert config (`.netccfg`, the input of netconvert) and of SUMO's network
+(`.net.xml`, its output). The plain files have 1,768 nodes, 2,840 edges and 5,082
 connections: the same nodes and edges as the network, and one connection for each arc of the turn graph that a car
 can use (chapter 7).""")
 ch.md("""The check: SUMO's own network file must have each edge of duckOSM. `duckosm.sim.edge_map` reads the `.net.xml`
@@ -94,7 +107,7 @@ and gives the `edge_id` of each SUMO edge (netconvert can split an edge into par
 gives the `edge_id` of each part).""")
 ch.code("""ids = duckosm.sim.edge_map(sumo)                 # the SUMO id and the edge_id of each SUMO edge
 len(ids), ids.edge_id.nunique()                  # the rows, and the different edge ids in them""")
-ch.md("""**What the output shows.** SUMO's network has 2,840 edges, and they are 2,840 different edge ids: netconvert
+ch.md("""SUMO's network has 2,840 edges, and they are 2,840 different edge ids: netconvert
 kept each duckOSM edge, with its `edge_id` as its SUMO id.
 
 > **Warning:** without the extra `sim` (or a SUMO install), `to_sumo` stops with "netconvert not found". Install
@@ -119,15 +132,14 @@ ch.code("""gmns = net.to_gmns("out/gmns.duckdb", to_csv="out/gmns")         # th
 gmns["modes"]                                                     # the rows of each table""")
 ch.md("""**What the output shows.** The GMNS network of driving has 1,772 nodes, 2,858 links, 3,318 lanes and 3,755
 movements. It has 18 links more than `driving.edges`: for example the other direction of a one-way road that a bus
-route uses. The export also makes the lanes and the movements. It took more than 25 s here. Each other
-export of the chapter takes less than 1 s.
+route uses. The export also makes the lanes and the movements.
 
 The check: `duckosm.planning.check_gmns` runs the rules of the standard on the tables. Examples: each link starts at
 its `from_node`, each lane number is correct, each movement turns where its inbound link ends. It gives one row for
 each rule: the schema, the rule, the number of bad rows and the number of rows.""")
 ch.code("""checks = duckosm.planning.check_gmns("out/gmns.duckdb")             # (schema, check, bad rows, rows) for each check
 len(checks), [c for c in checks if c[2] > 0]                        # the number of checks, and the checks with bad rows""")
-ch.md("""**What the output shows.** `check_gmns` ran 17 checks, and no check found a bad row (the empty list).""")
+ch.md("""`check_gmns` ran 17 checks, and no check found a bad row (the empty list).""")
 
 ch.md("""## MATSim
 
@@ -144,7 +156,7 @@ import xml.etree.ElementTree as ET                                   # to read t
 
 matsim = net.to_matsim("out/matsim_network.xml.gz")                  # the MATSim network
 matsim, len(ET.parse(gzip.open("out/matsim_network.xml.gz")).findall(".//link"))    # its numbers, and the links in the file""")
-ch.md("""**What the output shows.** The MATSim network has 1,768 nodes and 2,840 links, in UTM zone 32N (`EPSG:32632`,
+ch.md("""The MATSim network has 1,768 nodes and 2,840 links, in UTM zone 32N (`EPSG:32632`,
 in metres). The XML file has 2,840 `<link>` elements: one link for each edge.""")
 
 ch.md("""## OpenDRIVE (experimental)
@@ -159,7 +171,7 @@ is experimental: it writes one road for each edge, and the junctions only with `
 | `junctions` | `False` | `True`: also the OpenDRIVE junctions |""")
 ch.code("""odr = net.to_opendrive("out/monaco.xodr")                    # the OpenDRIVE file
 odr, len(ET.parse("out/monaco.xodr").findall("road"))       # its numbers, and the roads in the file""")
-ch.md("""**What the output shows.** The OpenDRIVE file has 2,840 roads, in UTM zone 32N. The XML has 2,840 `<road>`
+ch.md("""The OpenDRIVE file has 2,840 roads, in UTM zone 32N. The XML has 2,840 `<road>`
 elements: one road for each edge.""")
 
 ch.md("""## GeoPackage, GeoParquet and shapefiles
@@ -180,7 +192,7 @@ con = duckdb.connect()                                       # DuckDB with the e
 con.load_extension("spatial")
 {layer: con.execute(f"SELECT count(*) FROM st_read('out/monaco.gpkg', layer='{layer}')").fetchone()[0]
  for layer in gis["layers"]}                                 # the rows of each layer, as DuckDB reads them""")
-ch.md("""**What the output shows.** The GeoPackage has three layers: 2,840 edges, 1,768 nodes and the boundary (1 row).
+ch.md("""The GeoPackage has three layers: 2,840 edges, 1,768 nodes and the boundary (1 row).
 DuckDB reads each layer with the same number of rows as the network.""")
 ch.md("""GeoParquet is a Parquet file with a geometry column. It is fast to read for DuckDB, GeoPandas and the cloud data
 tools. `fmt="geoparquet"` writes one file for each layer into a folder.""")
@@ -208,7 +220,7 @@ network, and gives all OSM features (nodes, ways, relations) with all their tags
 ch.code("""area = duckosm.get(osm_id=2220322, name="monaco", out="data")                                          # the OSM file (from the cache)
 quack = duckosm.gis.quack(area, out="out", name="monaco", formats=["geoparquet"])    # the QuackOSM table
 con.sql(f"SELECT split_part(feature_id, '/', 1) AS type, count(*) AS features FROM '{quack[0]}' GROUP BY 1 ORDER BY 1").df()    # the features by OSM type""")
-ch.md("""**What the output shows.** The QuackOSM table of Monaco has 3,994 nodes (points with tags: shops, stops,
+ch.md("""The QuackOSM table of Monaco has 3,994 nodes (points with tags: shops, stops,
 trees ...), 5,606 ways and 59 relations. This is all of the OSM data with tags, not only the roads: a building, a park
 and a bench are features too.
 
@@ -221,8 +233,53 @@ from pathlib import Path
 subprocess.run([sys.executable, "-m", "duckosm", "quack", str(area.pbf), "--pmtiles", "-o", "out", "--name", "monaco"],
                check=True)                                             # the command duckosm quack --pmtiles
 Path("out/monaco.pmtiles").stat().st_size, Path("out/monaco.pmtiles").read_bytes()[:7]    # the size; a PMTiles file starts with "PMTiles\"""")
-ch.md("""**What the output shows.** The command made 59 tiles of 9,659 features in 0.1 s. The file is 0.2 MB
+ch.md("""The command made 59 tiles of 9,659 features. The file is 0.2 MB
 (219,713 bytes), and its first seven bytes are `PMTiles`.""")
+
+ch.md("""## The fix of chapter 5 in every output
+
+Chapter 5 fixes the OSM data in a fixes file: road works lower the speed limit of Boulevard Louis II (the OSM way
+4230891) to 10 km/h. Each export of a fixed network takes the fix. The cells below build the network with that fixes
+file, write five outputs and read the speed of one edge of Boulevard Louis II back from each file.
+
+| Output | Where the speed is |
+|---|---|
+| the database | `maxspeed_kmh` of `driving.edges` |
+| GeoPackage | `maxspeed_kmh` of the layer `edges_driving` |
+| SUMO | the attribute `speed` (m/s) of the `<edge>` |
+| MATSim | the attribute `freespeed` (m/s) of the `<link>` |
+| GMNS | `free_speed` (km/h) of the table `link` |
+| QuackOSM table | the tag `maxspeed` of the way |
+
+In each file, the id of the edge (or of the link) is the `edge_id`. So the cells find the same edge in each output.""")
+ch.code('''Path("osm_fixes.yaml").write_text("""overrides:
+- osm_id: 4230891
+  tags:
+    maxspeed: '10'
+  note: road works
+""")                                                                                 # the fixes file of chapter 5
+fixed = area.build(modes=["driving"], output="data/monaco_fixed.duckdb", fixes="osm_fixes.yaml")    # the network with the fix
+edge = int(fixed.edges(where="osm_id = 4230891").edge_id[0])                        # one edge of Boulevard Louis II
+speeds = {"database (km/h)": float(fixed.edges(where=f"edge_id = {edge}").maxspeed_kmh[0])}     # its speed in each output''')
+ch.code("""import gzip
+import xml.etree.ElementTree as ET                                                  # to read the XML files back
+
+fixed.to_gis("out/fixed.gpkg")                                                      # a GeoPackage
+speeds["GeoPackage (km/h)"] = con.execute(
+    "SELECT maxspeed_kmh FROM st_read('out/fixed.gpkg', layer='edges_driving') WHERE edge_id = ?", [edge]).fetchone()[0]
+sumo = fixed.to_sumo("out/fixed_sumo", run_netconvert=False)                        # the plain SUMO files; speed in m/s
+speeds["SUMO (km/h)"] = round(float(ET.parse(sumo["edg"]).find(f".//edge[@id='{edge}']").get("speed")) * 3.6, 1)
+fixed.to_matsim("out/fixed_matsim.xml.gz")                                          # the MATSim network; free speed in m/s
+speeds["MATSim (km/h)"] = round(float(ET.parse(gzip.open("out/fixed_matsim.xml.gz")).find(f".//link[@id='{edge}']").get("freespeed")) * 3.6, 1)
+fixed.to_gmns("out/fixed_gmns.duckdb")                                              # the GMNS network
+speeds["GMNS (km/h)"] = duckdb.connect("out/fixed_gmns.duckdb", read_only=True).execute(
+    "SELECT free_speed FROM gmns_driving.link WHERE link_id = ?", [edge]).fetchone()[0]
+quack = duckosm.gis.quack(area, out="out", name="fixed", fixes="osm_fixes.yaml", formats=["geoparquet"])    # the OSM data with the fixes
+speeds["QuackOSM table (tag)"] = con.execute(
+    f"SELECT tags['maxspeed'] FROM '{quack[0]}' WHERE feature_id = 'way/4230891'").fetchone()[0]
+speeds                                                                              # the speed of the edge in each output""")
+ch.md("""**What the output shows.** Each output gives 10 km/h for the edge. The QuackOSM table has the OSM tag, so it
+shows the text `'10'`. One fixes file corrects all six outputs.""")
 
 ch.md("""## The files of the chapter
 

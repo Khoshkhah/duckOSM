@@ -1,45 +1,43 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="900" height="300" viewBox="0 0 900 300" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" width="930" height="420" viewBox="0 0 930 420" font-family="Segoe UI, Helvetica, Arial, sans-serif">
   <defs>
     <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M0,0 L10,5 L0,10 z" fill="#57606a"/>
     </marker>
   </defs>
-  <rect x="0" y="0" width="900" height="300" fill="#ffffff"/>
-  <!-- inputs -->
-  <rect x="20" y="40" width="190" height="70" rx="10" fill="#f6f8fa" stroke="#d0d7de"/>
-  <text x="115" y="70" font-size="16" font-weight="600" fill="#1f2328" text-anchor="middle">OSM data</text>
-  <text x="115" y="92" font-size="13" fill="#57606a" text-anchor="middle">monaco.osm.pbf</text>
-  <rect x="20" y="170" width="190" height="80" rx="10" fill="#fff8e6" stroke="#d4a72c"/>
-  <text x="115" y="200" font-size="16" font-weight="600" fill="#1f2328" text-anchor="middle">Fixes file</text>
-  <text x="115" y="221" font-size="13" fill="#57606a" text-anchor="middle">osm_fixes.yaml</text>
-  <text x="115" y="239" font-size="12" fill="#57606a" text-anchor="middle">you write it one time</text>
-  <!-- build -->
-  <rect x="290" y="100" width="150" height="80" rx="10" fill="#ddf4ff" stroke="#1f6feb"/>
-  <text x="365" y="135" font-size="16" font-weight="600" fill="#1f2328" text-anchor="middle">Build</text>
-  <text x="365" y="157" font-size="12" fill="#57606a" text-anchor="middle">applies the rules</text>
-  <line x1="210" y1="75" x2="288" y2="125" stroke="#57606a" stroke-width="2" marker-end="url(#arr)"/>
-  <line x1="210" y1="210" x2="288" y2="160" stroke="#d4a72c" stroke-width="2" marker-end="url(#arr)"/>
-  <!-- network -->
-  <rect x="510" y="100" width="150" height="80" rx="10" fill="#dafbe1" stroke="#2ea043"/>
-  <text x="585" y="135" font-size="16" font-weight="600" fill="#1f2328" text-anchor="middle">Network</text>
-  <text x="585" y="157" font-size="12" fill="#57606a" text-anchor="middle">monaco.duckdb</text>
-  <line x1="440" y1="140" x2="508" y2="140" stroke="#57606a" stroke-width="2" marker-end="url(#arr)"/>
-  <!-- outputs -->
-  <g font-size="13" fill="#1f2328" text-anchor="middle">
-    <rect x="730" y="20" width="150" height="36" rx="8" fill="#f6f8fa" stroke="#d0d7de"/><text x="805" y="43">routes and maps</text>
-    <rect x="730" y="66" width="150" height="36" rx="8" fill="#f6f8fa" stroke="#d0d7de"/><text x="805" y="89">SUMO, MATSim</text>
-    <rect x="730" y="112" width="150" height="36" rx="8" fill="#f6f8fa" stroke="#d0d7de"/><text x="805" y="135">GMNS</text>
-    <rect x="730" y="158" width="150" height="36" rx="8" fill="#f6f8fa" stroke="#d0d7de"/><text x="805" y="181">GeoPackage</text>
-    <rect x="730" y="204" width="150" height="36" rx="8" fill="#f6f8fa" stroke="#d0d7de"/><text x="805" y="227">OpenDRIVE</text>
-    <rect x="730" y="250" width="150" height="36" rx="8" fill="#fff8e6" stroke="#d4a72c"/><text x="805" y="273">QuackOSM table</text>
+  <rect x="0" y="0" width="930" height="420" fill="#ffffff"/>
+  <rect x="20" y="70" width="190" height="70" rx="10" fill="#f6f8fa" stroke="#d0d7de"/>
+  <text x="115" y="100" font-size="16" font-weight="600" fill="#1f2328" text-anchor="middle">OSM data</text>
+  <text x="115" y="122" font-size="13" fill="#57606a" text-anchor="middle">monaco.osm.pbf</text>
+  <rect x="20" y="240" width="190" height="80" rx="10" fill="#fff8e6" stroke="#d4a72c"/>
+  <text x="115" y="270" font-size="16" font-weight="600" fill="#1f2328" text-anchor="middle">Fixes file</text>
+  <text x="115" y="291" font-size="13" fill="#57606a" text-anchor="middle">osm_fixes.yaml</text>
+  <text x="115" y="309" font-size="12" fill="#57606a" text-anchor="middle">you write it one time</text>
+  <rect x="290" y="160" width="150" height="80" rx="10" fill="#ddf4ff" stroke="#1f6feb"/>
+  <text x="365" y="195" font-size="16" font-weight="600" fill="#1f2328" text-anchor="middle">Build</text>
+  <text x="365" y="217" font-size="12" fill="#57606a" text-anchor="middle">applies the rules</text>
+  <line x1="210" y1="105" x2="288" y2="185" stroke="#57606a" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="210" y1="280" x2="288" y2="220" stroke="#d4a72c" stroke-width="2" marker-end="url(#arr)"/>
+  <rect x="500" y="160" width="150" height="80" rx="10" fill="#dafbe1" stroke="#2ea043"/>
+  <text x="575" y="195" font-size="16" font-weight="600" fill="#1f2328" text-anchor="middle">Network</text>
+  <text x="575" y="217" font-size="12" fill="#57606a" text-anchor="middle">monaco.duckdb</text>
+  <line x1="440" y1="200" x2="498" y2="200" stroke="#57606a" stroke-width="2" marker-end="url(#arr)"/>
+  <rect x="685" y="16" width="230" height="44" rx="8" fill="#f6f8fa" stroke="#d0d7de"/><text x="800" y="35" font-size="13" font-weight="600" fill="#1f2328" text-anchor="middle" font-family="Consolas, Menlo, monospace">net.map</text><text x="800" y="52" font-size="12" fill="#57606a" text-anchor="middle">the live map, the dashboard</text>
+  <rect x="685" y="70" width="230" height="44" rx="8" fill="#f6f8fa" stroke="#d0d7de"/><text x="800" y="89" font-size="13" font-weight="600" fill="#1f2328" text-anchor="middle" font-family="Consolas, Menlo, monospace">duckosm.routing</text><text x="800" y="106" font-size="12" fill="#57606a" text-anchor="middle">routes, isochrones, matrix</text>
+  <rect x="685" y="124" width="230" height="44" rx="8" fill="#f6f8fa" stroke="#d0d7de"/><text x="800" y="143" font-size="13" font-weight="600" fill="#1f2328" text-anchor="middle" font-family="Consolas, Menlo, monospace">duckosm.sim</text><text x="800" y="160" font-size="12" fill="#57606a" text-anchor="middle">SUMO, MATSim</text>
+  <rect x="685" y="178" width="230" height="44" rx="8" fill="#f6f8fa" stroke="#d0d7de"/><text x="800" y="197" font-size="13" font-weight="600" fill="#1f2328" text-anchor="middle" font-family="Consolas, Menlo, monospace">duckosm.planning</text><text x="800" y="214" font-size="12" fill="#57606a" text-anchor="middle">GMNS</text>
+  <rect x="685" y="232" width="230" height="44" rx="8" fill="#f6f8fa" stroke="#d0d7de"/><text x="800" y="251" font-size="13" font-weight="600" fill="#1f2328" text-anchor="middle" font-family="Consolas, Menlo, monospace">duckosm.gis</text><text x="800" y="268" font-size="12" fill="#57606a" text-anchor="middle">GeoPackage, GeoParquet</text>
+  <rect x="685" y="286" width="230" height="44" rx="8" fill="#f6f8fa" stroke="#d0d7de"/><text x="800" y="305" font-size="13" font-weight="600" fill="#1f2328" text-anchor="middle" font-family="Consolas, Menlo, monospace">duckosm.hdmap</text><text x="800" y="322" font-size="12" fill="#57606a" text-anchor="middle">OpenDRIVE, CommonRoad, Lanelet2</text>
+  <rect x="685" y="354" width="230" height="44" rx="8" fill="#fff8e6" stroke="#d4a72c"/><text x="800" y="373" font-size="13" font-weight="600" fill="#1f2328" text-anchor="middle" font-family="Consolas, Menlo, monospace">duckosm.gis.quack</text><text x="800" y="390" font-size="12" fill="#57606a" text-anchor="middle">the QuackOSM table</text>
+  <g stroke="#57606a" stroke-width="1.5" fill="none">
+    <path d="M650,200 L668,200"/>
+    <path d="M668,38 L668,308"/>
+    <path d="M668,38 L683,38" marker-end="url(#arr)"/>
+    <path d="M668,92 L683,92" marker-end="url(#arr)"/>
+    <path d="M668,146 L683,146" marker-end="url(#arr)"/>
+    <path d="M668,200 L683,200" marker-end="url(#arr)"/>
+    <path d="M668,254 L683,254" marker-end="url(#arr)"/>
+    <path d="M668,308 L683,308" marker-end="url(#arr)"/>
   </g>
-  <g stroke="#57606a" stroke-width="1.5" fill="none" marker-end="url(#arr)">
-    <path d="M660,140 L695,140 L695,38 L728,38"/>
-    <path d="M695,84 L728,84"/>
-    <path d="M695,130 L728,130"/>
-    <path d="M695,140 L695,176 L728,176"/>
-    <path d="M695,176 L695,222 L728,222"/>
-  </g>
-  <path d="M210,240 C420,300 600,290 728,268" stroke="#d4a72c" stroke-width="2" fill="none" stroke-dasharray="6 4" marker-end="url(#arr)"/>
-  <text x="470" y="252" font-size="12" fill="#57606a" text-anchor="middle">quack reads the OSM file and the fixes file</text>
+  <path d="M210,310 C420,415 560,415 683,376" stroke="#d4a72c" stroke-width="2" fill="none" stroke-dasharray="6 4" marker-end="url(#arr)"/>
+  <text x="430" y="345" font-size="12" fill="#57606a" text-anchor="middle">quack reads the OSM file and the fixes file</text>
 </svg>

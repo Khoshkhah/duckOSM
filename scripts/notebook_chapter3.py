@@ -1,8 +1,8 @@
 """Write docs/notebooks/03_maps.ipynb: chapter 3 of the notebook manual, "Draw maps".
 The style comes from scripts/notebook_book.py (rules: docs/design/notebook_book.md).
 
-The saved outputs come from a run with DUCKOSM_MAP_SHOW=plot, so each map of the notebook is a matplotlib picture; the
-text says what each call gives in a live notebook.
+The saved outputs come from a run with DUCKOSM_MAP_SHOW=picture, so each map of the notebook is a PNG of the live
+roadstyle map; the section "Each value of show" runs each value of `show` itself.
 
     python scripts/notebook_chapter3.py docs/notebooks/03_maps.ipynb"""
 import os
@@ -43,8 +43,8 @@ buildings, the harbors, the parks. The tunnels are dashed, and the bridges are d
 ch.md("""## How this page shows the maps
 
 A live map is a web page of approximately 6 MB. A saved notebook with many live maps is large, and GitHub does not
-show it. So the outputs on this page come from a run with `DUCKOSM_MAP_SHOW=plot`: each map is the static picture.
-When you run the cells yourself, you get the live map.
+show it. So the outputs on this page come from a run with `DUCKOSM_MAP_SHOW=picture`: each map is a picture of the
+live map. When you run the cells yourself, you get the live map.
 
 The argument `show` chooses how the notebook shows a map. Without it, duckOSM uses the environment variable
 `DUCKOSM_MAP_SHOW`, and without that, `"live"`.
@@ -60,12 +60,8 @@ The argument `show` chooses how the notebook shows a map. Without it, duckOSM us
 `maps/<file>-<n>.png`, where `<n>` counts the maps of the session. `"picture"` needs Playwright:
 `pip install playwright`, then `playwright install chromium`.
 
-```python
-net.map(show="link", path="maps/monaco.html")      # a link to the saved live map
-net.map(show="picture", path="maps/monaco.png")    # a PNG of the live map
-import os
-os.environ["DUCKOSM_MAP_SHOW"] = "picture"         # the default for all maps of this session
-```
+To give one default for all maps of a session, set the variable in Python:
+`os.environ["DUCKOSM_MAP_SHOW"] = "picture"`.
 
 > **Tip:** use `"link"` in a notebook that you share: the notebook stays small, and the HTML file opens in each
 > browser without a server. Use `"picture"` when you want the look of the live map in a saved notebook.""")
@@ -76,12 +72,21 @@ The chapter uses the three modes of Monaco, so that the map can show which modes
 ch.code("""net = duckosm.network(osm_id=2220322, modes=["driving", "walking", "cycling"], name="monaco")    # three modes
 net.summary()""")
 
+ch.md("""### Each value of `show`
+
+The three cells below draw the same map with three values of `show`. The fourth value, `"live"`, is the default in
+your notebook: it gives the map that you can zoom and click.""")
+ch.code("""net.map(show="picture", path="maps/monaco.png")      # a PNG of the live map""")
+ch.code("""net.map(show="link", path="maps/monaco.html")        # the live map as a file, and a link to it""")
+ch.md("""The link opens the saved file in a new browser tab. On this page the file is not there, so the link works only in
+your own notebook.""")
+ch.code("""net.map(show="plot")                                 # the matplotlib picture""")
 ch.md("""## The map of all modes: `net.map()`
 
 `net.map()` with no mode draws all the roads of the file. In a live notebook, it is the roadstyle map: the roads of
 all modes, the drawing order of the bridges and the tunnels, and the base map of the file. Click a road to see its
 columns: its `edge_id`, its name, its road class and its modes.""")
-ch.code("""net.map()          # the live map of all modes (this page: the static picture)""")
+ch.code("""net.map()          # the live map of all modes (this page: a picture of it)""")
 ch.md("""**What the output shows.** The picture has one color for each set of modes that can use a road. Most of the
 roads are green-blue (walking and cycling: the footways and the paths). The streets that all modes can use are dark
 gray. The tunnel loop in the west is purple: cars and bicycles can use it, but people on foot cannot. The legend
@@ -118,7 +123,7 @@ ch.md("""## The map of one mode
 picture gives one color to each road class (`highway`).""")
 ch.code("""net.map("driving")          # the driving network, by road class""")
 ch.code("""net.walking.map()           # the same call on the view of one mode""")
-ch.md("""**What the output shows.** The driving picture shows the main roads along the coast and the tunnel loop in the
+ch.md("""The driving picture shows the main roads along the coast and the tunnel loop in the
 west. The walking picture is much denser: it has the steps and the footways of the old town.""")
 
 ch.md("""## The base map: `layers`
@@ -150,7 +155,7 @@ ch.md("""## The themes: `theme`
 `"roadstyle"`. The static picture has one look, so `theme` changes only the live map. The cell saves the map with the
 theme `"grey"` as an HTML file (section "Save a map as a file" below). Open the file in a browser to see it.""")
 ch.code("""net.save_map("out/monaco-grey.html", theme="grey")      # the live map with the gray theme, as a file""")
-ch.md("""**What the output shows.** The call gives the path of the file. The file is one HTML page of approximately
+ch.md("""The call gives the path of the file. The file is one HTML page of approximately
 6 MB, and it works without a server and without the internet.""")
 
 ch.md("""## Color the roads by a column: `color_by`
@@ -165,11 +170,11 @@ Roads without a value are gray.
 | `cmap` | the color ramp of a number column |
 | `colors` | `{value: color}` for a text column |""")
 ch.code("""net.map("driving", color_by="maxspeed_kmh", cmap="viridis")      # the speed limit of each road""")
-ch.md("""**What the output shows.** The color bar goes from 10 to 70 km/h. The fast roads (yellow) are the main roads
+ch.md("""The color bar goes from 10 to 70 km/h. The fast roads (yellow) are the main roads
 and the tunnels along the coast. Most streets of the town have 30 km/h or less (dark blue).""")
 ch.code("""net.map("driving", color_by="highway",
         colors={"primary": "#d1242f", "secondary": "#e8590c", "tertiary": "#f2c94c"})   # three classes, the rest gray""")
-ch.md("""**What the output shows.** The primary roads are red, the secondary roads orange and the tertiary roads
+ch.md("""The primary roads are red, the secondary roads orange and the tertiary roads
 yellow. The other classes are thin gray lines.""")
 
 ch.md("""## Highlight some edges: `highlight`
@@ -178,7 +183,7 @@ ch.md("""## Highlight some edges: `highlight`
 the result of a query.""")
 ch.code("""albert = net.sql("SELECT edge_id FROM driving.edges WHERE name = 'Boulevard Albert 1er'").edge_id   # one street
 net.map("driving", highlight=albert)                                                              # in orange""")
-ch.md("""**What the output shows.** The Boulevard Albert 1er is the orange line along the harbor of Monaco.""")
+ch.md("""The Boulevard Albert 1er is the orange line along the harbor of Monaco.""")
 
 ch.md("""## Draw a route: `routes`
 
@@ -186,7 +191,7 @@ ch.md("""## Draw a route: `routes`
 Chapter 7 tells how to compute a route. Here the route goes by car from the south-west of Monaco to the north-east.""")
 ch.code("""route = net.driving.route_points((7.4155, 43.7285), (7.4335, 43.7468))     # (lon, lat) to (lon, lat)
 net.map("driving", routes={"by car": route})                                # the route over the roads""")
-ch.md("""**What the output shows.** The route is the orange line with the label "by car" in the legend. In the live map,
+ch.md("""The route is the orange line with the label "by car" in the legend. In the live map,
 click the line to see its time and its length.""")
 
 ch.md("""## The dashboard: `net.dashboard()`
@@ -195,9 +200,9 @@ ch.md("""## The dashboard: `net.dashboard()`
 panel shows its card: all its columns. The color menu of the panel colors the roads by road class or by **Modes**
 (the colors of the table in "The color of a road in more than one mode"). `mode`, `show`, `path` and `layers` work as
 in `net.map()`.""")
-ch.code("""net.dashboard()            # the dashboard of all modes (this page: the static picture)""")
-ch.md("""**What the output shows.** With `show="plot"`, the dashboard is the same picture as `net.map()`: a static
-picture has no panel. Run the cell in a live notebook to see the panel.""")
+ch.code("""net.dashboard()            # the dashboard of all modes (this page: a picture of it)""")
+ch.md("""A picture of the dashboard shows the map and the panel, but you cannot click it. Run the cell in your notebook to
+use the panel.""")
 
 ch.md("""## Save a map as a file: `net.save_map()`
 
@@ -207,7 +212,7 @@ dashboard. Send the file to a person who has no Python: it opens in each browser
 ch.code("""print(net.save_map("out/monaco.html"))                                          # the map of all modes
 print(net.save_map("out/driving-speed.html", "driving", color_by="maxspeed_kmh"))  # one mode, colored
 print(net.save_map("out/dashboard.html", dashboard=True))                        # the dashboard""")
-ch.md("""**What the output shows.** Three HTML files in the folder `out`. The map of one mode is smaller than the map
+ch.md("""Three HTML files in the folder `out`. The map of one mode is smaller than the map
 of all modes, because it has fewer roads.
 
 > **Tip:** `net.save_map()` gives the same file as `net.map(show="link", path=...)`, but it shows no link. Use it

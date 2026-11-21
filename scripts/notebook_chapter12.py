@@ -49,7 +49,7 @@ The chapter uses the driving network of Monaco. The extra `sim` installs SUMO (w
 sumolib.""")
 ch.code("""net = duckosm.network(osm_id=2220322, modes=["driving"], name="monaco")    # get and build the driving network of Monaco
 net.driving                                                                # the card of the driving mode""")
-ch.md("""**What the output shows.** The driving network of Monaco has 2840 edges and 1768 nodes, 96.2 km of roads.""")
+ch.md("""The driving network of Monaco has 2840 edges and 1768 nodes, 96.2 km of roads.""")
 
 ch.md("""## The SUMO network: `to_sumo`
 
@@ -74,7 +74,7 @@ The call gives a dict with the path of each file and the counts.
 | `config` | none | your own netconvert options (a `.netccfg` file) |""")
 ch.code("""files = net.driving.to_sumo("out/sumo")                     # the plain XML files and network.net.xml
 {k: str(v) for k, v in files.items()}                       # the files and the counts""")
-ch.md("""**What the output shows.** The progress line gives the time of the export (less than 1 s for Monaco). The SUMO
+ch.md("""The SUMO
 network has 1768 nodes and 2840 edges, the same numbers as the driving network, and 5082 connections. `net` is the
 path of `network.net.xml`, the file that SUMO reads.""")
 
@@ -83,7 +83,7 @@ ch.md("""### The netconvert options
 duckOSM gives `netconvert` a small set of options, `duckosm.sim.DEFAULT_NETCFG`. They keep each duckOSM edge as one
 SUMO edge with the same id.""")
 ch.code("""duckosm.sim.DEFAULT_NETCFG                                  # the options that to_sumo gives netconvert""")
-ch.md("""**What the output shows.** The five options:
+ch.md("""The five options:
 
 | Option | Value | Why |
 |---|---|---|
@@ -102,7 +102,7 @@ with open("merge.netccfg", "w") as f:                                      # a n
     f.write("<configuration>\\n" + "".join(f'  <{k} value="{v}"/>\\n' for k, v in cfg.items()) + "</configuration>\\n")
 merged = net.driving.to_sumo("out/sumo_merged", config="merge.netccfg")    # netconvert with your options
 len(duckosm.sim.edge_map(merged)), files["n_edges"]                     # the edges with their edge_id in SUMO, of all""")
-ch.md("""**What the output shows.** With `geometry.remove = true`, only 1615 of the 2840 edges keep their `edge_id` as a
+ch.md("""With `geometry.remove = true`, only 1615 of the 2840 edges keep their `edge_id` as a
 SUMO edge. netconvert joined the other 1225 edges into their neighbors.
 
 > **Warning:** keep `geometry.remove` set to `false`. With `true`, netconvert joins the edges between two junctions
@@ -115,7 +115,7 @@ ch.md("""### Only the plain XML files
 machine, or when you run `netconvert` yourself with more options.""")
 ch.code("""plain = net.driving.to_sumo("out/sumo_plain", run_netconvert=False)       # no netconvert, no .net.xml
 sorted(k for k in plain if not k.startswith("n_"))                          # the files""")
-ch.md("""**What the output shows.** The dict has the three plain XML files (`nod`, `edg`, `con`) and no `net`. Run
+ch.md("""The dict has the three plain XML files (`nod`, `edg`, `con`) and no `net`. Run
 `netconvert --node-files ... --edge-files ... --connection-files ...` on them to make the network.""")
 
 ch.md("""## Read the network with sumolib: `sumo_net`
@@ -126,7 +126,7 @@ sumolib's own calls on it.""")
 ch.code("""sn = duckosm.sim.sumo_net(files)             # the .net.xml read with sumolib
 {"SUMO edges": len(sn.getEdges(withInternal=False)), "junctions": len(sn.getNodes()),
  "traffic lights": len(sn.getTrafficLights()), "duckOSM edges": int(net.driving.summary().edges[0])}    # the numbers""")
-ch.md("""**What the output shows.** sumolib reads 2840 SUMO edges and 1768 junctions: one SUMO edge for each duckOSM edge,
+ch.md("""Sumolib reads 2840 SUMO edges and 1768 junctions: one SUMO edge for each duckOSM edge,
 and one junction for each node. Monaco has no traffic lights in this SUMO network.""")
 ch.code("""e = sn.getEdges(withInternal=False)[0]                                     # one SUMO edge
 {"id": e.getID(), "lanes": e.getLaneNumber(), "speed m/s": e.getSpeed(), "length m": round(e.getLength(), 1),
@@ -151,7 +151,7 @@ in a network of `to_sumo`. When a tool changes an id, `edge_map` still finds the
 ch.code("""edges = duckosm.sim.edge_map(files)                         # the SUMO id and the edge_id of each SUMO edge
 print(len(edges), "rows;", int((edges.id != edges.edge_id.astype(str)).sum()), "ids that netconvert changed")
 edges.head(3)""")
-ch.md("""**What the output shows.** `edge_map` gives 2840 rows, one for each SUMO edge, and netconvert changed no id. So
+ch.md("""`edge_map` gives 2840 rows, one for each SUMO edge, and netconvert changed no id. So
 here `id` and `edge_id` are the same number, as text and as an integer.
 
 > **Tip:** join the output of a simulation on `id`, then the network on `edge_id`. The next section does this.""")
@@ -179,7 +179,7 @@ open("out/sumo/edgedata.add.xml", "w").write(
 subprocess.run([f"{sumo.SUMO_HOME}/bin/sumo", "-n", str(files["net"]), "-r", "out/sumo/trips.xml",
                 "-a", "out/sumo/edgedata.add.xml", "--no-step-log", "--end", "1800", "--seed", "1"],
                check=True, capture_output=True).returncode               # the simulation, 30 minutes; 0: no error""")
-ch.md("""**What the output shows.** The return code 0 tells that SUMO ran with no error. SUMO wrote
+ch.md("""The return code 0 tells that SUMO ran with no error. SUMO wrote
 `out/sumo/edgedata.xml`, with one `<edge>` element for each SUMO edge.""")
 
 ch.md("""## Join the counts back to the edges
@@ -192,10 +192,10 @@ ch.code("""import pandas as pd                                                  
 counts = pd.read_xml("out/sumo/edgedata.xml", xpath=".//edge", parser="etree", dtype={"id": str})    # one row for each SUMO edge
 cars = counts.merge(edges, on="id").groupby("edge_id").entered.sum()               # the cars of each edge_id
 cars.describe()                                                                    # the counts""")
-ch.md("""**What the output shows.** Each of the 2840 edges has a count. Half of the edges have 7 cars or fewer in the 30
+ch.md("""Each of the 2840 edges has a count. Half of the edges have 7 cars or fewer in the 30
 minutes, and some have none. The busiest edge has 145 cars.""")
 ch.code("""net.driving.map(color_by=cars)    # the edges colored by the number of cars (a picture here; live when you run it)""")
-ch.md("""**What the output shows.** The main roads and the tunnels have the most cars (green and yellow): the random trips cross Monaco
+ch.md("""The main roads and the tunnels have the most cars (green and yellow): the random trips cross Monaco
 on them. The small streets have few cars or none.""")
 ch.code("""top = net.edges(where=f"edge_id IN ({','.join(map(str, cars.nlargest(3).index))})")[["edge_id", "name", "highway"]]
 top.assign(cars=top.edge_id.map(cars)).sort_values("cars", ascending=False)        # the three edges with the most cars""")

@@ -10,10 +10,11 @@ from notebook_book import IMAGES, Chapter  # noqa: E402
 
 ch = Chapter(5, "05_osm_fixes", "Fix the OSM data once",
              "Write a fix one time, in one file: the network and every export take it",
-             learn="what a fixes file is; how you write a rule with `duckosm.fixes.Fixes`; the kinds of rule; how you build "
-                   "again and compare two networks; which fixes keep the `edge_id`; how every output takes the fix",
+             learn="what a fixes file is and its format; three ways to make it: the editing page, Python and a text editor; "
+                   "a build again with `net.rebuild` and a new build with the file; how you check the fix; which fixes keep the `edge_id`",
              time="about 4 minutes", extras="widget,viz",
              next_=("06_exports", "6. Exports", "the network as SUMO, MATSim, GMNS, OpenDRIVE and GIS files"))
+
 
 ch.md(f"""## Why you fix the OSM data
 
@@ -36,35 +37,252 @@ database, the map, the routes and every export show the corrected data.
 > **Key idea:** you fix the OSM data, not the outputs. The fixes file is the one place for your corrections, and every
 > output of the build takes them. The next build, with a new extract, takes them again.""")
 
-ch.md("""## The parts of a fixes file
 
-A fixes file is a YAML file. It has five keys. This chapter uses the first one, `overrides`, from Python. The other
-keys come from the map editor (section "Fix on a map").
+ch.md("""## The format of the file
 
-| Key | Does |
+### What the file holds
+
+A fixes file is a list of your corrections of the OSM data. It puts the corrections in groups, one group for each kind
+of correction:
+
+| Group | Holds |
 |---|---|
-| `overrides` | changes one way: one-way, lanes, layer, OSM tags; or removes it |
-| `new_ways` | adds a road that OSM does not have |
-| `turn_restrictions` | forbids or forces a turn |
-| `extra.tag_edits` | sets or deletes the tags of a way, a node or a relation |
-| `extra.building_faces` | gives a wall of a building a type and a door |
+| `overrides` | the rules for OSM ways: change the tags, one-way or lanes of a way, or remove the way |
+| `new_ways` | the roads that OSM does not have |
+| `turn_restrictions` | the turns that a driver cannot make, or must make |
+| `extra` → `tag_edits` | the changes of the tags of a node, a way or a relation |
+| `extra` → `building_faces` | the type and the door of each wall of a building |
 
-A rule of `overrides` is one way. Its fields are these:
+The file is in YAML, a text format. You can read it in any text editor.
+
+### YAML in three rules
+
+**1. `key: value` is one field.**
+
+```yaml
+osm_id: 4230891
+```
+
+**2. A line that starts further right belongs to the line above it.**
+
+```yaml
+tags:
+  maxspeed: '10'
+```
+
+`maxspeed` has two spaces more than `tags`, so `maxspeed` is inside `tags`: it is a tag of the way.
+
+**3. A line that starts with `- ` (a dash and a space) begins a new item of a list.**
+
+```yaml
+overrides:
+- osm_id: 4230891
+- osm_id: 4230100
+```
+
+Here `overrides` holds a list of two items. The lines under an item, with two spaces more than its dash, belong to that
+item.
+
+YAML uses the spaces at the start of a line to show what is inside what, as Python does. Use spaces, never the Tab key.
+
+### The skeleton of a fixes file
+
+Each group is one key at the start of a line, and each key holds a list. This is a fixes file with five empty lists
+(`[]` is an empty list):
+
+```yaml
+overrides: []
+new_ways: []
+turn_restrictions: []
+extra:
+  tag_edits: []
+  building_faces: []
+```
+
+You need only the groups that you use. A file with only `overrides` is a correct file.
+
+### Build the file step by step
+
+**Step 1: one rule.** Road works on Boulevard Louis II, the OSM way 4230891, lower its speed limit to 10 km/h. The rule
+names the way and sets its tag `maxspeed`:
+
+```yaml
+overrides:
+- osm_id: 4230891
+  tags:
+    maxspeed: '10'
+  note: road works
+```
+
+The build now sees the way as if OSM had `maxspeed=10`. The `note` is your text. The build does not read it.
+
+**Step 2: a second rule.** Way 4230100 is one-way in the real world. Add a new item under the same `overrides:`:
+
+```yaml
+overrides:
+- osm_id: 4230891
+  tags:
+    maxspeed: '10'
+  note: road works
+- osm_id: 4230100
+  oneway: true
+```
+
+**Step 3: remove a way.** Way 4229578 does not exist in the real world. A rule with `remove: true` takes it out of the
+build: out of the network, the base map and every export. Add it as one more item:
+
+```yaml
+- osm_id: 4229578
+  remove: true
+```
+
+To take a way out of some networks only, use `exclude_modes`. For example, a street that is closed to cars but open
+to people on foot:
+
+```yaml
+- osm_id: 4229577
+  exclude_modes:
+  - driving
+```
+
+**Step 4: the other groups.** Each group has its own list. A new road, a forbidden turn and a traffic signal on a node
+are one item in each of three lists:
+
+```yaml
+new_ways:
+- id: 9000000000000
+  nodes:
+  - 21911886
+  - [7.4235072, 43.7371133]
+  - 21914340
+  tags:
+    highway: service
+    name: New lane
+turn_restrictions:
+- from_way: 4230100
+  via_node: 21924057
+  to_way: 4230099
+  restriction: no_left_turn
+extra:
+  tag_edits:
+  - type: node
+    id: 21924057
+    set:
+      highway: traffic_signals
+```
+
+### The rules of the file
+
+- **Each group comes one time.** The file has one `overrides:`, one `new_ways:`, one `turn_restrictions:` and one
+  `extra:`. Do not write a second `overrides:` for a new rule: YAML keeps only the last one, and the rules of the
+  first one are lost with no error.
+- **To add a record, add an item to the list of its group.**
+- **One way has one rule.** To change more on a way, add fields to its rule. Do not add a second item with the same
+  `osm_id`.
+- **To remove a fix, delete its item**, from its `- ` line to the end of the record. The way is then as in OSM again.
+- **The spaces must agree.** All the items of one list have their dash at the same position, and all the fields of
+  one record start at the same position.
+- **Write the value of a tag in quotes**, for example `maxspeed: '10'`, because an OSM tag is text.
+- **A record for an object that is not in the area does nothing.** So one file can hold the fixes of all your areas.
+
+You can also write a record on one line, in braces: `- {osm_id: 4230100, oneway: true}`. It has the same meaning as
+the long form. `Fixes` and the editing page write the long form, and they follow all these rules for you.
+
+### The full example
+
+This file has one record of each kind. It is the result of the four steps, and a reference for your own file:
+
+```yaml
+overrides:
+- osm_id: 4230891
+  tags:
+    maxspeed: '10'
+  note: road works
+- osm_id: 4230100
+  oneway: true
+- osm_id: 503462470
+  lanes: 3
+  turn_lanes_forward: left|through|through
+- osm_id: 4229577
+  exclude_modes:
+  - driving
+- osm_id: 4229578
+  remove: true
+new_ways:
+- id: 9000000000000
+  nodes:
+  - 21911886
+  - [7.4235072, 43.7371133]
+  - 21914340
+  tags:
+    highway: service
+    name: New lane
+turn_restrictions:
+- from_way: 4230100
+  via_node: 21924057
+  to_way: 4230099
+  restriction: no_left_turn
+extra:
+  tag_edits:
+  - type: node
+    id: 21924057
+    set:
+      highway: traffic_signals
+  - type: relation
+    id: 393226
+    delete:
+    - building
+  building_faces:
+  - building: 23715051
+    from_node: 256791677
+    to_node: 256791676
+    type: front
+    door: main
+```
+
+The editing page also adds `changed`, the time of the change, to each record. The build does not read it.
+
+### The fields of each group
+
+**`overrides`**: one rule for one OSM way.
 
 | Field | Does |
 |---|---|
 | `osm_id` | the OSM id of the way (the key of the rule) |
+| `tags` | sets these OSM tags on the way (`maxspeed`, `highway`, `name`, `surface` ...) |
 | `oneway` | `true` or `false` |
 | `lanes`, `lanes_forward`, `lanes_backward` | the lanes in both directions, or in one direction |
-| `layer` | the vertical level (a bridge is 1, a tunnel is -1) |
 | `turn_lanes_forward`, `turn_lanes_backward` | the arrows of the lanes, in the syntax of the OSM tag `turn:lanes` |
+| `layer` | the vertical level (a bridge is 1, a tunnel is -1) |
 | `keep_nodes` | `[from, to]`: keep only this part of the way |
-| `exclude_modes` | removes the way from these networks: `driving`, `walking`, `cycling` |
-| `remove` | `true`: removes the way from the build |
-| `tags` | sets these OSM tags on the way (`maxspeed`, `highway`, `name` ...) |
+| `exclude_modes` | removes the way from these networks only: `driving`, `walking`, `cycling` |
+| `remove` | `true`: removes the way from the whole build |
 | `note` | your text: why you made the fix. The build does not read it |
 
-A rule for a way that is not in the area does nothing. So one file can hold the fixes of all your areas.""")
+**`new_ways`**: one new road.
+
+| Field | Does |
+|---|---|
+| `id` | 9,000,000,000,000 or more, used one time. Do not change it: the edge ids come from it |
+| `nodes` | the points of the road: an OSM node id, or `[lon, lat]` for a new point. Make the two ends OSM nodes, so that the road connects to the network |
+| `tags`, `tags_from` | the OSM tags of the road, or the OSM way to copy the tags from |
+
+**`turn_restrictions`**: one turn. A turn restriction changes the driving network.
+
+| Field | Does |
+|---|---|
+| `from_way`, `via_node`, `to_way` | the way before the junction, the node of the junction and the way after it |
+| `restriction` | `no_u_turn` (the default), `no_left_turn`, `no_right_turn`, `no_straight_on`, or `only_left_turn`, `only_right_turn`, `only_straight_on` |
+
+**`extra`**: the tags of other objects, and the walls of buildings.
+
+| Record | Fields |
+|---|---|
+| `tag_edits` | `type` (`node`, `way` or `relation`), `id`, and `set` (the tags to set) or `delete` (the tags to delete) |
+| `building_faces` | `building`, `from_node` and `to_node` (the wall), `type` (`front`, `back`, `side`, `party` or `court`) and `door` |
+
+A node and a relation have no `remove`. To take one out, delete the tag that makes it what it is. For example, a
+relation without the tag `building` is no longer a building.""")
 
 ch.md("""## Build Monaco without a fix
 
@@ -74,33 +292,87 @@ them. A fix needs these two files, because the build with the fix starts again f
 ch.code("""area = duckosm.get(osm_id=2220322, name="monaco", out="data")    # the OSM file of Monaco and its boundary
 net = area.build(modes=["driving"])                               # the driving network, with no fixes file
 net                                                               # the card""")
-ch.md("""**What the output shows.** The card shows the file `data/monaco.duckdb` and the driving network: the number of
+ch.md("""The card shows the file `data/monaco.duckdb` and the driving network: the number of
 edges and nodes and the length in km. This is the network before the fix.""")
 
-ch.md("""## Find the road to fix
 
-In this chapter, the error is a speed limit. The task: road works close a lane of one road, and the speed limit there
-becomes 10 km/h. To see the effect, take a route by car across Monaco, from Fontvieille in the west to Larvotto in the
-east, and fix a road that the route uses.""")
-ch.code("""a, b = (7.4155, 43.7285), (7.4335, 43.7468)    # Fontvieille and Larvotto, as (lon, lat)
-before = net.route(a, b)                       # the fastest route by car
-round(before.time_s), round(before.length_m)   # the time in seconds and the length in metres""")
-ch.md("""A route is a list of edges. Each edge comes from one OSM way, and the column `osm_id` of `driving.edges` names
-it. The SQL below groups the edges of the route by their way and gives the three longest ways. The fix goes on the
-first one.""")
-ch.code('''ways = net.sql("""SELECT osm_id, any_value(name) AS name, any_value(maxspeed_kmh) AS maxspeed_kmh,
-                         round(sum(length_m)) AS length_m
-                  FROM driving.edges WHERE list_contains($ids, edge_id)
-                  GROUP BY osm_id ORDER BY length_m DESC LIMIT 3""", {"ids": before.edge_ids})    # the three longest ways of the route
-ways''')
-ch.md("""**What the output shows.** The route is 2,939 m long and takes 229 s by car. Its three longest ways are
-Boulevard Louis II (way 4230891, 356 m of the route), Avenue Princesse Grace (223 m) and Boulevard Albert 1er
-(216 m). All three have a speed limit of 50 km/h. The fix goes on Boulevard Louis II.
+ch.md("""## Make the file and add records
 
-> **Tip:** to find the OSM id of a road in your own area, click the road on [openstreetmap.org](https://www.openstreetmap.org)
-> (the "Query features" tool), or look at the column `osm_id` of `net.edges()`, or click the road on `net.map()`.""")
+There are three ways to make a fixes file and to add records to it. All three write the same format, so you can use
+them together on one file.
 
-ch.md("""## Write the fix
+| Way | Use it when | You need the OSM id? |
+|---|---|---|
+| the editing page, `net.edit()` | you want to click the road on a map | no: you click the road |
+| Python, `duckosm.fixes.Fixes` | you fix many roads from a list, or in a script | yes |
+| a text editor | you want to read or change the file yourself | yes |""")
+
+ch.md("""### The editing page: `net.edit()`
+
+The easiest way is the editing page. You find a road on a map, change it in a form, and the page writes the record
+into the fixes file. It is also the only way for some fixes: a turn that a driver cannot make, a new road, the walls of
+a building. `net.edit()`
+starts the editor **Edit OSM data** on the database, on your computer. The page shows the roads and the buildings of
+the area on a map. Each change that you add on the page goes into the fixes file at once, in the same format as
+`Fixes`.
+
+`net.edit()` starts the page in the background and gives its address. Open the address in your browser:
+
+```python
+net.edit()
+```
+
+```text
+'http://127.0.0.1:8790/'
+```
+
+The page writes the fixes file of the build. A network with no fixes file gets `osm_fixes.yaml` beside its database.
+To write another file, or to use another port, give them to `net.edit()`:
+
+```python
+net.edit(fixes="osm_fixes.yaml", port=8791)
+```
+
+| Argument | Default | Does |
+|---|---|---|
+| `fixes` | the fixes file of the build, else `osm_fixes.yaml` beside the database | the file that the page writes |
+| `port` | `8790` | the port of the page on `127.0.0.1` |
+
+<img src="https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/docs/images/edit-road.png" alt="The editing page: Boulevard Charles III is picked in the Road tab, and its lanes are changed to 3" width="100%">
+
+The page has one tab for each kind of record:
+
+| Tab | What you change | Key in the file |
+|---|---|---|
+| **Road** | the tags of a road (class, lanes, speed, one-way, sidewalk, surface, access); delete the road | `overrides`, `extra.tag_edits` |
+| **Building** | floors, height, roof, facade; the type of each wall and its door; delete the building | `extra.tag_edits`, `extra.building_faces`, `overrides` |
+| **Node** | a traffic signal, a crossing or another node | `extra.tag_edits` |
+| **Turn** | a turn that a driver cannot make, or must make, at a junction | `turn_restrictions` |
+| **New road** | a road that OSM does not have: click its points on the map | `new_ways` |
+| **Changes** | the list of your changes, and **Build again** | |
+
+To add one record:
+
+1. Pick a tab.
+2. Click the road on the map, or type its OSM id and click **Load**.
+3. Change the fields, then click **Add to changes**. The page writes the record into the file at once.
+4. In the **Changes** tab, click **Build again** to build the network again with the file.
+
+In the **Turn** tab, you pick a road, and the page shows the roads at its junction: the picked road (**From**) is
+blue, the roads that leave the junction are green, and the roads that only arrive are violet. You then choose the
+turn that a driver cannot make, or must make.
+
+<img src="https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/docs/images/edit-turn.png" alt="The Turn tab: the picked road is blue, the roads that leave the junction are green and the road that only arrives is violet" width="100%">
+
+The editor runs while Python runs. The guide [Fix the OSM data](../guides/edit-osm-data.md) shows each tab and
+button of the page.
+
+> **Warning:** the page is on `127.0.0.1` of the machine that runs Python. In Colab, that machine is in the cloud, so
+> your browser cannot open the page. Run `net.edit()` in Jupyter on your own computer, or use the step **Edit OSM
+> data** of [duckOSM Studio](https://khoshkhah.github.io/duckosm-studio/) in the browser.""")
+
+
+ch.md("""### From Python: `duckosm.fixes.Fixes`
 
 `duckosm.fixes.Fixes(path)` opens a fixes file, or makes a new one when the file does not exist. Each call that adds a
 rule writes the file at once, so the file on disk is always the same as the object in Python.
@@ -108,22 +380,25 @@ rule writes the file at once, so the file on disk is always the same as the obje
 `fixes.set(way, **fields)` adds a rule for the way, or changes its rule. A keyword that is a field of a rule (`oneway`,
 `lanes`, `layer`, `note` ...) goes into the rule. Each other keyword is an OSM tag: `maxspeed=10` sets the tag
 `maxspeed` to `"10"`. The build then reads the tag as OSM data, so the speed and the travel time of the road change.""")
-ch.code("""way = int(ways.osm_id[0])                              # the OSM id of the way to fix
+ch.md("""The fix of this chapter: road works on Boulevard Louis II, the OSM way 4230891, lower its speed limit to
+10 km/h.""")
+ch.code("""way = 4230891                                          # Boulevard Louis II: the OSM way to fix
 fixes = duckosm.fixes.Fixes("osm_fixes.yaml")          # open or make the fixes file
 fixes.set(way=way, maxspeed=10, note="road works")     # one rule: the tag maxspeed of the way, and a note
 fixes                                                  # the card: a table of the rules""")
-ch.md("""**What the output shows.** The card names the file and the number of rules (1). The table has one row for
+ch.md("""The card names the file and the number of rules (1). The table has one row for
 each way: `osm_id`, the OSM `tags` of the rule (`maxspeed` is the text `'10'`) and the `note`.
 
 The file is ordinary YAML. You can read it, keep it in git with your project, and give it to a colleague.""")
 ch.code("""print(open("osm_fixes.yaml").read())    # the fixes file on disk""")
-ch.md("""**What the output shows.** The rule is one item of `overrides`: the `osm_id`, the `tags` with `maxspeed` and
+ch.md("""The rule is one item of `overrides`: the `osm_id`, the `tags` with `maxspeed` and
 the `note`. This is the format that the map editor writes, so the two tools can share one file.
 
 > **Warning:** `Fixes` writes the whole file again at each change. Comments that you wrote in the file by hand are
 > lost. The other keys of the file (`new_ways`, `turn_restrictions`, `extra`) stay.""")
 
-ch.md("""## The other kinds of rule
+
+ch.md("""#### The other calls
 
 `set` is one of five calls that change the rules. The table shows all of them. Each call returns the `Fixes`, so you
 can chain the calls.
@@ -136,9 +411,9 @@ can chain the calls.
 | `fixes.drop(way)` | deletes the rule of the way, so the way is as in OSM again | the rule is gone |
 | `fixes.rules()` | gives the rules as a DataFrame | |
 
-The cell below tries each call on a second file, `practice.yaml`, so the file of the chapter keeps its one rule. The
-second and third ways of the route get a rule each.""")
-ch.code("""w2, w3 = int(ways.osm_id[1]), int(ways.osm_id[2])          # the second and third ways of the route
+The cell below tries each call on a second file, `practice.yaml`, so the file of the chapter keeps its one rule. Two
+other roads of Monaco get a rule each.""")
+ch.code("""w2, w3 = 503633031, 166399479                              # Avenue Princesse Grace and Boulevard Albert 1er
 practice = duckosm.fixes.Fixes("practice.yaml")              # a second fixes file
 practice.set(way=w2, oneway=True, lanes=2)                   # two fields of a rule: one-way, two lanes
 practice.set(way=w2, highway="residential")                  # an OSM tag; the rule of w2 keeps its fields
@@ -150,29 +425,75 @@ only `exclude_modes`.""")
 ch.code("""practice.remove(way=w3)        # remove w3 from the whole build
 practice.drop(way=w2)          # w2 is as in OSM again
 practice, len(practice)        # the file now has one rule""")
-ch.md("""**What the output shows.** After `drop`, the file has one rule: the rule of `w3`, with `exclude_modes` and now
+ch.md("""After `drop`, the file has one rule: the rule of `w3`, with `exclude_modes` and now
 also `remove: true`. `len(fixes)` is the number of rules.
 
 > **Tip:** `remove` and `exclude` are the two ways to take a road out. Use `exclude` for a road that some modes can
 > use (a street that is closed to cars but open to people on foot). Use `remove` for a way that must not be in the
 > data at all.""")
 
-ch.md("""## Build again with the fix
+
+ch.md("""### In a text editor
+
+The file is plain text, so you can also write it yourself in any text editor, in the format of section "The format of
+the file". The cell below writes a file `hand.yaml` with one rule from Python, as a text editor would. Then `Fixes`
+opens it and shows its rule: the file is the same as a file that `Fixes` or the editing page writes.""")
+ch.code('''from pathlib import Path
+
+Path("hand.yaml").write_text("""overrides:
+  - osm_id: 4230891
+    tags:
+      maxspeed: "10"
+    note: road works
+""")                                                     # the file, written as text
+duckosm.fixes.Fixes("hand.yaml").rules()               # open it: one rule''')
+ch.md("""> **Warning:** YAML uses the spaces at the start of each line. Keep two spaces for each level, as in the example,
+> and write a number in a tag in quotes (`"10"`), because an OSM tag is text.""")
+
+ch.md("""## Build with the fixes
+
+A fixes file changes nothing by itself. A build reads it. There are two ways to build with the file.
+
+| Way | Uses | Use it when |
+|---|---|---|
+| `net.rebuild(fixes=...)` | the same OSM file and boundary as `net` | you want to compare the network before and after the fix |
+| a new build: `duckosm.network(..., fixes=...)` | a new extract, or another area | you build later with newer OSM data, or in another project |""")
+
+ch.md("""### Build again: `net.rebuild`
 
 `net.rebuild(fixes=...)` builds the area again, with the same modes, from the OSM file and the boundary beside the
 database. It takes a `Fixes` or the path of a fixes file. The new network goes to `<name>_fixed.duckdb` beside the old
-one (`out=` sets another file), so the old network stays and you can compare the two.""")
+one (`out=` sets another file), so the old network stays and you can compare the two. To see the effect of the
+fix, the cell compares one route by car across Monaco, from Fontvieille to Larvotto, before and after the fix.""")
 ch.code("""fixed = net.rebuild(fixes=fixes)                     # the same build, with the fixes file: data/monaco_fixed.duckdb
+a, b = (7.4155, 43.7285), (7.4335, 43.7468)          # Fontvieille and Larvotto, as (lon, lat)
+before = net.route(a, b)                             # a route by car across Monaco, before the fix
 after = fixed.route(a, b)                            # the same route on the fixed network
 round(before.time_s), round(after.time_s)            # the seconds before and after the fix""")
-ch.md("""**What the output shows.** The route now takes 252 s, not 229 s. It does not use Boulevard Louis II now: it
+ch.md("""The route now takes 252 s, not 229 s. It does not use Boulevard Louis II now: it
 takes other streets around it. The new route is longer (3,302 m, not 2,939 m), but at 10 km/h the old way is slower.
 
 The new network remembers its fixes file. `fixed.fixes` gives the `Fixes` of the build. `net.fixes` is `None`,
 because `net` has no fixes file.""")
 ch.code("""fixed.fixes, net.fixes        # the fixes file of each network""")
 
-ch.md("""## Compare the two networks
+
+ch.md("""### A new build with the file
+
+The same file works in each new build. Give it to `duckosm.network`, to `area.build` or to the command
+`duckosm build --fixes osm_fixes.yaml`. The cell below builds Monaco again from the start, with the file, into a new
+network. The route takes the same time as after `rebuild`, because the two builds read the same OSM data and the same
+rule.""")
+ch.code("""again = duckosm.network(osm_id=2220322, modes=["driving"], name="monaco_with_fixes", fixes="osm_fixes.yaml")   # a new build with the file
+round(again.route(a, b).time_s)                       # the same time as after rebuild""")
+ch.md("""> **Key idea:** keep the fixes file with your project. When you build the area again next month, with a newer OSM
+> extract, the same file corrects the new build. A rule whose way is not in the new data does nothing.""")
+
+ch.md("""## Check the fix
+
+Four checks show that the fix works: the compare of the two networks, the map, the edge ids and the outputs.""")
+
+ch.md("""### Compare the two networks
 
 `net.diff(other)` compares two networks edge by edge, by `edge_id`. It gives one row for each edge that is different:
 
@@ -192,28 +513,28 @@ ch.md("""**What the output shows.** Eight edges changed. No edge was added or re
 Boulevard Louis II is a two-way road, so it has four edges in each direction. On each edge, two columns changed:
 `maxspeed_kmh` (now 10) and `cost_s`, the travel time, which the build calculates from the speed.""")
 
-ch.md("""## See the change on a map
+ch.md("""### See the change on a map
 
 `fixed.map(routes=...)` draws routes on the network, each in its own color. The cell draws three lines: the route
 before the fix, the route after the fix, and the fixed way (its edges, as a route). Run the cell to see the live map:
 you can zoom, and click a road to see its columns. The manual page shows a picture of the map.""")
 ch.code("""way_edges = {"edges": list(fixed.edges(where=f"osm_id = {way}").edge_id)}                   # the edges of the fixed way, as a route to draw
 fixed.map(routes={"before the fix": before, "after the fix": after, "the fixed way": way_edges})    # the three as lines, each in its own color""")
-ch.md("""**What the output shows.** The route after the fix leaves the fixed way. It takes other streets around the slow
+ch.md("""The route after the fix leaves the fixed way. It takes other streets around the slow
 part, because they are now faster.""")
 
-ch.md("""## The edge ids do not change
+ch.md("""### The edge ids do not change
 
 An `edge_id` is a hash of the OSM way and of the two nodes at the ends of the edge. A fix of a tag (`maxspeed`,
 `lanes`, `name`) does not change the way or its nodes. So each edge keeps its `edge_id`, and your own data that you
 joined on the ids (chapter 4) stays correct after the fix.""")
 ch.code("""set(net.edges().edge_id) == set(fixed.edges().edge_id)    # the same edge ids before and after the fix""")
-ch.md("""**What the output shows.** `True`: the two networks have the same set of edge ids.
+ch.md("""`True`: the two networks have the same set of edge ids.
 
 > **Key idea:** a fix of the tags keeps every `edge_id`. A fix that removes a road (`remove`, `exclude`) removes the
 > edges of that road only. All the other edges keep their ids.""")
 
-ch.md("""### A fix that removes a road
+ch.md("""#### A fix that removes a road
 
 The next cell checks this rule. It closes the fixed way to cars with `exclude`, in a third file, and builds the area
 again into `data/monaco_closed.duckdb` (`out=`).""")
@@ -221,85 +542,16 @@ ch.code("""closed = duckosm.fixes.Fixes("closed.yaml").exclude(way=way, modes=["
 shut = net.rebuild(fixes=closed, out="data/monaco_closed.duckdb")                   # a third network
 gone = net.diff(shut)                                                               # the edges that are different
 gone.change.value_counts(), set(fixed.edges(where=f"osm_id = {way}").edge_id) == set(gone.edge_id[gone.change == "removed"])""")
-ch.md("""**What the output shows.** The diff has eight removed edges and no other change. The second value is `True`: the
+ch.md("""The diff has eight removed edges and no other change. The second value is `True`: the
 removed edges are the eight edges of the fixed way. All the other edges of the network keep their ids.""")
 
-ch.md("""## Every output takes the fix
+ch.md("""### Every output takes the fix
 
-The fix is in the database, so each export of the database takes it. The cells below write five outputs of the fixed
-network and read the speed of one edge of the fixed way back from each file. Each format stores the speed in its own
-unit: SUMO and MATSim use m/s, so the cell converts it to km/h. Chapter 6 shows each export in full.
+The fix is in the network, so each export of the fixed network takes it: SUMO, MATSim, GMNS, OpenDRIVE and the GIS
+files. The QuackOSM table reads the OSM file, and it takes the same fixes file with its own `fixes=`. Chapter 6 shows
+these exports, and its last section reads the speed of Boulevard Louis II back from each output: 10 km/h in all of
+them.""")
 
-| Output | The call | Where the speed is |
-|---|---|---|
-| the database | (the build) | `maxspeed_kmh` of `driving.edges` |
-| GeoPackage | `fixed.to_gis` | `maxspeed_kmh` of the layer `edges_driving` |
-| SUMO | `fixed.to_sumo` | the attribute `speed` (m/s) of the `<edge>` |
-| MATSim | `fixed.to_matsim` | the attribute `freespeed` (m/s) of the `<link>` |
-| GMNS | `fixed.to_gmns` | `free_speed` (km/h) of the table `link` |
-| QuackOSM table | `duckosm.gis.quack(..., fixes=)` | the tag `maxspeed` of the way |
-
-In each file, the id of the edge (or of the link) is the `edge_id`. So the cell finds the same edge in each output.""")
-ch.code("""import duckdb                                                    # to read the outputs back
-
-edge = way_edges["edges"][0]                                     # one edge of the fixed way
-speeds = {"database (km/h)": float(fixed.edges(where=f"edge_id = {edge}").maxspeed_kmh[0])}    # its speed in each output
-fixed.to_gis("out/monaco.gpkg")                                  # a GeoPackage
-gpkg = duckdb.connect()                                          # DuckDB reads it back
-gpkg.load_extension("spatial")                                   # with the extension spatial
-speeds["GeoPackage (km/h)"] = gpkg.execute(
-    "SELECT maxspeed_kmh FROM st_read('out/monaco.gpkg', layer='edges_driving') WHERE edge_id = ?", [edge]).fetchone()[0]""")
-ch.md("""SUMO and MATSim write XML. `run_netconvert=False` writes only the plain XML files of SUMO, so this cell does not
-need the SUMO programs.""")
-ch.code("""import gzip
-import xml.etree.ElementTree as ET                               # to read the XML files back
-
-sumo = fixed.to_sumo("out/sumo", run_netconvert=False)            # the SUMO files; speed in m/s
-speeds["SUMO (km/h)"] = round(float(ET.parse(sumo["edg"]).find(f".//edge[@id='{edge}']").get("speed")) * 3.6, 1)
-fixed.to_matsim("out/matsim.xml.gz")                             # the MATSim network; free speed in m/s
-speeds["MATSim (km/h)"] = round(float(ET.parse(gzip.open("out/matsim.xml.gz")).find(f".//link[@id='{edge}']").get("freespeed")) * 3.6, 1)""")
-ch.md("""GMNS is a set of tables. `duckosm.gis.quack` is different from the other calls: it reads the OSM file, not the
-network, so it takes the fixes file with its own `fixes=`.""")
-ch.code("""fixed.to_gmns("out/gmns.duckdb")                                 # the GMNS network: link_id is the edge_id
-speeds["GMNS (km/h)"] = duckdb.connect("out/gmns.duckdb", read_only=True).execute(
-    "SELECT free_speed FROM gmns_driving.link WHERE link_id = ?", [edge]).fetchone()[0]
-quack = duckosm.gis.quack(area, out="out", name="monaco", fixes=fixes, formats=["geoparquet"])    # the QuackOSM table
-speeds["QuackOSM table (tag)"] = gpkg.execute(
-    f"SELECT tags['maxspeed'] FROM '{quack[0]}' WHERE feature_id = 'way/{way}'").fetchone()[0]
-speeds                                                           # the speed of the edge in each output""")
-ch.md("""**What the output shows.** Each output gives 10 km/h for the edge. The QuackOSM table has the OSM tag, so it
-shows the text `'10'`. The GMNS export takes the longest time (more than 25 s here). It also makes the tables of the
-lanes and of the movements at each junction.
-
-> **Tip:** `fixes=` also works in the first build: `duckosm.network(..., fixes="osm_fixes.yaml")`,
-> `duckosm.get(..., fixes=...)` and `area.build(fixes=...)` take a path or a `Fixes`. Use `rebuild` when you have a
-> network and want to compare it with the fixed one.""")
-
-ch.md("""## Fix on a map
-
-Some fixes are easier on a map: a turn that a driver cannot make, a new road, the walls of a building. `net.edit()`
-starts the editor **Edit OSM data** on the database, on your computer. The page shows the roads and the buildings of
-the area on a map. Each change that you add on the page goes into the fixes file at once, in the same format as
-`Fixes`.
-
-```python
-url = net.edit()                       # the editor in the background; the fixes file of the build, else osm_fixes.yaml
-url                                    # http://127.0.0.1:8790/: open it in your browser
-net.edit(fixes="osm_fixes.yaml", port=8791)    # another file, another port
-```
-
-| Argument | Default | Does |
-|---|---|---|
-| `fixes` | the fixes file of the build, else `osm_fixes.yaml` beside the database | the file that the page writes |
-| `port` | `8790` | the port of the page on `127.0.0.1` |
-
-The editor runs while Python runs. After your changes, click **Build again** on the page, or call
-`net.rebuild(fixes=...)` in the notebook. The guide [Fix the OSM data](../guides/edit-osm-data.md) shows each tab of
-the page.
-
-> **Warning:** the page is on `127.0.0.1` of the machine that runs Python. In Colab, that machine is in the cloud, so
-> your browser cannot open the page. Run `net.edit()` in Jupyter on your own computer, or use the step **Edit OSM
-> data** of [duckOSM Studio](https://khoshkhah.github.io/duckosm-studio/) in the browser.""")
 
 ch.exercises([
     ("Make the fixed way one-way with `fixes.set(way=way, oneway=True)`, build again into a new file, and count the "
@@ -308,9 +560,9 @@ ch.exercises([
 oneway = net.rebuild(fixes=fixes, out="data/monaco_oneway.duckdb")
 d = net.diff(oneway)
 (d.change == "removed").sum()                                 # the edges of the other direction"""),
-    ("Close the second way of the route to cars only, and find the new time of the route.",
-     """closed2 = duckosm.fixes.Fixes("closed2.yaml").exclude(way=w2, modes="driving")
-net.rebuild(fixes=closed2, out="data/monaco_closed2.duckdb").route(a, b).time_s"""),
+    ("Close Boulevard Albert 1er (`w3`) to cars only, and find the new time of the route.",
+     """closed3 = duckosm.fixes.Fixes("closed3.yaml").exclude(way=w3, modes="driving")
+net.rebuild(fixes=closed3, out="data/monaco_closed3.duckdb").route(a, b).time_s     # about 252 s"""),
     ("Delete the rule of the fixed way, so that the way is as in OSM again, and look at the file.",
      """fixes.drop(way=way)
 print(open("osm_fixes.yaml").read())                           # overrides: []"""),
@@ -337,7 +589,8 @@ ch.summary([
     ("`net.rebuild(fixes=..., out=...)`", "builds the area again with the fixes; gives the new `Network`"),
     ("`net.fixes`", "the `Fixes` of the build, or `None`"),
     ("`net.diff(other, mode=None)`, `duckosm.fixes.diff(net, other)`", "the edges that are different, by `edge_id`"),
-    ("`net.edit(fixes=None, port=8790)`", "starts the map editor and gives its URL"),
+    ("`net.edit(fixes=None, port=8790)`", "starts the editing page and gives its URL"),
+    ("`duckosm.network(..., fixes=...)`, `area.build(fixes=...)`", "a new build with the fixes file"),
     ("`duckosm.gis.quack(..., fixes=...)`", "the QuackOSM table of the OSM file, with the fixes"),
 ], reference="[duckosm.fixes](../reference/sdk/fixes.md)")
 

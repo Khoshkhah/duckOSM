@@ -358,13 +358,11 @@ class Network(os.PathLike):
         if not self.path.is_file():
             return f"<b>Network</b> <code>{escape(shown(self.path))}</code>: missing"
         meta = self._meta()
-        facts = [f"<code>{escape(shown(self.path))}</code>", _size(self.path)]
-        if meta.get("built"):
-            facts.append(f"built {escape(meta['built'])}")
-        facts.append(f"fixes: <code>{escape(str(meta['fixes']))}</code>" if meta.get("fixes") else "no fixes file")
-        if not self.saved:
-            facts.append("<b>not saved</b> (in the work folder): <code>net.save(\"name.duckdb\")</code> keeps it")
-        return (f"<div><b>Network {escape(self.path.name.split('.')[0])}</b>: {', '.join(facts)}"
+        fixes = f"<code>{escape(str(meta['fixes']))}</code>" if meta.get("fixes") else "none"
+        saved = "yes" if self.saved else 'no, it is in the work folder: <code>net.save("name.duckdb")</code> keeps it'
+        rows = "".join(f"<tr><td>{k}</td><td>{v}</td></tr>" for k, v in (
+            ("file", f"<code>{escape(shown(self.path))}</code> ({_size(self.path)})"), ("fixes", fixes), ("saved", saved)))
+        return (f"<div><b>Network {escape(self.path.name.split('.')[0])}</b><table>{rows}</table>"
                 f"{self.summary().to_html(index=False)}</div>")
 
     # ---- the data -----------------------------------------------------------------------------------------------------
@@ -479,20 +477,32 @@ class Network(os.PathLike):
         return rs.render_edges(gdf[[c for c in gdf.columns if c in MAP_COLUMNS or c == color_by or c == gdf.geometry.name]],
                                **style)
 
-    def dashboard(self, mode: str | None = None, *, show: str | None = None, path=None, layers=None, **style):
+    def dashboard(self, mode: str | None = None, *, show: str | None = None, path=None, layers=None, color_by=None,
+                  highlight=None, routes=None, **style):
         """roadstyle's dashboard of the file: the map, the panel with the road card and the color menu (road class,
-        modes), docked. ``show``, ``path`` and ``layers``: as in :meth:`map`.
+        modes), docked. ``show``, ``path``, ``layers``, ``color_by``, ``highlight`` and ``routes``: as in :meth:`map`.
+        With ``color_by``, the roads have the colors of your data, and the road card of a clicked road shows its value.
 
-        >>> net.dashboard()"""
+        >>> net.dashboard()
+        >>> net.dashboard("driving", color_by=counts.set_index("edge_id").vehicles_per_hour, cmap="viridis")"""
         show = _show(show)
         if show == "plot":
-            return self.plot(mode, layers=bool(layers) and layers)
-        return self._present(self._live_dashboard(mode, {"layers": True if layers is None else layers, **style}), show,
-                             path)
+            return self.plot(mode, layers=bool(layers) and layers, color_by=color_by, highlight=highlight, routes=routes,
+                             **style)
+        return self._present(self._live_dashboard(mode, layers, color_by, highlight, routes, style), show, path)
 
-    def _live_dashboard(self, mode, style):
+    def _live_dashboard(self, mode, layers, color_by, highlight, routes, style):
         require("roadstyle", "Network.dashboard")
+        if color_by is not None or routes is not None:
+            # your data or routes: the map of map(), in the dashboard template (as roadstyle.duckosm.page does)
+            style = {"name": f"{self.path.name.split('.')[0]}: dashboard", "tooltip": None, "template": "dashboard",
+                     "layout": "dock", "dashboard": {"panel": {"sections": [{"id": "road", "part": "road_card"}]}},
+                     **style}
+            return self._live_map(mode, "liberty", color_by, highlight, routes, style)
         from roadstyle import duckosm as page
+        style = {"layers": True if layers is None else layers, **style}
+        if highlight is not None:
+            style["color_table"] = {int(e): HIGHLIGHT for e in highlight}
         return page.page(self.path, "all" if mode is None else self._mode(mode), dashboard=True, **style)
 
     def _present(self, live, show, path):
@@ -517,7 +527,8 @@ class Network(os.PathLike):
         >>> net.save_map("monaco.html")"""
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         if dashboard:
-            m = self._live_dashboard(mode, options)
+            m = self._live_dashboard(mode, options.pop("layers", None), options.pop("color_by", None),
+                                     options.pop("highlight", None), options.pop("routes", None), options)
         else:
             theme = options.pop("theme", "liberty")
             m = self._live_map(mode, theme, options.pop("color_by", None), options.pop("highlight", None),

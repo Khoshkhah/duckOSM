@@ -21,13 +21,13 @@ def work(tmp_path, monkeypatch):
 def test_a_build_goes_to_the_work_folder_and_save_keeps_it(work):
     net = duckosm.network(pbf=PBF, boundary=BOUNDARY, **FAST)
     assert not net.saved and duckosm.work_dir() in net.path.parents
-    assert "not saved" in net._repr_html_()
+    assert "<td>saved</td><td>no, it is in the work folder" in net._repr_html_()
     assert sorted(p.name for p in work.iterdir()) == ["cache"]          # the folder of the user stays clean
     net.path.with_name(net.path.name.split(".")[0] + ".osm.pbf").write_bytes(b"pbf")   # a companion file
     kept = net.save("out/monaco.duckdb")
     assert kept.saved and kept.path == Path("out/monaco.duckdb") and len(kept.driving.edges()) == len(net.driving.edges())
     assert Path("out/monaco.osm.pbf").read_bytes() == b"pbf"            # the companions go with it, under the new name
-    assert "not saved" not in kept._repr_html_()
+    assert "<td>saved</td><td>yes</td>" in kept._repr_html_()
     with pytest.raises(duckosm.DuckOSMError, match="exists"):
         net.save("out/monaco.duckdb")
     assert net.save("out/", overwrite=True).path == Path("out") / net.path.name   # a folder: <folder>/<name>.duckdb

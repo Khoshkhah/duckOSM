@@ -47,7 +47,7 @@ that names a module calls the function of that module, with the same other argum
 | Group | Methods and properties |
 |---|---|
 | Data | `sql(query, params=None)`, `connect()`, `schema(schema=None)`, `tables()`, `columns(table)`, `summarize(table)`, `summary()`, `modes`, `boundary`, `edges(mode, where=None, crs=None)`, `nodes(mode, crs=None)` |
-| Maps | `map(mode=None, theme=None, color_by=None, highlight=None, routes=None, **style)`, `dashboard(mode, **style)`, `save_map(path, mode=None, dashboard=False, **options)`, `plot(mode=None, color_by=None, highlight=None, routes=None, ax=None, **style)` |
+| Maps | `map(mode=None, theme=None, color_by=None, highlight=None, routes=None, **style)`, `dashboard(mode=None, color_by=None, highlight=None, routes=None, **style)`, `save_map(path, mode=None, dashboard=False, **options)`, `plot(mode=None, color_by=None, highlight=None, routes=None, ax=None, **style)` |
 | [analysis](sdk/analysis.md) | `stats(mode, area_m2=None)` |
 | [routing](sdk/routing.md) | `route(a, b, mode, weight)`, `route_points(a, b, mode)`, `routes(origins, destinations, mode)`, `k_shortest_paths(a, b, k, mode)`, `matrix(origins, destinations, mode)`, `isochrones(origins, minutes, mode)`, `accessibility(origins, targets, minutes, mode)`, `route_multimodal_points(a, b)`, `directions(route, mode)` |
 | [ml](sdk/ml.md) | `to_networkx(mode)`, `to_rustworkx(mode)` |
@@ -146,7 +146,7 @@ net = duckosm.build(pbf="my.osm.pbf", config={"options": {"bus_routes": False}, 
 | Call | Returns |
 |---|---|
 | `net.map(mode=None, *, theme="liberty", color_by=None, highlight=None, routes=None, **style)` | the live roadstyle map in a notebook (`roadstyle.duckosm.page`: the roads of all modes, the levels, the base map of the file). `theme`: `"liberty"`, `"osm"`, `"google"`, `"grey"` or `"roadstyle"`. |
-| `net.dashboard(mode=None)` | roadstyle's dashboard: the map and the panel with the road card and the color menu |
+| `net.dashboard(mode=None, color_by=None, highlight=None, routes=None)` | roadstyle's dashboard: the map and the panel with the road card and the color menu. With `color_by` (your data, as in `net.map()`), the roads have the colors of your data, and the road card shows the value of the clicked road. |
 | `net.save_map(path, mode=None, *, dashboard=False, **options)` | the same map as one offline HTML file |
 | `net.plot(mode=None, *, color_by=None, highlight=None, routes=None, ax=None)` | a static matplotlib picture |
 
