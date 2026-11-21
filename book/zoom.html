@@ -15,17 +15,26 @@
   .cell-output-display a.lightbox img { cursor: zoom-in; max-height: 85vh; width: auto; max-width: 100%; }    /* the whole picture fits the screen */
   .gslide-image img.rs-zoomed { cursor: grab; }
   @media (max-width: 600px) { .rs-zoombar span { display: none; } }
-  .rs-pagehint { font-size: 0.8em; color: #777; margin-top: 2px; }
+  .rs-zoomable { position: relative; display: inline-block; max-width: 100%; }
+  .rs-badge { position: absolute; top: 8px; right: 8px; display: flex; gap: 6px; align-items: center; padding: 5px 9px;
+    border-radius: 999px; background: rgba(0, 0, 0, 0.65); color: #fff; font: 13px/1 system-ui, sans-serif;
+    pointer-events: none; transition: background 0.15s; }
+  .rs-zoomable:hover .rs-badge { background: rgba(0, 0, 0, 0.85); }
+  .rs-zoomable:hover img { outline: 2px solid rgba(0, 0, 0, 0.25); }
 </style>
 <script>
 window.addEventListener("load", () => {
   if (typeof Panzoom === "undefined") return;
-  // In the page: a hint under each output picture. The zoom is in the popup.
+  // In the page: a badge on each output picture, so that the reader sees that it can zoom. The zoom is in the popup.
+  const glass = '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="6.5" cy="6.5" r="5" ' +
+    'fill="none" stroke="currentColor" stroke-width="2"/><path d="M10.5 10.5 15 15M4.5 6.5h4M6.5 4.5v4" ' +
+    'stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
   document.querySelectorAll(".cell-output-display a.lightbox").forEach((link) => {
-    const hint = document.createElement("div");
-    hint.className = "rs-pagehint";
-    hint.textContent = "Click the picture to open it and zoom.";
-    link.after(hint);
+    link.classList.add("rs-zoomable");
+    const badge = document.createElement("span");
+    badge.className = "rs-badge";
+    badge.innerHTML = glass + "<span>Click to zoom</span>";
+    link.appendChild(badge);
   });
   if (typeof lightboxQuarto === "undefined") return;
   const g = lightboxQuarto.settings;

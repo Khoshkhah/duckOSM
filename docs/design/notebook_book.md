@@ -13,7 +13,7 @@ cd docs/notebooks && IPYTHONDIR=../../book/ipython DUCKOSM_MAP_SHOW=plot jupyter
 ```
 
 `IPYTHONDIR=book/ipython` gives the matplotlib pictures two times the pixels at the same size (retina). In the book,
-a click on an output picture opens it in a popup (`lightbox: auto` in `book/_quarto.yml`). There, the mouse wheel
+each output picture has a badge "Click to zoom" at its top-right corner, and a click on it opens it in a popup (`lightbox: auto` in `book/_quarto.yml`). There, the mouse wheel
 zooms in at the mouse pointer, a click zooms in where you click and a second click shows the whole picture again, the
 buttons +, - and Fit zoom, and a drag moves the picture (`book/zoom.html`, with `book/panzoom.min.js`).
 

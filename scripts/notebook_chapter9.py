@@ -343,7 +343,8 @@ momepy makes the blocks in three steps:
 1. **Enclosures:** it cuts the land along the streets. Each enclosure is an area with streets around it.
 2. **Cells:** it divides each enclosure into one cell for each building (a tessellation). A cell is the land that is
    nearer to its building than to other buildings.
-3. **Blocks:** it joins the cells of the buildings that are between the same streets.
+3. **Blocks:** it joins the cells of the buildings that are between the same streets. A cell with no building goes
+   into no block.
 
 ### The streets
 
@@ -356,7 +357,7 @@ lines = pd.concat([net.driving.edges(), net.walking.edges()])      # the edges o
 lines = lines.drop_duplicates("edge_id")                           # a road of both modes counts once
 lines = lines[~lines.is_reverse & lines.tunnel.isna()]             # one line for each street, no tunnels
 crs = lines.estimate_utm_crs()                                     # the UTM zone of Monaco: coordinates in metres
-streets = lines.to_crs(crs)[["edge_id", "highway", "geometry"]]
+streets = lines.to_crs(crs)[["edge_id", "highway", "lanes", "oneway", "geometry"]]
 len(streets)""")
 ch.md("""### The buildings and the land
 
@@ -366,20 +367,60 @@ ch.code("""buildings = duckosm.gis.features(net, tags={"building": True}).to_crs
 buildings = buildings[buildings.geom_type.isin(["Polygon", "MultiPolygon"])]       # only the areas
 buildings = buildings.explode(index_parts=False).reset_index(drop=True)[["geometry"]]   # one polygon for each row
 water = duckosm.gis.features(net, tags={"natural": ["water"], "leisure": ["marina"]}).to_crs(crs)   # lakes and ports
-land = net.boundary.to_crs(crs).difference(water.union_all())                      # the city without its water
-len(buildings), round(land.area.sum() / 1e6, 2)                                    # buildings, land in km²""")
+area = net.boundary.to_crs(crs).union_all()                                        # the area, one polygon
+land = area.difference(water.union_all())                                          # the city without its water
+len(buildings), round(land.area / 1e6, 2)                                          # buildings, land in km²""")
+ch.md("""### Land with no building
+
+momepy puts a cell into a block only when the cell has a building. A park, a beach or a quay at the sea has no
+building, so its land goes into no block, and the roads on that land are outside all blocks. To keep this land, the
+next cell gives momepy two more kinds of area as if they were buildings:
+
+| Area | Why |
+|---|---|
+| The OSM land areas: parks, gardens, sports grounds, grass, forest, beaches, parking | their land then goes into a block |
+| The sea, the ports and the land outside the area, as one polygon around the land | the land along the coast and along the edge of the area then goes into a block |
+
+After momepy, the sea, the ports and the land outside the area are cut out of the result again. This changes only
+what momepy gets as input, not what momepy does.""")
+ch.code("""import geopandas as gpd
+import shapely
+
+tags = {"leisure": ["park", "garden", "pitch", "playground", "sports_centre", "track", "stadium"],
+        "landuse": ["grass", "forest", "recreation_ground", "cemetery", "meadow", "village_green", "flowerbed"],
+        "natural": ["wood", "beach", "scrub", "grassland", "bare_rock", "heath"],
+        "amenity": ["parking"]}
+open_land = duckosm.gis.features(net, tags=tags).to_crs(crs)                       # parks, gardens, beaches, ...
+open_land = open_land.geometry.intersection(land).difference(buildings.union_all())    # on the land, not under a building
+frame = shapely.box(*area.buffer(300).bounds)                                      # a rectangle around the area
+sea = frame.difference(land)                                                       # the sea, the ports, the land outside
+extra = gpd.GeoSeries(pd.concat([open_land, gpd.GeoSeries([sea], crs=crs)]), crs=crs).explode(index_parts=False)
+extra = extra[extra.geom_type.eq("Polygon") & (extra.area > 20)]                   # areas of more than 20 m²
+things = gpd.GeoDataFrame(geometry=pd.concat([buildings.geometry, extra]), crs=crs).reset_index(drop=True)
+len(buildings), len(extra), len(things)                                            # buildings, extra areas, all""")
+ch.md("""momepy gets 1,504 areas: the 1,258 buildings and 246 extra areas (the OSM land areas, and the pieces of the
+polygon of the sea, the ports and the land outside the area).""")
 ch.md("""### The three steps
 
-`momepy.enclosures` cuts the land along the streets. A port is a hole in the land, and momepy also gives the hole as
-an enclosure, so the second line removes the enclosures that are not on the land. `momepy.generate_blocks` gives two
-results: the blocks, and the block of each building.""")
-ch.code("""enc = momepy.enclosures(streets, limit=land)                       # step 1: the areas between the streets
-enc = enc[enc.representative_point().within(land.union_all())]     # remove the ports (holes in the land)
-cells = momepy.enclosed_tessellation(buildings, enc)               # step 2: one cell for each building
-blocks, block_of = momepy.generate_blocks(cells, streets, buildings)    # step 3: the cells joined into blocks
+momepy works on the frame (the rectangle around the area), with the buildings and the extra areas. Then the fourth
+line cuts the sea, the ports and the land outside the area out of the blocks. `momepy.generate_blocks` gives two
+results: the blocks, and the block of each building. This chapter uses only the blocks.""")
+ch.code("""enc = momepy.enclosures(streets, limit=gpd.GeoSeries([frame], crs=crs))     # step 1: the areas between the streets
+cells = momepy.enclosed_tessellation(things, enc)                          # step 2: one cell for each building or area
+blocks, _ = momepy.generate_blocks(cells, streets, things)                 # step 3: the cells joined into blocks
+blocks = gpd.GeoDataFrame(geometry=blocks.intersection(land), crs=crs).explode(index_parts=False)   # only the land
+blocks = blocks[blocks.area > 1].reset_index(drop=True)
 len(enc), len(cells), len(blocks)""")
-ch.md("""The land has 2.08 km² and 1,710 enclosures. The 1,258 buildings give 2,711 cells. There are more cells than
-buildings, because an enclosure with no building is also a cell. momepy joins the cells into 292 blocks.""")
+ch.md("""momepy cuts the frame into 1,635 enclosures and 2,870 cells, and joins the cells into blocks. After the cut,
+404 blocks are on the land.
+
+The next cell measures the share of the road length on the land that is in no block and on no block border.""")
+ch.code("""on_land = streets.intersection(land).length.sum()                          # the road length on the land
+in_blocks = streets.intersection(blocks.buffer(0.5).union_all()).length.sum()   # the road length in or on a block
+round(1 - in_blocks / on_land, 2)                                          # the share on land outside all blocks""")
+ch.md("""15 % of the road length on the land is still outside all blocks. These roads run on land with no building and
+no OSM land area: small pieces of land with roads all around them, such as traffic islands, corners at junctions and
+the middle strip of a divided road. These pieces are street land, not blocks, so they stay empty on the maps.""")
 ch.md("""### The size of the blocks
 
 The cell gives each block its area in hectares (1 ha = 10,000 m², about a football field and a half) and puts it in a
@@ -388,15 +429,14 @@ ch.code("""blocks["ha"] = blocks.area / 10_000                                # 
 classes = ["< 0.1 ha", "0.1-0.5 ha", "0.5-1 ha", "1-5 ha", "> 5 ha"]
 blocks["size"] = pd.cut(blocks.ha, [0, 0.1, 0.5, 1, 5, 1000], labels=classes)
 blocks["size"].value_counts().sort_index()                         # the blocks in each class""")
-ch.md("""Most blocks are small: 149 blocks have 0.1 to 0.5 ha, and 57 have less than 0.1 ha. Only 4 blocks have more
-than 5 ha. They are on the coast and on the slopes, where few streets cut the land, for example at the Larvotto beach
-in the northeast.
+ch.md("""Most blocks are small: 169 blocks have less than 0.1 ha, and 152 have 0.1 to 0.5 ha. Only 3 blocks have more
+than 5 ha. They are on the coast and on the slopes, where few streets cut the land.
 
 The blocks change with the streets that you give to momepy. With the driving streets only, many steps and footways
 do not cut the land, and the blocks become larger.""")
 ch.md("""### The map of momepy's blocks
 
-This map shows the blocks exactly as momepy gives them. Each block reaches the center line of its streets, so two
+This map shows the blocks as momepy gives them, with only the water cut out. Each block reaches the center line of its streets, so two
 blocks on the two sides of a street touch at that line.
 
 The first cell sorts the roads into three kinds, for the maps: main roads, streets, and footways and steps.""")
@@ -409,7 +449,9 @@ kind.value_counts()                                                             
 ch.md("""Monaco has 4,184 footways and steps, 1,210 streets and 721 main roads. Most lines are footways and steps:
 Monaco has many of them between its streets, on the slopes.
 
-The second cell makes a function, `block_map`, that draws blocks. The two maps below use it. Each block is a
+The second cell makes a function, `block_map`, that draws blocks. The two maps below use it. The maps draw the
+footways, but not the roads for cars: `block_map(blocks, roads=True)` also draws the center lines of the main roads
+and the streets. Each block is a
 half-transparent polygon with a border inside it, on top of the buildings. The border is a band of 1 m inside the
 polygon, so it does not make the block larger. Two blocks that touch never have the same color: `mapclassify.greedy`
 gives each block one of six colors in this way. The map is an SVG, a vector picture: click it and zoom in to one
@@ -433,8 +475,9 @@ from matplotlib.patches import Patch
 six = ListedColormap(["#1b9e77", "#d95f02", "#7570b3", "#e7298a", "#66a61e", "#e6ab02"])    # the six block colors
 
 
-def block_map(blks, space=None):
-    \"\"\"The map of the blocks blks, with the street space space (a polygon) if you give it, as an SVG.\"\"\"
+def block_map(blks, space=None, roads=False):
+    \"\"\"The map of the blocks blks as an SVG: with the street space space (a polygon) if you give it, and with the
+    center lines of the main roads and the streets if roads is True.\"\"\"
     color = mapclassify.greedy(blks, min_colors=6)                               # 0 to 5: blocks that touch differ
     fig, ax = plt.subplots(figsize=(12, 13))                                     # a large map
     ax.set_facecolor("#e8e8e8")                                                  # the background in light gray
@@ -443,6 +486,9 @@ def block_map(blks, space=None):
         gpd.GeoSeries([space], crs=blks.crs).plot(ax=ax, color="white")         # the street space
         legend.append(Patch(facecolor="white", edgecolor="#bbbbbb", label="street space"))
     streets[kind == "footway, steps"].plot(ax=ax, color="#8b4513", linewidth=0.25, linestyle=(0, (4, 3)))    # footways
+    if roads:
+        streets[kind != "footway, steps"].plot(ax=ax, color="#666666", linewidth=0.4)    # the roads for cars
+        legend.append(Line2D([], [], color="#666666", linewidth=0.8, label="road (center line)"))
     buildings.plot(ax=ax, color="#9e9e9e", edgecolor="#6e6e6e", linewidth=0.2)  # the buildings
     blks.plot(ax=ax, color=[six(c) for c in color], alpha=0.45)                 # each block: a half-transparent polygon
     border = blks.difference(blks.buffer(-1))                                    # a band of 1 m inside each block
@@ -465,36 +511,71 @@ line of the street.""")
 
 ch.md("""### The street space
 
-On the first map the streets have no space of their own: a real street has a width. The next cell gives each street
-a width from its kind, and removes the street space from the blocks:
+On the first map the streets have no space of their own: two blocks on the two sides of a street touch at its center
+line. A real street has a width. This section gives momepy the two edges of each street, not only its center line, so
+that momepy itself makes blocks that stop at the street edge.
 
-| Kind | `highway` | Width |
+#### The width of each street
+
+OSM gives the width of few streets: in Monaco, 32 of 3,502 road ways have a `width` tag. So the next cell gives each
+road a width in one of three ways. The map reads only the column `streets["width"]`:
+
+| Way | How | Change it |
 |---|---|---|
-| main road | `motorway`, `trunk`, `primary`, `secondary`, `tertiary` (and their `_link`) | 12 m |
-| street | the other roads for cars | 8 m |
-| footway, steps | `footway`, `steps`, `pedestrian`, `path`, `cycleway`, `corridor` | 2 m |
+| By kind | one width for each kind: main road 12 m, street 8 m, footway or steps 2 m | the dict `widths` |
+| From the lanes (used here) | `lanes` × 3.25 m for each lane, on both sides of a two-way road, plus 2 m for the sidewalks. Footways and steps, and roads with no `lanes`, take the width of their kind | the lane width and the sidewalk width in the cell |
+| Your own | any width that you have, for example measured widths | put them into `streets["width"]` |""")
+ch.code("""widths = {"main road": 12.0, "street": 8.0, "footway, steps": 2.0}          # way 1: one width for each kind, in metres
+by_kind = kind.map(widths)
+sides = streets.oneway.map({True: 1, False: 2}).fillna(2)                     # a two-way road has lanes on both sides
+by_lanes = streets.lanes * sides * 3.25 + 2.0                                 # way 2: 3.25 m a lane, 2 m of sidewalks
+streets["width"] = by_lanes.where(kind != "footway, steps").fillna(by_kind)   # footways and roads with no lanes: by kind
+streets.groupby(kind).width.describe()[["count", "min", "50%", "max"]].round(1)    # the widths of each kind, in metres""")
+ch.md("""The footways and the steps are 2 m wide. Most streets and main roads are 8.5 m: one lane in each direction
+(2 × 3.25 m) plus 2 m of sidewalks. A one-way road with one lane is 5.25 m, and the widest main roads, with four
+lanes, are 15 m.""")
+ch.md("""#### Momepy with the street edges
 
-OSM gives the width of few streets, so these are typical widths, not measured widths.
+The steps of the first cell:
 
-Some roads go into a block and stop there: a garden path, steps or a driveway. momepy does not cut the block on such
-a road, so the road is a part of the block. The cell keeps these roads in the block and makes the street space only
-from the roads between the blocks. So each block stays one polygon.
-
-The result is not momepy's blocks any more: each block is smaller by the street space around it.""")
-ch.code("""half = kind.map({"main road": 6.0, "street": 4.0, "footway, steps": 1.0})       # half of the width, in metres
-inside = streets.sjoin(blocks[["geometry"]], predicate="within").index.unique()  # the roads that stop inside one block
+1. Find the roads that stop inside a block on the first map: a garden path, steps or a driveway. They are a part of
+   their block, so they get no street space.
+2. Make the street space: each other road with its width, less the buildings. A street never goes through a building.
+   `ends` gives the shape of the end of a road: `"flat"` (cut square, used here) or `"round"` (a half circle).
+3. Take the outline of the street space: the two edges of each street.
+4. Take the street space out of the extra areas (the parks and the sea), so that they do not fill the streets.
+5. Give momepy each building and area 10 cm smaller. Where a building touches a street edge, momepy otherwise puts
+   the street strip into the block of that building. This changes only the input: the blocks are made of momepy's
+   cells, so their shapes do not change.""")
+ch.code("""ends = "flat"                                                                   # the road ends: "flat" or "round"
+half = streets["width"] / 2                                                     # half of the width, in metres
+inside = streets.sjoin(blocks[["geometry"]], predicate="within").index.unique()  # 1. the roads that stop inside a block
 between = streets.drop(inside)                                                  # the roads between the blocks
-space = between.buffer(half.drop(inside)).union_all()                           # the street space: each road with its width
-shown = blocks.copy()
-shown["geometry"] = blocks.difference(space)                                    # the blocks without the street space
-shown = shown[~shown.is_empty]
-len(inside), round(space.intersection(land.union_all()).area / 1e6, 2), round(shown.area.sum() / 1e6, 2)    # roads inside, km²""")
-ch.md("""1,203 roads stop inside a block, so they stay in their block. The street space of the other roads covers
-0.42 km² of the land of Monaco. The blocks without the street space cover 1.53 km².""")
-ch.code("""block_map(shown, space)                                                          # the blocks less the street space""")
-ch.md("""The street space is white between the blocks. Where a footway runs along the edge of a building, for example on
-the piers of the port, its strip of 2 m cuts the block but not the building. So there the building shows outside its
-block.""")
+space = between.buffer(half.drop(inside), cap_style=ends).union_all().difference(buildings.union_all())    # 2. the street space
+edges = gpd.GeoSeries([space], crs=crs).explode(index_parts=False).boundary.explode(index_parts=False)   # 3. its outline
+cut = pd.concat([streets.geometry, edges])                                      # the lines that cut the land
+cut = gpd.GeoDataFrame(geometry=cut, crs=crs).reset_index(drop=True)
+extra2 = extra.difference(space).explode(index_parts=False)                      # 4. the extra areas less the streets
+extra2 = extra2[extra2.geom_type.eq("Polygon") & (extra2.area > 20)]
+things2 = gpd.GeoDataFrame(geometry=pd.concat([buildings.geometry, extra2]), crs=crs).reset_index(drop=True)
+things2 = gpd.GeoDataFrame(geometry=things2.buffer(-0.1), crs=crs)               # 5. 10 cm smaller: they touch no street
+things2 = things2[~things2.is_empty].reset_index(drop=True)
+len(inside), round(space.intersection(land).area / 1e6, 2)                      # roads inside a block, km² of street space""")
+ch.md("""1,871 roads stop inside a block on the first map, so they get no street space. The street space of the other
+roads covers 0.29 km² of the land of Monaco.""")
+ch.md("""The second cell runs the same three steps of momepy as before, with the new lines, and cuts out the water
+again.""")
+ch.code("""enc2 = momepy.enclosures(cut, limit=gpd.GeoSeries([frame], crs=crs))             # step 1
+cells2 = momepy.enclosed_tessellation(things2, enc2)                             # step 2
+blocks2, _ = momepy.generate_blocks(cells2, cut, things2)                        # step 3
+blocks2 = gpd.GeoDataFrame(geometry=blocks2.intersection(land), crs=crs).explode(index_parts=False)    # only the land
+blocks2 = blocks2[blocks2.area > 1].reset_index(drop=True)
+len(blocks2), round(blocks2.area.sum() / 1e6, 2)                                # blocks, km²""")
+ch.md("""momepy makes 448 blocks on the land, and they cover 1.71 km². No block covers the street space. There are more blocks than on the first map,
+because the street edges cut the land into more pieces.""")
+ch.code("""block_map(blocks2, space)                                                        # momepy's blocks with the street edges""")
+ch.md("""The street space is white between the blocks. Each block is a block of momepy: momepy made it with the street
+edges as input, so it stops at the edge of its streets. A building is never cut by the street space.""")
 
 
 ch.md("""## Try it yourself
