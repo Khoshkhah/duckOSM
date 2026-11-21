@@ -140,12 +140,18 @@ struct Router {
 
 #[pymethods]
 impl Router {
+    /// `weight`: `time`, `length` or a numeric column of `<mode>.edges`; `costs`: your own cost of each edge `(edge_id, cost)`
+    /// (then `weight` is only its name). `missing`: an edge with no own cost costs its `time`, or `skip`: it is not used.
     #[new]
-    fn new(py: Python<'_>, db: PathBuf, mode: String, weight: String) -> PyResult<Self> {
+    #[pyo3(signature = (db, mode, weight, costs=None, missing="time".to_string()))]
+    fn new(py: Python<'_>, db: PathBuf, mode: String, weight: String, costs: Option<Vec<(i64, f64)>>, missing: String) -> PyResult<Self> {
         let (con, graph) = py
             .detach(|| {
                 let con = duckosm_route::route::open(&db)?;
-                let g = duckosm_route::route::routing_graph(&con, &mode, &weight, &[])?;
+                let g = match own_costs(&con, &mode, &weight, costs, &missing)? {
+                    None => duckosm_route::route::routing_graph(&con, &mode, &weight, &[])?,
+                    Some(o) => duckosm_route::route::routing_graph_own(&con, &mode, &[], &o)?,
+                };
                 Ok::<_, String>((con, g))
             })
             .map_err(err)?;
@@ -236,12 +242,41 @@ fn route_multimodal(
     .map_err(err)
 }
 
+/// The own costs of `weight` and `costs`: None for `time` and `length` (the router of today), else the costs of a column or
+/// the given costs.
+fn own_costs(con: &duckdb::Connection, mode: &str, weight: &str, costs: Option<Vec<(i64, f64)>>, missing: &str) -> Result<Option<duckosm_route::route::Own>, String> {
+    let skip = match missing {
+        "time" => false,
+        "skip" => true,
+        m => return Err(format!("missing must be 'time' or 'skip', not {m:?}")),
+    };
+    let costs = match costs {
+        Some(c) => c.into_iter().collect(),
+        None if weight == "time" || weight == "length" => return Ok(None),
+        None => duckosm_route::route::column_costs(con, mode, weight)?,
+    };
+    Ok(Some(duckosm_route::route::Own { costs, skip }))
+}
+
 #[pyfunction]
 #[allow(clippy::too_many_arguments)]
-fn route_points(py: Python<'_>, db: PathBuf, a: (f64, f64), b: (f64, f64), mode: String, weight: String, radius_m: f64, access_kmh: f64) -> PyResult<String> {
+#[pyo3(signature = (db, a, b, mode, weight, radius_m, access_kmh, costs=None, missing="time".to_string()))]
+fn route_points(
+    py: Python<'_>,
+    db: PathBuf,
+    a: (f64, f64),
+    b: (f64, f64),
+    mode: String,
+    weight: String,
+    radius_m: f64,
+    access_kmh: f64,
+    costs: Option<Vec<(i64, f64)>>,
+    missing: String,
+) -> PyResult<String> {
     py.detach(|| {
         let con = duckosm_route::route::open(&db)?;
-        duckosm_route::points::route_points(&con, a, b, &mode, &weight, radius_m, access_kmh)
+        let own = own_costs(&con, &mode, &weight, costs, &missing)?;
+        duckosm_route::points::route_points_own(&con, a, b, &mode, &weight, own.as_ref(), radius_m, access_kmh)
     })
     .map(|v| text(&v))
     .map_err(err)

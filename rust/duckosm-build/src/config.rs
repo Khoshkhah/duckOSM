@@ -97,7 +97,7 @@ const VALIDATION: [&str; 7] = [
 ];
 const REPORT: [&str; 1] = ["enabled"];
 const VIZ: [&str; 2] = ["enabled", "basemap"];
-const MULTIMODAL: [&str; 3] = ["enabled", "transfer_s", "transfer_costs"];
+const MULTIMODAL: [&str; 5] = ["enabled", "transfer_s", "transfer_costs", "node_costs", "only_listed_nodes"];
 /// The area's DEM, its ground reference (docs/concepts/ground-reference.md). The command line `--dem` wins.
 const ELEVATION: [&str; 5] = ["dem", "product", "vertical_datum", "license", "reference"];
 
@@ -611,6 +611,12 @@ pub fn read(path: &Path, pbf_is_cut: bool, _strict: bool) -> Result<FromConfig, 
             boundary_cells,
             transfer_s: multimodal.f64("transfer_s", 60.0)?,
             transfer_costs,
+            node_costs: match multimodal.get("node_costs") {
+                None | Some(Yaml::Null) => None,
+                Some(Yaml::String(p)) => Some(PathBuf::from(p)),
+                Some(_) => return Err("multimodal.node_costs: must be the path of a CSV or Parquet file".into()),
+            },
+            only_listed_nodes: multimodal.bool("only_listed_nodes", false)?,
         },
         viz: viz_on,
         ..Params::default()

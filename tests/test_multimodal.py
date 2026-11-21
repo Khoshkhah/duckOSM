@@ -171,6 +171,59 @@ def test_transfer_cost_overrides_are_per_direction():
     assert costs == {"walking->driving": 120.0, "driving->walking": 15.0}
 
 
+def _two_junctions():
+    """_mm_db with a second shared junction 30 (driving 30->40, edge 202)."""
+    con = _mm_db()
+    _add_node(con, "driving", 30, 2, 0)
+    _add_edge(con, "driving", 202, 30, 40, 10, x0=2, y0=0, x1=1, y1=1)
+    return con
+
+
+def test_node_costs_set_the_cost_at_each_junction(tmp_path):
+    con = _two_junctions()
+    f = tmp_path / "nodes.csv"
+    f.write_text("node_id,cost_s,from_mode,to_mode\n20,300,,\n20,5,walking,driving\n30,0,,\n")
+    _mm(con, "--transfer-cost", 60, "--node-costs", f)
+    costs = {(n, a): c for n, a, c in con.execute("SELECT node_id, from_mode, cost_s FROM mm.transfers").fetchall()}
+    # a row with modes wins over a row without; junction 30 costs 0 in both directions
+    assert costs == {(20, "walking"): 5.0, (20, "driving"): 300.0, (30, "walking"): 0.0, (30, "driving"): 0.0}
+    # walk 10->20 (50) and park at 20 (5), drive 20->40 (10)
+    r = route_multimodal(con, 10, 40, start_mode="walking", end_mode="driving")
+    assert r["transfers"][0]["node_id"] == 20 and r["time_s"] == 50 + 5 + 10
+
+
+def test_node_costs_change_the_route(tmp_path):
+    """A high cost at junction 20 moves the change of mode to junction 30."""
+    con = _two_junctions()
+    f = tmp_path / "nodes.csv"
+    f.write_text("node_id,cost_s\n20,1000\n")
+    _mm(con, "--transfer-cost", 60, "--node-costs", f)
+    r = route_multimodal(con, 10, 40, start_mode="walking", end_mode="driving")
+    assert r["transfers"][0]["node_id"] == 30 and r["time_s"] == 50 + 50 + 60 + 10
+
+
+def test_only_listed_nodes(tmp_path):
+    con = _two_junctions()
+    f = tmp_path / "parks.csv"
+    f.write_text("node_id,cost_s,from_mode,to_mode\n30,120,walking,driving\n")
+    _mm(con, "--node-costs", f, "--only-listed-nodes")
+    assert con.execute("SELECT node_id, from_mode, to_mode, cost_s FROM mm.transfers").fetchall() == [
+        (30, "walking", "driving", 120.0)]
+
+
+def test_node_costs_bad_files(tmp_path):
+    f = tmp_path / "bad.csv"
+    f.write_text("node,cost_s\n20,1\n")
+    with pytest.raises(ValueError, match="no column node_id"):
+        _mm(_mm_db(), "--node-costs", f)
+    f.write_text("node_id,cost_s\n20,-1\n")
+    with pytest.raises(ValueError, match="0 or more"):
+        _mm(_mm_db(), "--node-costs", f)
+    f.write_text("node_id,cost_s\n20,1\n20,2\n")
+    with pytest.raises(ValueError, match="two costs"):
+        _mm(_mm_db(), "--node-costs", f)
+
+
 def test_transfers_route_through_walking_only():
     """3-mode db: transfers connect walking<->driving and walking<->cycling, never driving<->cycling."""
     con = _new_db(modes=("walking", "driving", "cycling"))
@@ -281,6 +334,28 @@ def test_route_unknown_endpoint_raises():
 
 
 # ---- config --------------------------------------------------------------------------
+
+def test_config_node_costs_monaco(tmp_path):
+    """`multimodal.node_costs` and `only_listed_nodes` in a build config (the Rust build) on Monaco."""
+    data = Path(__file__).parent / "data"
+
+    def build(name, extra=""):
+        cfg = tmp_path / f"{name}.yaml"
+        cfg.write_text(f"name: {name}\noutput_path: {tmp_path}/{name}.duckdb\n"
+                       f"source: {{type: pbf, pbf_path: {data}/monaco.osm.pbf}}\nboundary: {{path: {data}/monaco.geojson}}\n"
+                       "modes: [driving, walking]\noptions: {sea: false, levels: false, build_features: false}\n"
+                       f"multimodal: {{enabled: true{extra}}}\n")
+        r = subprocess.run([sys.executable, "-m", "duckosm", "build", "--config", str(cfg)], capture_output=True, text=True)
+        assert r.returncode == 0, r.stderr
+        return duckdb.connect(str(tmp_path / f"{name}.duckdb"), read_only=True)
+
+    node = build("first").execute("SELECT min(node_id) FROM mm.transfers").fetchone()[0]
+    f = tmp_path / "parks.csv"
+    f.write_text(f"node_id,cost_s,from_mode,to_mode\n{node},7,walking,driving\n")
+    con = build("second", f", node_costs: {f}, only_listed_nodes: true")
+    assert con.execute("SELECT node_id, from_mode, to_mode, cost_s FROM mm.transfers").fetchall() == [
+        (node, "walking", "driving", 7.0)]
+
 
 def test_config_multimodal_block(tmp_path):
     y = tmp_path / "c.yaml"
