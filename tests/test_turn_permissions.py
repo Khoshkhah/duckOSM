@@ -66,7 +66,7 @@ def test_sumo_writes_the_permissions(tmp_path):
         _find_netconvert()
     except Exception:
         pytest.skip("netconvert not installed (pip install duckosm[sumo])")
-    to_sumo(_db(), str(tmp_path), net_name="p")
+    to_sumo(_db(), str(tmp_path), net_name="p", run_netconvert=True)
     con_xml = (tmp_path / "p.con.xml").read_text()
     assert re.search(r'from="1" to="2" fromLane="\d+" toLane="\d+" allow="bus coach taxi"', con_xml)   # the left, buses and taxis only
     assert re.search(r'from="1" to="4" fromLane="\d+" toLane="\d+" disallow="trailer truck"', con_xml)  # straight on, no lorries
@@ -117,7 +117,7 @@ def test_sumo_applies_a_via_way_restriction_in_a_joined_junction(tmp_path):
         _find_netconvert()
     except Exception:
         pytest.skip("netconvert not installed (pip install duckosm[sumo])")
-    out = to_sumo(_split_junction(), str(tmp_path), net_name="v", config={"junctions.join": "true"})
+    out = to_sumo(_split_junction(), str(tmp_path), net_name="v", config={"junctions.join": "true"}, run_netconvert=True)
     assert out["n_path_restrictions"] == 1
     con_xml = (tmp_path / "v.con.xml").read_text()
     assert re.search(r'from="11" to="14" fromLane="\d+" toLane="\d+" allow="bus coach"', con_xml)   # the left: buses only
