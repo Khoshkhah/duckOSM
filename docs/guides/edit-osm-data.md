@@ -3,7 +3,7 @@
 The editor **Edit OSM data** corrects the OSM data of an area on a map and writes the corrections to a fixes file. Each build reads the file.
 
 ```bash
-duckosm edit monaco.duckdb
+duckosm edit monaco.duckdb --load osm_fixes.yaml --save osm_fixes_v2.yaml
 ```
 
 ## The editor
@@ -11,14 +11,35 @@ duckosm edit monaco.duckdb
 | Where | How |
 |---|---|
 | [duckOSM Studio](https://khoshkhah.github.io/duckosm-studio/) | the step **Edit OSM data**, after a build with **Layers** on; **Download** saves the file |
-| your computer | `duckosm edit DB` opens the page at `http://127.0.0.1:8790/` and saves each change in the file at once |
+| your computer | `duckosm edit DB` opens the page at `http://127.0.0.1:8790/`; after the first **Save**, it saves each change in the save file at once |
 
 | Option of `duckosm edit` | Does | Default |
 |---|---|---|
-| `--fixes FILE` | the fixes file; the first change makes it | `osm_fixes.yaml` beside the database |
+| `--load FILE` | a fixes file that the page reads into its list; the page does not write it | none: the list is empty |
+| `--save FILE` | the fixes file that the page writes, each change at once; it can be the `--load` file; the first change makes it | none: the first **Save** asks for the file |
+| `--fixes FILE` | the old name of `--load FILE --save FILE`; it goes in a later release | |
 | `--port PORT` | the port of the page on `127.0.0.1` | `8790` |
 
-![The page of duckosm edit: the panel Edit OSM data at the left, the roads of the database on the base map, tilted, with the buildings in 3D](../images/edit-page.png)
+duckOSM does not choose a name or a folder for a fixes file. You choose the two files, so you can load a base file and save
+variants of it, and the base file does not change.
+
+## The files
+
+The lines over the tabs show the two files: **Loaded: osm_fixes.yaml** and **Saving to: osm_fixes_v2.yaml**, or **not chosen yet**.
+
+| Button | Does |
+|---|---|
+| **Open** | load another fixes file into the list; it asks first when the list has changes. The save file is then not chosen |
+| **Save** | write the list to the save file; with no save file, it asks for one. After that, each change goes into the file at once |
+| **Save as** | write the list to another file, which is then the save file |
+
+On your computer, a file name is a path on the computer that runs Python or `duckosm edit`, relative to the folder where it
+runs. In duckOSM Studio, **Open** reads a file from your computer and **Save** downloads the file.
+
+When the database was built with a fixes file, the page shows **Built with data/osm_fixes.yaml. Load it?** The page does not load
+it by itself. The first write to a file that exists keeps a copy of it as `FILE.bak`.
+
+![The page of duckosm edit: the panel Edit OSM data at the left with the two files over the tabs and Boulevard Charles III picked, and the roads of the database on the base map, tilted](../images/edit-page.png)
 
 | Tab | What you change | Key in the file |
 |---|---|---|
@@ -50,7 +71,7 @@ In the **Turn** tab, the **From** road is blue, the roads that leave the junctio
 | **Add a file** | add the changes of another fixes file; for one object, the later change stays |
 | **Delete all changes** | delete every change from the list and the file; it asks first |
 | **Changes on the map** | show or hide your changes on the map |
-| **Build again** | build the database again with the file; off when the database has no record of its build (build it with `duckosm build -c`) |
+| **Build again** | build the database again with the save file; off when the database has no record of its build (build it with `duckosm build -c`). The database then records the save file, so `net.fixes` and `net.rebuild()` find it |
 
 The details of the checks and of each record: [on GitHub](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/edit_osm_data_details.md).
 
@@ -127,7 +148,8 @@ A wall `type` is `front`, `back`, `side`, `party` or `court`. The result is in [
 
 ## From Python
 
-`duckosm.fixes` writes the same file ([reference](../reference/sdk/fixes.md)).
+`duckosm.fixes` writes the same file ([reference](../reference/sdk/fixes.md)). The changes stay in memory until
+`fixes.save("osm_fixes.yaml")`.
 
 | Editor | Python |
 |---|---|
@@ -135,8 +157,9 @@ A wall `type` is `front`, `back`, `side`, `party` or `court`. The result is in [
 | **Road** tab: one-way, lanes, layer | `fixes.set(way=..., oneway=True, lanes=2, layer=1)` |
 | **Road** tab: delete the road | `fixes.remove(way=...)` |
 | remove the way from one network | `fixes.exclude(way=..., modes=["driving"])` |
+| **Save**, **Save as** | `fixes.save("osm_fixes.yaml")` |
 | **Changes**: **Build again** | `net.rebuild(fixes=fixes)` |
-| the editor on a map | `net.edit()` |
+| the editor on a map | `net.edit(load="osm_fixes.yaml", save="osm_fixes_v2.yaml")` |
 | the edges that changed | `net.diff(fixed)` |
 
 ## Where the fixes are used

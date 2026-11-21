@@ -4,7 +4,8 @@
 // an "Add to changes" button: nothing is in the rules before it. On the map an edited object is amber, the selected one is blue. A road of the map gets the
 // colour from roadstyle's highlight sets (ROAD_SETS); a building, a node, a junction and a new road from the editor's own layers.
 // initFixesPanel(ctx) draws the panel in roadstyle's editor frame (ctx.frame: the host's panel and back button) and returns what the host page calls: load(),
-// text(), open(), close(), restore(), rebuilt(). The host page gives what it owns in `ctx` (README.md).
+// text(), open(), close(), restore(), rebuilt(), files(), saveFile(). The host page gives what it owns in `ctx` (README.md). Over the tabs, the panel shows
+// the fixes file that it loaded and the file that it saves to, with Open, Save and Save as. The person chooses both files: the panel has no default file.
 import * as F from "./fixes.js";
 
 const AMBER = "#f59e0b", BLUE = "#2563eb";
@@ -272,6 +273,8 @@ export async function initFixesPanel(ctx) {
   new MutationObserver(paintFoot).observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ["hidden", "class"] });
   const presets = await fetch(new URL("presets.json", import.meta.url)).then((r) => r.json());
   let doc = {}, hist = [], future = [];
+  // the fixes files: the one that the list came from (`loaded`) and the one that Save writes (`saving`); null: none yet. `written`: the text of the save file
+  let loaded = ctx.loaded ?? null, saving = ctx.saving ?? null, written = "";
   let sel = null, data = null, draft = {}, touched = new Set(), kind = "road", token = 0;   // the state of the tab `kind` (Road, Building or Node)
   let ask = false;                             // the picked object has records in the changes, and the box waits for Edit it or Delete it (the form waits)
   let current = "road";                        // the tab that shows
@@ -1017,11 +1020,97 @@ export async function initFixesPanel(ctx) {
       r.renumbered ? `${plural(r.renumbered, "new road")} got a new ID.` : "",
       "Undo takes the file back."].filter(Boolean).join(" "), 12000);
   };
-  $("fix-download").onclick = () => {
-    const a = Object.assign(document.createElement("a"), { download: "osm_fixes.yaml", href: URL.createObjectURL(new Blob([text() ?? ""], { type: "text/yaml" })) });
+  const baseName = (p) => String(p).split(/[\\/]/).pop();
+  function download(name, txt) {
+    const a = Object.assign(document.createElement("a"), { download: baseName(name), href: URL.createObjectURL(new Blob([txt], { type: "text/yaml" })) });
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href));
+  }
+  $("fix-download").onclick = () => download(saving ?? loaded ?? "osm_fixes.yaml", text() ?? "");
+
+  // ---- the fixes files (Kaveh, 2026-11-21): Open loads a file into the list, Save writes the list to the save file, Save as chooses another save file.
+  // The host gives `ctx.files`: { paths: a name is a path that the person types (duckosm edit: on the computer that runs Python), auto: each change is
+  // written at once, open(path) gives {name, text}, saveTo(path) gives the name of the new save file, write(name, text) }. Without it (duckOSM Studio
+  // in the browser), Open reads a file of this computer and Save downloads the file.
+  const store = ctx.files ?? {
+    paths: false, auto: false,
+    open: () => new Promise((ok) => {
+      const input = $("fix-open-file");
+      input.onchange = async () => { const f = input.files?.[0]; input.value = ""; ok(f ? { name: f.name, text: await f.text() } : null); };
+      input.oncancel = () => ok(null);
+      input.click();
+    }),
+    saveTo: async (name) => name,
+    write: async (name, txt) => download(name, txt),
   };
+  fr.head.insertAdjacentHTML("afterbegin", `<div id="fix-files" class="small">
+    <p id="fix-names">Loaded: <code id="fix-loaded"></code><br>Saving to: <code id="fix-saving"></code></p>
+    <p id="fix-built" hidden>Built with <code></code>. <a href="#" class="link" role="button" id="fix-built-load">Load it?</a></p>
+    <div class="row"><button id="fix-open" type="button">Open</button><button id="fix-file-save" type="button">Save</button><button id="fix-save-as" type="button">Save as</button><input id="fix-open-file" type="file" accept=".yaml,.yml" hidden></div>
+    <form id="fix-path" hidden><label for="fix-path-in" id="fix-path-label"></label><div class="row"><input id="fix-path-in" type="text" spellcheck="false" autocomplete="off"><button class="sb-primary" type="submit" id="fix-path-ok">OK</button><button type="button" id="fix-path-no">Cancel</button></div></form>
+  </div>`);
+  function paintFiles() {
+    $("fix-loaded").textContent = loaded ?? "none";
+    $("fix-saving").textContent = saving ?? "not chosen yet";
+    $("fix-loaded").title = loaded ?? ""; $("fix-saving").title = saving ?? "";
+    const built = ctx.builtWith?.() ?? null, b = $("fix-built");
+    b.hidden = !built || built === loaded;
+    if (built) b.querySelector("code").textContent = built;
+  }
+  // the name of a file, in a text field over the tabs: a path relative to the folder of the server (duckosm edit), or the name of a download. null: Cancel
+  function askName(what, value) {
+    const form = $("fix-path"), input = $("fix-path-in");
+    $("fix-path-label").textContent = store.paths ? `${what}: a .yaml file on the computer that runs Python (relative to its folder)` : `${what}: the name of the file`;
+    $("fix-path-ok").textContent = what;
+    input.value = value ?? "";
+    form.hidden = false; input.focus(); input.select();
+    return new Promise((ok) => {
+      const done = (v) => { form.hidden = true; form.onsubmit = $("fix-path-no").onclick = null; ok(v); };
+      form.onsubmit = (e) => { e.preventDefault(); const v = input.value.trim(); if (v) done(v); };
+      $("fix-path-no").onclick = () => done(null);
+    });
+  }
+  async function openFile(path) {
+    const n = total();
+    if (n) {
+      const what = "Open another file?", more = `The list has ${plural(n, "change")}. They go from the list. Save them first to keep them.`;
+      if (!(window.rs?.confirm ? await window.rs.confirm({ title: what, text: more, ok: "Open" }) : confirm(`${what} ${more}`))) return;
+    }
+    const p = path ?? (store.paths ? await askName("Open", loaded ?? "") : undefined);
+    if (p === null) return;
+    let got;
+    try { got = await store.open(p); } catch (e) { return status(`Not opened: ${e.message}`, 10000); }
+    if (!got) return;
+    try { const d = F.parse(yaml, got.text); const bad = F.checkFile(d); if (bad) throw new Error(bad); }
+    catch (e) { return status(`${got.name} is not a fixes file: ${e.message.split("\n")[0]}. Nothing changed.`, 10000); }
+    saving = null;                                    // the list of another file does not go into the old save file: the first Save asks
+    load(got.text, got.name);
+    status(`Loaded ${plural(total(), "change")} from ${baseName(got.name)}.`, 6000);
+  }
+  async function saveFile(as = false) {
+    let name = saving;
+    if (as || !name) {
+      const p = await askName(as ? "Save as" : "Save", saving ?? loaded ?? "osm_fixes.yaml");
+      if (p === null) return null;
+      try { name = await store.saveTo(p); } catch (e) { status(`Not saved: ${e.message}`, 10000); return null; }
+    }
+    const t = text() ?? "";
+    try { await store.write(name, t); } catch (e) { status(`Not saved: ${e.message}`, 10000); return null; }
+    saving = name; written = t; paintFiles();
+    return name;
+  }
+  // each change goes into the save file at once (duckosm edit), when there is one
+  function autoWrite() {
+    const t = text() ?? "";
+    if (!store.auto || !saving || t === written) return;
+    written = t;
+    store.write(saving, t).catch((e) => status("The fixes file was not saved: " + e.message, 15000));
+  }
+  $("fix-open").onclick = () => openFile();
+  $("fix-file-save").onclick = () => saveFile(false);
+  $("fix-save-as").onclick = () => saveFile(true);
+  $("fix-built-load").onclick = () => openFile(ctx.builtWith());
+  paintFiles();
 
   // ---- the turns: the junctions at the end of a road, and a rule for each road that leaves one
   // the way that a turn goes, from the direction of the road at the end of the start road and the direction of the road that leaves: straight on within 30 degrees
@@ -1810,7 +1899,8 @@ export async function initFixesPanel(ctx) {
     paintBar();
     if (current === "turns" && !$("fix-turnsec").hidden) outgoing({ keep: false });
     const s = (x) => (x === 1 ? "" : "s");
-    ctx.onChange(n ? `${n} change${s(n)}: ${F.objects(doc).length} object${s(F.objects(doc).length)}, ${turns} turn rule${s(turns)}, ${faces} wall${s(faces)}, ${newWays} new road${s(newWays)}.` : "No fixes.", n);
+    ctx.onChange?.(n ? `${n} change${s(n)}: ${F.objects(doc).length} object${s(F.objects(doc).length)}, ${turns} turn rule${s(turns)}, ${faces} wall${s(faces)}, ${newWays} new road${s(newWays)}.` : "No fixes.", n);
+    autoWrite();
     if (!$("fix-changes").hidden) renderChanges();
     drawEdits();
     drawFaces();
@@ -1825,8 +1915,13 @@ export async function initFixesPanel(ctx) {
     if (total()) return 0;
     try { const t = localStorage.getItem(storeKey()); if (!t) return 0; doc = F.parse(yaml, t); F.stampMissing(doc, F.localTime()); hist = []; future = []; sync(); return total(); } catch { return 0; }
   }
-  function load(txt) {
-    try { doc = F.parse(yaml, txt); F.stampMissing(doc, F.localTime()); hist = []; future = []; persist(); sync(); if (sel && data) { draft = initialDraft(); renderForm(); } }
+  // the list from the text of a fixes file. `name`: the file that it came from (Loaded); when it is the save file, the load does not write it again
+  function load(txt, name) {
+    try {
+      doc = F.parse(yaml, txt); F.stampMissing(doc, F.localTime()); hist = []; future = [];
+      if (name !== undefined) { loaded = name; if (name === saving) written = text() ?? ""; paintFiles(); }
+      persist(); sync(); if (sel && data) { draft = initialDraft(); renderForm(); }
+    }
     catch (e) { status("The fixes file is not valid: " + e.message.split("\n")[0], 8000); }
   }
   // roadstyle's own map interaction while the editor is open (roadstyle's public functions only): no road popup (rs.holdPopup) and no select look
@@ -1875,5 +1970,5 @@ export async function initFixesPanel(ctx) {
   $("fix-apply").onclick = () => ctx.onBuild?.();
   addEventListener("beforeunload", (e) => { if (pendingList().length) e.preventDefault(); });          // the host page builds again (it reads text())
   setTab("road"); sync();
-  return { text, load, restore, open: openFrom, close, isOpen: open, rebuilt, select, tab: setTab, drawn: () => ({ ...drawnCount, lit: Object.fromEntries([...lit].map(([s, r]) => [s, r.length])) }), count: () => F.objects(doc).length + (doc.turn_restrictions ?? []).length + F.faceEdits(doc).length + F.newWays(doc).length };
+  return { text, load, restore, files: () => ({ loaded, saving }), saveFile, open: openFrom, close, isOpen: open, rebuilt, select, tab: setTab, drawn: () => ({ ...drawnCount, lit: Object.fromEntries([...lit].map(([s, r]) => [s, r.length])) }), count: () => F.objects(doc).length + (doc.turn_restrictions ?? []).length + F.faceEdits(doc).length + F.newWays(doc).length };
 }

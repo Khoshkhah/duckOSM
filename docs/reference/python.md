@@ -52,7 +52,7 @@ that names a module calls the function of that module, with the same other argum
 | [routing](sdk/routing.md) | `route(a, b, mode, weight)`, `route_points(a, b, mode)`, `routes(origins, destinations, mode)`, `k_shortest_paths(a, b, k, mode)`, `matrix(origins, destinations, mode)`, `isochrones(origins, minutes, mode)`, `accessibility(origins, targets, minutes, mode)`, `route_multimodal_points(a, b)`, `directions(route, mode)` |
 | [ml](sdk/ml.md) | `to_networkx(mode)`, `to_rustworkx(mode)` |
 | Exports ([sim](sdk/sim.md), [planning](sdk/planning.md), [hdmap](sdk/hdmap.md), [gis](sdk/gis.md)) | `to_sumo(out_dir, mode)`, `to_matsim(out_path, mode)`, `to_gmns(out_path, mode)`, `to_opendrive(out_path, mode)`, `to_gis(out, mode)` |
-| [fixes](sdk/fixes.md) | `fixes`, `rebuild(fixes=None, out=None)`, `diff(other, mode)`, `edit(fixes=None, port=None)` |
+| [fixes](sdk/fixes.md) | `fixes`, `rebuild(fixes=None, out=None)`, `diff(other, mode)`, `edit(load=None, save=None, port=8790)` |
 
 `ModeView` also has `save_map(path, **options)` and `summary()` for its mode. `Area` has `build(...)`, which gives a `Network`.
 

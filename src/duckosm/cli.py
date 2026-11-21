@@ -255,22 +255,30 @@ def admin(args):
 
 @main.command()
 @click.argument("db", type=DB_PATH)
-@click.option("--fixes", type=click.Path(dir_okay=False), default=None,
-              help="The fixes file (default: osm_fixes.yaml beside DB). It need not exist: the first change makes it.")
+@click.option("--load", type=click.Path(dir_okay=False), default=None,
+              help="A fixes file that the page reads into its list. The page does not write it.")
+@click.option("--save", type=click.Path(dir_okay=False), default=None,
+              help="The fixes file that the page writes, each change at once. It can be the --load file. "
+                   "It need not exist. With no --save, the first Save on the page asks for the file.")
+@click.option("--fixes", type=click.Path(dir_okay=False), default=None, help="Old name: --load FILE --save FILE.")
 @click.option("--port", type=int, default=8790, show_default=True, help="The port of the page on 127.0.0.1")
-def edit(db, fixes, port):
+def edit(db, load, save, fixes, port):
     """Edit the OSM data of DB on a page on your computer, and build again.
 
     \b
-    The page is roadstyle's dashboard of DB with the panel Edit OSM data. Each change goes into the
-    fixes file at once. Build again runs the build of DB again with the file.
+    The page is roadstyle's dashboard of DB with the panel Edit OSM data. The page reads the --load file and
+    writes each change into the --save file at once. Build again builds DB again with the save file.
     Example:
-        duckosm edit monaco.duckdb        # then open http://127.0.0.1:8790/
+        duckosm edit monaco.duckdb --load osm_fixes.yaml --save osm_fixes_v2.yaml
     """
     from duckosm.edit import serve
 
+    if fixes and (load or save):
+        raise click.UsageError("--fixes is the old name of --load and --save: give --fixes or --load/--save, not both")
+    if fixes:
+        click.echo("duckosm edit: --fixes FILE is an old name: use --load FILE --save FILE", err=True)
     try:
-        serve(db, fixes, port)
+        serve(db, fixes, port, load=load, save=save)
     except Exception as e:
         raise click.ClickException(str(e))
 

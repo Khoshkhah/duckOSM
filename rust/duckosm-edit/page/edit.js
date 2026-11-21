@@ -1,8 +1,9 @@
 // duckosm edit (docs/design/edit_page.md): the host of duckOSM's fixes editor (web/fixes_editor/) on roadstyle's standard dashboard. The page
 // is roadstyle's (the server made it from the database); this script puts the editor into the dashboard's panel and gives it what the host
 // gives in duckOSM Studio: the database (`duck`: the server runs each query on the database, read only), the map, js-yaml and the hooks. The
-// rules go to the fixes file on disk (PUT /api/fixes) with each change. Build again (POST /api/build) builds the database again with the file,
-// and the page loads again with the new network.
+// page reads the load file (GET /api/fixes) and writes the save file (PUT /api/fixes) with each change; Open (POST /api/open) and Save as
+// (POST /api/save-to) choose other files on the computer that runs the server. Build again (POST /api/build) builds the database again with the
+// save file, and the page loads again with the new network.
 (() => {
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
@@ -25,7 +26,7 @@
     const [info] = await Promise.all([api("info").then((r) => r.json()), script("https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js")]);
     document.head.append(Object.assign(document.createElement("link"), { rel: "stylesheet", href: "fixes_editor/fixes_panel.css" }));
     // the editor is in roadstyle's editor frame in the dashboard's panel (rs.frame): the page is the editor, so the frame has no back button. The
-    // title line has the name of the fixes file, and the head row has the line of state under the tabs.
+    // head row has the line of state under the tabs (the editor puts its files over it).
     const frame = (opts) => {
       // under `duckosm studio` the page is at /edit/ and the frame has a back button to the steps of Studio; `duckosm edit` has no page to go back to
       const studio = /\/edit\/$/.test(location.pathname);
@@ -39,7 +40,6 @@
         if (t.ok) window.rsGround({ ...a.ground, terrain: await t.arrayBuffer() });
       }).catch(() => {});
       if (studio) f.addEventListener("back", async () => { const n = (await (await api("info")).json()).name; location.href = `../?area=${encodeURIComponent(n)}`; });      // the steps, with this area
-      f.top.insertAdjacentHTML("beforeend", `<span class="small muted" title="${esc(info.fixes)}">${esc(info.fixes.split(/[\\/]/).pop())}</span>`);
       f.head.insertAdjacentHTML("beforeend", '<p id="fix-status" class="small" role="status" hidden></p>');
       return f;
     };
@@ -54,16 +54,19 @@
         return { toArray: () => rows.map((o) => ({ toJSON: () => o })) };
       },
     };
-    // the rules as the file has them (the panel's text), so that only a change writes the file; `blocked`: the file is not valid YAML, so the
-    // page does not write it (a write would lose it)
-    let saved = null, ready = false, blocked = "", queue = Promise.resolve();
-    const save = () => {
-      if (!ready || blocked) return;
-      const t = panel.text() ?? "";
-      if (t === saved) return;
-      saved = t;
-      queue = queue.then(() => api("fixes", { method: "PUT", body: t })).then(() => noteSaved(`Saved in ${info.fixes.split(/[\\/]/).pop()}.`))
-        .catch((e) => status("The fixes file was not saved: " + e.message, 15000));
+    // the editor's files are on the computer of the server: a name is a path there. The writes go one after the other (`queue`). `blocked`: the
+    // load file is not valid YAML, so the page writes nothing until the person opens or saves a file (a write to the same file would lose it)
+    let ready = false, blocked = "", queue = Promise.resolve();
+    const files = {
+      paths: true, auto: true,
+      open: async (path) => { const r = await (await api("open", { method: "POST", body: path })).json(); blocked = ""; return r; },
+      saveTo: async (path) => { const r = (await (await api("save-to", { method: "POST", body: path })).json()).name; blocked = ""; return r; },
+      write: (name, t) => {
+        if (!ready || blocked) return Promise.resolve();
+        const w = queue.then(() => api("fixes", { method: "PUT", body: t })).then(() => noteSaved(`Saved in ${name.split(/[\\/]/).pop()}.`));
+        queue = w.catch(() => {});
+        return w;
+      },
     };
     // the line of state says that the file is saved, after the message that shows (the result of Add a file, for example), not in its place
     const noteSaved = (msg) => {
@@ -71,6 +74,7 @@
       status(now ? `${now} ${msg}` : msg, now ? 10000 : 2500);
     };
     async function onBuild() {
+      if (!panel.files().saving && !(await panel.saveFile())) return;          // Build again uses the save file: choose it first
       await queue;
       const b = $("fix-apply");
       b.disabled = true; b.classList.add("busy");
@@ -86,18 +90,15 @@
       }
     }
     const panel = await initFixesPanel({ frame, duck, map: window.map, yaml: window.jsyaml, status, areaKey: () => "edit:" + info.db,
-      onChange: save, onBuild, buildOff: () => info.build_off, changesNote: `Each change is saved in <code title="${esc(info.fixes)}">${esc(info.fixes.split(/[\\/]/).pop())}</code> at once.` });
-    let fileText = "";
+      files, loaded: info.load, saving: info.save, builtWith: () => info.built_with,
+      onBuild, buildOff: () => info.build_off, changesNote: "After the first Save, each change goes into the save file at once." });
     if (info.exists) {
-      fileText = await (await api("fixes")).text();
+      const fileText = await (await api("fixes")).text();
       try { window.jsyaml.load(fileText); } catch (e) { blocked = e.message.split("\n")[0]; }
-      if (blocked) status(`The fixes file is not valid YAML: ${blocked}. The page does not change it. Correct it, then load the page again.`, 0);
-      else panel.load(fileText);
+      if (blocked) status(`The fixes file is not valid YAML: ${blocked}. The page does not change it. Correct it, then load the page again, or open another file.`, 0);
+      else panel.load(fileText, info.from);                // the load file, or the save file after this server wrote it
     }
-    // the load gives a record with no time the time of now (`changed`): then the text differs from the file, and save() writes it
-    saved = fileText.trim() ? fileText : "";
     ready = true;
-    save();
     await panel.open();
     // the template's hide button hides the panel: the editor closes too (nothing of it stays selected on the map); show opens it again
     $("sb-hide")?.addEventListener("click", () => panel.close());

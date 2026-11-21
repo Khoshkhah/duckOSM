@@ -56,6 +56,8 @@ def test_edit_save_box_and_build(monaco, page_url):
     con = duckdb.connect(str(monaco), read_only=True)
     lanes = {r[0] for r in con.execute(f"SELECT lanes FROM driving.edges WHERE osm_id = {ROAD}").fetchall()}
     assert lanes == {3}, lanes
+    record = con.execute("SELECT build_config FROM main.visualization_metadata").fetchone()[0]
+    assert f"osm_overrides: '{fixes}'" in record, "the build's record names the save file (net.fixes, net.rebuild)"
     con.close()
 
 
@@ -124,6 +126,53 @@ def test_add_a_file(monaco, page_url, tmp_path):
         assert page.evaluate("window.fixesPanel.count()") == before
         assert not errors, errors
         browser.close()
+
+
+def test_load_and_save_are_two_files(monaco, tmp_path):
+    """--load only (Kaveh, 2026-11-21): the page reads the file and never writes it. A change waits for the save file; Save asks for a path (relative
+    to the folder of the server), and then each change goes into that file. Open another file: a confirm, the list of that file, and no save file."""
+    base, variant, other = tmp_path / "base.yaml", tmp_path / "variant.yaml", tmp_path / "other.yaml"
+    base.write_text(f"overrides:\n  - {{osm_id: {ROAD}, lanes: 2, changed: '2020-01-01T10:00:00+01:00'}}\n")
+    other.write_text("extra:\n  tag_edits:\n    - {type: node, id: 21912099, set: {highway: stop}}\n")
+    before = base.read_text()
+    proc, url = _serve(monaco, ["--load", "base.yaml"], cwd=tmp_path)
+    try:
+        with pw.sync_playwright() as p:
+            browser = p.chromium.launch()
+            page, errors = _open(browser, url)
+            assert page.inner_text("#fix-loaded") == "base.yaml" and page.inner_text("#fix-saving") == "not chosen yet"
+            assert page.evaluate("window.fixesPanel.count()") == 1
+            _pick_road(page, ROAD)
+            page.click("#fix-inchg [data-ask=edit]")
+            page.fill("#fixf-lanes", "4")
+            page.click("#fix-save")
+            time.sleep(1)
+            assert base.read_text() == before and not variant.exists(), "no save file: nothing is written"
+            page.click("#fix-file-save")
+            assert page.input_value("#fix-path-in") == "base.yaml"
+            page.fill("#fix-path-in", "variant.yaml")
+            page.click("#fix-path-ok")
+            page.wait_for_function("document.getElementById('fix-saving').textContent === 'variant.yaml'", timeout=10_000)
+            for _ in range(50):
+                if variant.exists() and "lanes: 4" in variant.read_text():
+                    break
+                time.sleep(0.1)
+            assert "lanes: 4" in variant.read_text() and base.read_text() == before
+            # Open another file: the list has changes, so the page asks first; then the save file is not chosen any more
+            page.once("dialog", lambda d: d.accept())          # the browser's confirm, on a roadstyle rev without rs.confirm
+            page.click("#fix-open")
+            if page.evaluate("!!window.rs?.confirm"):
+                page.click("dialog.rs-dialog button[value='1']")
+            page.fill("#fix-path-in", "other.yaml")
+            page.click("#fix-path-ok")
+            page.wait_for_function("document.getElementById('fix-loaded').textContent === 'other.yaml'", timeout=10_000)
+            assert page.inner_text("#fix-saving") == "not chosen yet" and page.evaluate("window.fixesPanel.count()") == 1
+            assert not errors, errors
+            browser.close()
+    finally:
+        proc.terminate()
+        proc.wait(10)
+    assert "lanes: 4" in variant.read_text() and "highway: stop" not in variant.read_text(), "Open does not write the old save file"
 
 
 def test_phone(monaco, page_url):

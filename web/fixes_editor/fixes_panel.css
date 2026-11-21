@@ -108,3 +108,9 @@ html.rs-phone #fix-panel :is(.row, .wallbar) button { min-height: 44px; }      /
 #fix-panel .nrules { margin-left: 6px; padding: 0 6px; border-radius: 99px; background: rgba(245, 158, 11, 0.2); color: #b45309; font-size: 11px; font-weight: 600; white-space: nowrap; }
 #fix-panel .chgtop .muted { font-weight: 400; }      /* the kind and the id after the name of a change */
 #fix-panel .chgtime { margin-top: 2px; }                /* the time of a change (docs/design/fixes_editor_time_merge.md) */
+/* the fixes files over the tabs: "Loaded: … · Saving to: …", Open, Save, Save as, and the text field of a file name */
+#fix-panel #fix-files p { margin: 0 0 4px; overflow-wrap: anywhere; }
+#fix-panel #fix-files .row { margin-top: 4px; }
+#fix-panel #fix-path { margin-top: 6px; }
+#fix-panel #fix-path label { color: var(--mut); }
+#fix-panel #fix-path input { flex: 1 1 12em; min-width: 0; }

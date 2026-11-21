@@ -857,17 +857,25 @@ class Network(os.PathLike):
         from duckosm.fixes import diff
         return diff(self, other, mode=mode)
 
-    def edit(self, fixes=None, port: int = 8790) -> str:
+    def edit(self, load=None, save=None, port: int = 8790, *, fixes=None) -> str:
         """Open ``duckosm edit`` on the file: the editor of the fixes, on a map. The server runs in the background while
-        Python runs; each change is saved in ``fixes`` at once (default: the fixes file of the build, else
-        ``osm_fixes.yaml`` beside the file). Returns the URL of the page.
+        Python runs. Returns the URL of the page.
 
-        >>> net.edit()"""
+        ``load``: a fixes file that the page reads into its list. The page does not write it. ``save``: the fixes file
+        that the page writes, each change at once. It can be the ``load`` file, and it need not exist. With no ``save``,
+        the first Save on the page asks for the file. A relative path is relative to the folder where Python runs.
+        The library never chooses a fixes file: with neither, the list is empty. ``fixes``: old name, the same as
+        ``load=fixes, save=fixes``.
+
+        >>> net.edit(load="data/osm_fixes.yaml", save="data/osm_fixes_v2.yaml")"""
         from duckosm import _rust
         from duckosm.edit import _Db
-        if fixes is None:
-            fixes = self._meta().get("fixes") or self.path.with_name("osm_fixes.yaml")
-        return _rust.edit(str(self.path.resolve()), str(Path(fixes).resolve()), port, _Db(self.path.resolve()))
+        if fixes is not None:
+            import warnings
+            warnings.warn("net.edit(fixes=F) is an old name: use net.edit(load=F, save=F)", DeprecationWarning, stacklevel=2)
+            load = save = fixes
+        path = lambda f: None if f is None else str(Path(f).resolve())  # noqa: E731
+        return _rust.edit(str(self.path.resolve()), path(load), path(save), port, _Db(self.path.resolve()))
 
     def to_gis(self, out, mode: str | None = None, progress: Any = None, **kwargs) -> dict:
         """:func:`duckosm.gis.to_gis`: a GeoPackage, GeoParquet or shapefiles (``mode=None``: all modes).
