@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **`duckosm.hdmap.surfaces(gmns_db)`: the road surfaces as polygons.** It gives two GeoDataFrames: one polygon for each
+  lane (its line to the edge of the junction, with the lane width) and one for each junction (the union of its lane
+  connectors). DuckDB makes the polygons in the UTM zone of the area. Monaco: 3,318 lanes and 1,727 junctions.
 - **The SUMO export does not run netconvert by default, and it has the traffic lights, the stop signs and the bus stops.**
   `to_sumo` and `duckosm sumo` write the plain XML and the `.netccfg`; the user changes the `.netccfg` and runs
   `netconvert -c`. `run_netconvert=True` (`--netconvert`) runs it as before. The `.nod.xml` has `type="traffic_light"`
