@@ -40,68 +40,211 @@ database, the map, the routes and every export show the corrected data.
 
 ch.md("""## The format of the file
 
-A fixes file is a small text file in YAML. It has five keys, one for each kind of record. This file has one record of
-each kind:
+### What the file holds
+
+A fixes file is a list of your corrections of the OSM data. It puts the corrections in groups, one group for each kind
+of correction:
+
+| Group | Holds |
+|---|---|
+| `overrides` | the rules for OSM ways: change the tags, one-way or lanes of a way, or remove the way |
+| `new_ways` | the roads that OSM does not have |
+| `turn_restrictions` | the turns that a driver cannot make, or must make |
+| `extra` → `tag_edits` | the changes of the tags of a node, a way or a relation |
+| `extra` → `building_faces` | the type and the door of each wall of a building |
+
+The file is in YAML, a text format. You can read it in any text editor.
+
+### YAML in three rules
+
+**1. `key: value` is one field.**
 
 ```yaml
-overrides:                       # change an OSM way, by its id
-  - osm_id: 4230891
-    tags: {maxspeed: "10"}
-    note: road works
-  - {osm_id: 4230100, oneway: true}
-  - {osm_id: 503462470, lanes: 3, turn_lanes_forward: left|through|through}
-  - {osm_id: 4229577, exclude_modes: [driving]}
-  - {osm_id: 4229578, remove: true}
-new_ways:                        # add a road that OSM does not have
-  - id: 9000000000000
-    nodes: [21911886, [7.4235072, 43.7371133], 21914340]
-    tags: {highway: service, name: New lane}
-turn_restrictions:               # forbid or force a turn
-  - {from_way: 4230100, via_node: 21924057, to_way: 4230099, restriction: no_left_turn}
-extra:
-  tag_edits:                     # set or delete the tags of a way, a node or a relation
-    - {type: node, id: 21924057, set: {highway: traffic_signals}}
-    - {type: relation, id: 393226, delete: [building]}
-  building_faces:                # the type and the door of a wall of a building
-    - {building: 23715051, from_node: 256791677, to_node: 256791676, type: front, door: main}
+osm_id: 4230891
 ```
 
-You need only the keys that you use. A file with one rule of `overrides` is a correct file. A record for an object
-that is not in the area does nothing, so one file can hold the fixes of all your areas. The editing page adds
-`changed`, the time of the change, to each record. The build does not read it.
+**2. A line that starts further right belongs to the line above it.**
+
+```yaml
+tags:
+  maxspeed: '10'
+```
+
+`maxspeed` has two spaces more than `tags`, so `maxspeed` is inside `tags`: it is a tag of the way.
+
+**3. A line that starts with `- ` (a dash and a space) begins a new item of a list.**
+
+```yaml
+overrides:
+- osm_id: 4230891
+- osm_id: 4230100
+```
+
+Here `overrides` holds a list of two items. The lines under an item, with two spaces more than its dash, belong to that
+item.
+
+YAML uses the spaces at the start of a line to show what is inside what, as Python does. Use spaces, never the Tab key.
+
+### The skeleton of a fixes file
+
+Each group is one key at the start of a line, and each key holds a list. This is a fixes file with five empty lists
+(`[]` is an empty list):
+
+```yaml
+overrides: []
+new_ways: []
+turn_restrictions: []
+extra:
+  tag_edits: []
+  building_faces: []
+```
+
+You need only the groups that you use. A file with only `overrides` is a correct file.
+
+### Build the file step by step
+
+**Step 1: one rule.** Road works on Boulevard Louis II, the OSM way 4230891, lower its speed limit to 10 km/h. The rule
+names the way and sets its tag `maxspeed`:
+
+```yaml
+overrides:
+- osm_id: 4230891
+  tags:
+    maxspeed: '10'
+  note: road works
+```
+
+The build now sees the way as if OSM had `maxspeed=10`. The `note` is your text. The build does not read it.
+
+**Step 2: a second rule.** Way 4230100 is one-way in the real world. Add a new item under the same `overrides:`:
+
+```yaml
+overrides:
+- osm_id: 4230891
+  tags:
+    maxspeed: '10'
+  note: road works
+- osm_id: 4230100
+  oneway: true
+```
+
+**Step 3: remove a way.** Way 4229578 does not exist in the real world. A rule with `remove: true` takes it out of the
+build: out of the network, the base map and every export. Add it as one more item:
+
+```yaml
+- osm_id: 4229578
+  remove: true
+```
+
+To take a way out of some networks only, use `exclude_modes`. For example, a street that is closed to cars but open
+to people on foot:
+
+```yaml
+- osm_id: 4229577
+  exclude_modes:
+  - driving
+```
+
+**Step 4: the other groups.** Each group has its own list. A new road, a forbidden turn and a traffic signal on a node
+are one item in each of three lists:
+
+```yaml
+new_ways:
+- id: 9000000000000
+  nodes:
+  - 21911886
+  - [7.4235072, 43.7371133]
+  - 21914340
+  tags:
+    highway: service
+    name: New lane
+turn_restrictions:
+- from_way: 4230100
+  via_node: 21924057
+  to_way: 4230099
+  restriction: no_left_turn
+extra:
+  tag_edits:
+  - type: node
+    id: 21924057
+    set:
+      highway: traffic_signals
+```
 
 ### The rules of the file
 
-- **Each key comes one time.** The file has one `overrides:`, one `new_ways:`, one `turn_restrictions:` and one
-  `extra:`. Do not write a second `overrides:` for a new record: YAML keeps only the last one, and the records of the
-  first one are lost.
-- **Each key holds a list.** Each record is one item of the list, and an item starts with `- ` (a dash and a space).
-- **To add a record, add an item under its key.** For example, a second fix of a way is a new item in `overrides`:
+- **Each group comes one time.** The file has one `overrides:`, one `new_ways:`, one `turn_restrictions:` and one
+  `extra:`. Do not write a second `overrides:` for a new rule: YAML keeps only the last one, and the rules of the
+  first one are lost with no error.
+- **To add a record, add an item to the list of its group.**
+- **One way has one rule.** To change more on a way, add fields to its rule. Do not add a second item with the same
+  `osm_id`.
+- **To remove a fix, delete its item**, from its `- ` line to the end of the record. The way is then as in OSM again.
+- **The spaces must agree.** All the items of one list have their dash at the same position, and all the fields of
+  one record start at the same position.
+- **Write the value of a tag in quotes**, for example `maxspeed: '10'`, because an OSM tag is text.
+- **A record for an object that is not in the area does nothing.** So one file can hold the fixes of all your areas.
 
-  ```yaml
-  overrides:
-    - osm_id: 4230891          # the first rule
-      tags: {maxspeed: "10"}
-    - osm_id: 4230100          # a new rule: one more item, under the same key
-      oneway: true
-  ```
+You can also write a record on one line, in braces: `- {osm_id: 4230100, oneway: true}`. It has the same meaning as
+the long form. `Fixes` and the editing page write the long form, and they follow all these rules for you.
 
-- **One way has one rule.** To change more on the same way, add fields to its rule. Do not add a second item with
-  the same `osm_id`.
-- **A record has two forms, with the same meaning.** The long form has one field on each line. The short form is on
-  one line, in braces: `- {osm_id: 4230100, oneway: true}`. The example file uses both.
-- **Spaces matter.** Indent with spaces, never with tabs. The items are two spaces under their key, and the fields of
-  an item are under its first field.
-- **Write the value of a tag in quotes**, for example `maxspeed: "10"`, because an OSM tag is text.
-- **The order of the keys and of the records does not matter.** Keys that you do not use can stay out of the file.
+### The full example
 
-`Fixes` and the editing page follow these rules for you: they add each record to the correct list, and they change
-the rule of a way that already has one.
+This file has one record of each kind. It is the result of the four steps, and a reference for your own file:
 
-### `overrides`: change an OSM way
+```yaml
+overrides:
+- osm_id: 4230891
+  tags:
+    maxspeed: '10'
+  note: road works
+- osm_id: 4230100
+  oneway: true
+- osm_id: 503462470
+  lanes: 3
+  turn_lanes_forward: left|through|through
+- osm_id: 4229577
+  exclude_modes:
+  - driving
+- osm_id: 4229578
+  remove: true
+new_ways:
+- id: 9000000000000
+  nodes:
+  - 21911886
+  - [7.4235072, 43.7371133]
+  - 21914340
+  tags:
+    highway: service
+    name: New lane
+turn_restrictions:
+- from_way: 4230100
+  via_node: 21924057
+  to_way: 4230099
+  restriction: no_left_turn
+extra:
+  tag_edits:
+  - type: node
+    id: 21924057
+    set:
+      highway: traffic_signals
+  - type: relation
+    id: 393226
+    delete:
+    - building
+  building_faces:
+  - building: 23715051
+    from_node: 256791677
+    to_node: 256791676
+    type: front
+    door: main
+```
 
-A rule of `overrides` names one OSM way by its `osm_id` and says what to change. The build sees the way as if OSM had
-these values.
+The editing page also adds `changed`, the time of the change, to each record. The build does not read it.
+
+### The fields of each group
+
+**`overrides`**: one rule for one OSM way.
 
 | Field | Does |
 |---|---|
@@ -116,7 +259,7 @@ these values.
 | `remove` | `true`: removes the way from the whole build |
 | `note` | your text: why you made the fix. The build does not read it |
 
-### `new_ways`: add a road
+**`new_ways`**: one new road.
 
 | Field | Does |
 |---|---|
@@ -124,24 +267,22 @@ these values.
 | `nodes` | the points of the road: an OSM node id, or `[lon, lat]` for a new point. Make the two ends OSM nodes, so that the road connects to the network |
 | `tags`, `tags_from` | the OSM tags of the road, or the OSM way to copy the tags from |
 
-### `turn_restrictions`: forbid or force a turn
+**`turn_restrictions`**: one turn. A turn restriction changes the driving network.
 
 | Field | Does |
 |---|---|
 | `from_way`, `via_node`, `to_way` | the way before the junction, the node of the junction and the way after it |
 | `restriction` | `no_u_turn` (the default), `no_left_turn`, `no_right_turn`, `no_straight_on`, or `only_left_turn`, `only_right_turn`, `only_straight_on` |
 
-A turn restriction changes the driving network.
-
-### `extra.tag_edits` and `extra.building_faces`
+**`extra`**: the tags of other objects, and the walls of buildings.
 
 | Record | Fields |
 |---|---|
-| `tag_edits` | `type` (`way`, `node` or `relation`), `id`, and `set` (tags to set) or `delete` (tags to delete) |
+| `tag_edits` | `type` (`node`, `way` or `relation`), `id`, and `set` (the tags to set) or `delete` (the tags to delete) |
 | `building_faces` | `building`, `from_node` and `to_node` (the wall), `type` (`front`, `back`, `side`, `party` or `court`) and `door` |
 
-Use `tag_edits` for an object that is not a road, for example a traffic signal on a node. Use `building_faces` for the
-3D buildings of the base map ([`main.building_faces`](../reference/database.md#building_faces)).""")
+A node and a relation have no `remove`. To take one out, delete the tag that makes it what it is. For example, a
+relation without the tag `building` is no longer a building.""")
 
 ch.md("""## Build Monaco without a fix
 
