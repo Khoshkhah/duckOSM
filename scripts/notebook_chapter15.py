@@ -162,7 +162,7 @@ column "Shape" gives the size of each array: (rows,) for a list of numbers, and 
 | Key | Type | Shape, junction graph | Shape, turn graph | What it is |
 |---|---|---|---|---|
 | `src`, `dst` | `int64` | (arcs,) | (arcs,) | the row number of the vertex at the start and at the end of each arc |
-| `x` | `float32` | (vertices, 2) | (vertices, features) | the vertex features, one row for each vertex |
+| `x` | `float32` | (vertices, 2) | (vertices, features) | the vertex features, one row for each vertex. In the junction graph only `lon` and `lat` (see below) |
 | `x_names` | list of text | 2 names | one name for each feature | the name of each column of `x` |
 | `edge_attr` | `float32` | (arcs, features) | (arcs, 1) | the arc features, one row for each arc |
 | `edge_attr_names` | list of text | one name for each feature | 1 name | the name of each column of `edge_attr` |
@@ -170,6 +170,12 @@ column "Shape" gives the size of each array: (rows,) for a list of numbers, and 
 | `edge_id` | `int64` | (arcs,) | (vertices,) | the `edge_id` of each arc (junction graph) or of each vertex (turn graph) |
 | `node_id` | `int64` | (vertices,) | no key | the `node_id` of each vertex (junction graph) |
 | `graph`, `mode` | text | | | `"nodes"` or `"turns"`, and the mode |
+
+In the junction graph, `x` has only two columns, `lon` and `lat`: the place of each node. The `features` argument
+chooses columns of the **edges**, so in the junction graph they describe the arcs (`edge_attr`), not the vertices. A
+node of duckOSM has no other columns that describe it. To give the vertices more features, for example the number of
+edges at each node, add your own columns to `x` with NumPy, as section "Add your own column" shows for the turn graph.
+In the turn graph, each vertex is an edge, so `x` has one column for each feature that you choose.
 
 The cell makes the junction graph with the default features and prints the type and the shape of each array.""")
 ch.code("""arrays = duckosm.ml.graph_arrays(net.driving)    # the junction graph, the default features
