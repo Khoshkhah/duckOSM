@@ -139,19 +139,21 @@ How it works:
 2. The `features` columns become numbers (`float32`). The next section tells how each type of column changes.
 3. The arrays go into a dict, with the names of the feature columns and the duckOSM id of each row number.
 
-You call it on the network of one mode. Two arguments choose what you get:
+`graph_arrays` has three arguments, the inputs of the call. The table says what each one is:
+
+| Argument | Default | What it does |
+|---|---|---|
+| `net` | (you must give it) | the network of one mode, for example `net.driving`. A `Network` or the path of a `.duckdb` file also works |
+| `graph` | `"nodes"` | the graph: `"nodes"` gives the junction graph (each node is a vertex), `"turns"` gives the turn graph (each edge is a vertex) |
+| `features` | `length_m`, `maxspeed_kmh`, `lanes` | the columns of the edges that become numbers. In the junction graph they describe the arcs, in the turn graph the vertices |
+
+Three examples:
 
 ```python
 duckosm.ml.graph_arrays(net.driving)                                   # the junction graph, with the default features
 duckosm.ml.graph_arrays(net.driving, graph="turns")                    # the turn graph
 duckosm.ml.graph_arrays(net.driving, features=["length_m", "highway"])  # your choice of edge columns as features
 ```
-
-- `graph` chooses the graph: `"nodes"` (the default) gives the junction graph, where each node is a vertex. `"turns"`
-  gives the turn graph, where each edge is a vertex.
-- `features` chooses the columns of the edges that become numbers. The default is `length_m`, `maxspeed_kmh` and
-  `lanes` (`duckosm.ml.DEFAULT_FEATURES`). In the junction graph they describe the arcs, and in the turn graph they
-  describe the vertices.
 
 The result is a Python dict. Each key of the dict holds one array (or a list of names). The table lists the keys. The
 column "Shape" gives the size of each array: (rows,) for a list of numbers, and (rows, columns) for a table. "vertices",
