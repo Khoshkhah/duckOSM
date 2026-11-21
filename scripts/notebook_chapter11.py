@@ -46,6 +46,8 @@ Valhalla and GraphHopper use the same model.
 
 <img src="{IMAGES}/mapmatch-flow.svg" alt="The steps of map matching: the GPS points, the candidate edges, the probabilities, the Viterbi algorithm and the match" width="100%">
 
+The table gives each step of the picture, what it does, and the option of `match` that controls it.
+
 | Part | What it does | Option |
 |---|---|---|
 | Candidates | each edge within `radius_m` of a point is a possible edge for it (a state) | `radius_m`, default 50 m |

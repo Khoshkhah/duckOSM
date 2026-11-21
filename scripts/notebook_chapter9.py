@@ -9,11 +9,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from notebook_book import IMAGES, Chapter  # noqa: E402
 
 ch = Chapter(9, "09_analysis", "Street network analysis",
-             "The numbers of OSMnx, junctions, street directions, components, nearest roads and heights",
+             "The numbers of OSMnx, junctions, street directions, components, nearest roads, heights and city blocks",
              learn="the two views of the statistics; junctions; street bearings and their entropy; connected "
                    "components; the nearest node and edge of a point; a smaller area; random points; heights and "
-                   "grades; OSMnx on a duckOSM network",
-             time="about 2 minutes", extras="analysis,viz", more_install="\n    %pip install -q osmnx",
+                   "grades; OSMnx on a duckOSM network; city blocks with momepy",
+             time="about 2 minutes", extras="analysis,viz", more_install="\n    %pip install -q osmnx momepy",
              next_=("10_gis", "10. OSM data for GIS", "OSM features, OSM XML and administrative areas"))
 
 ch.md(f"""## What street network analysis measures
@@ -53,7 +53,7 @@ the OSMnx graph of the same area.
 
 | View | Nodes and edges | Use it |
 |---|---|---|
-| `osmnx` | A node with exactly 2 neighboring nodes, and its roads passing through, is not a node. Its two edges are one edge. | to compare with OSMnx and with published OSMnx numbers |
+| `osmnx` | a node where a road only passes through (it has exactly 2 neighbor nodes) is removed, and its two edges become one edge | to compare with OSMnx and with published OSMnx numbers |
 | `duckosm` | every row of `<mode>.nodes` and `<mode>.edges` | to count the rows that your data joins to |
 
 > **Key idea:** the `osmnx` view gives the numbers that OSMnx gives for the same roads. The `duckosm` view counts
@@ -61,11 +61,11 @@ the OSMnx graph of the same area.
 
 ch.md("""## Open the network of chapter 1
 
-Chapter 1 builds Monaco with three modes (driving, walking and cycling) and saves it as `monaco.duckdb`. This chapter opens that file with `duckosm.open`: it builds nothing. The analysis uses the driving network. `an` is the short name of the module.""")
-ch.code("""from duckosm import analysis as an                                           # the module of this chapter
-net = duckosm.open("monaco.duckdb")    # the network of chapter 1: Monaco, three modes
-drive = net.driving                                                         # the driving mode
-drive                                                                       # the card""")
+Chapter 1 builds Monaco with three modes (driving, walking and cycling) and saves it as `monaco.duckdb`. This chapter opens that file with `duckosm.open`: it builds nothing. The analysis uses the driving network,
+`net.driving`. `an` is the short name of the module.""")
+ch.code("""from duckosm import analysis as an      # the module of this chapter
+net = duckosm.open("monaco.duckdb")     # the network of chapter 1: Monaco, three modes
+net.driving                             # the card of the driving mode""")
 
 ch.md("""## Statistics: `stats`
 
@@ -82,7 +82,7 @@ ch.md("""## Statistics: `stats`
 | `street_length_total`, `street_segment_count`, `street_length_avg` | the same as the edge keys, with a two-way road counted once |
 | `circuity_avg` | the length of the streets divided by the straight distance between their ends |
 | `self_loop_proportion` | the share of edges that start and end at the same node |""")
-ch.code("""s = an.stats(drive)                                                       # both views, the keys of OSMnx basic_stats
+ch.code("""s = an.stats(net.driving)                                                       # both views, the keys of OSMnx basic_stats
 s.drop(["streets_per_node_counts", "streets_per_node_proportions"])       # the numbers (the two dicts follow)""")
 ch.md("""**What the output shows.** The `duckosm` view counts 1,768 nodes and 2,840 edges: the rows of the file. The `osmnx` view counts 843 nodes and 1,484 edges, about half. The lengths are almost the same (65.8 km and 65.9 km of streets), because the same roads are in both views. So the average street is 61 m in the `osmnx` view and 33 m in the `duckosm` view. The 2-road nodes count as intersections in the `duckosm` view: 1,561, not 636. The circuity is 1.17 in the `osmnx` view: the streets of Monaco follow the hills and the coast.""")
 
@@ -90,18 +90,22 @@ ch.md("""### The densities: `area_m2`
 
 OSMnx gives the densities only when you give the area. `area_m2=` is the area in square metres. Here it is the area of
 the boundary of the network (`net.boundary`), measured in its UTM zone. The node and intersection densities are counts per km². The edge and street densities are metres per km².""")
-ch.code("""b = net.boundary                                                    # the boundary polygon (a GeoDataFrame)
-area_m2 = b.to_crs(b.estimate_utm_crs()).area.sum()                 # its area in m2
-print(f"area: {area_m2 / 1e6:.2f} km2")
-an.stats(drive, area_m2=area_m2).loc[["node_density_km", "intersection_density_km", "edge_density_km",
-                                      "street_density_km"]].round(1)          # the four densities""")
+ch.code("""b = net.boundary                          # the boundary polygon (a GeoDataFrame in degrees)
+utm = b.estimate_utm_crs()                # its UTM zone, in metres
+area_m2 = b.to_crs(utm).area.sum()        # its area in m2
+print(f"area: {area_m2 / 1e6:.2f} km2")""")
+ch.code("""dens = an.stats(net.driving, area_m2=area_m2)                                       # the statistics with the densities
+dens.loc[["node_density_km", "intersection_density_km", "edge_density_km", "street_density_km"]].round(1)""")
 ch.md("""The boundary of the city has 2.39 km². In the `osmnx` view Monaco has 353 nodes and 266 intersections per km², and 27,517 m of streets per km². The street density is almost the same in the two views. The node density of the `duckosm` view is twice as large.""")
 
 ch.md("""### The streets at the nodes
 
 The keys `streets_per_node_counts` and `streets_per_node_proportions` are dicts: the number of nodes (or their share)
 for each count of streets.""")
-ch.code("""s.loc["streets_per_node_counts"].apply(lambda d: dict(list(d.items())[1:]))    # nodes for each count of streets (from 1)""")
+ch.code("""import pandas as pd
+
+counts = pd.DataFrame(s.loc["streets_per_node_counts"].to_dict())    # one row for each count of streets
+counts.sort_index()                                                 # the nodes of each view""")
 ch.md("""**What the output shows.** Both views have 207 dead ends, about 566 T junctions, 44 crossings and 2 nodes with five streets. They differ only in the nodes with two streets: 948 in the `duckosm` view, 24 in the `osmnx` view. OSMnx keeps a 2-street node only where it must, for example where a loop starts and ends at the same node.""")
 
 ch.md("""## Junctions: `streets_per_node`
@@ -116,18 +120,22 @@ ch.md("""## Junctions: `streets_per_node`
 | 3 | a T junction |
 | 4 | a crossing |
 
-The chart counts the nodes of each class. The map shows the dead ends, the T junctions and the crossings.""")
+The map shows the dead ends, the T junctions and the crossings.""")
+ch.code("""spn = an.streets_per_node(net.driving)       # node_id -> streets
+spn.value_counts().sort_index()              # the nodes for each count of streets""")
 ch.code("""import matplotlib.pyplot as plt
 
-spn = an.streets_per_node(drive)                                             # node_id -> streets
-nodes = net.driving.nodes().merge(spn.rename("streets").reset_index(), on="node_id")  # the nodes with their count
-fig, (a, b) = plt.subplots(1, 2, figsize=(12, 5), gridspec_kw={"width_ratios": [1, 2]})    # a chart and a map
-spn.value_counts().sort_index().plot.bar(ax=a, color="#1f6feb", xlabel="streets at the node", ylabel="nodes")    # the counts
-net.driving.edges().plot(ax=b, color="#cccccc", linewidth=0.6)                       # the roads in gray
-for k, color, label in [(1, "#d1242f", "dead end"), (3, "#bf8700", "T junction"), (4, "#2ea043", "crossing")]:    # 3 classes
-    nodes[nodes.streets == k].plot(ax=b, color=color, markersize=6, label=label)    # the nodes of the class
-b.legend(loc="lower right"); b.set_axis_off(); plt.tight_layout(); plt.show()   # the picture""")
-ch.md("""**What the output shows.** The chart shows the classes of the `duckosm` view: 948 nodes with two streets, 567 T junctions, 207 dead ends and 44 crossings. Monaco has few crossings: its streets meet mostly at T junctions, on the slopes. Many dead ends are at the edge of the city, where the boundary cuts the streets, and at the entries of garages.""")
+nodes = net.driving.nodes().set_index("node_id")                  # the nodes, with their points
+nodes["streets"] = spn                                            # the count of streets at each node
+fig, ax = plt.subplots(figsize=(7, 7))
+net.driving.edges().plot(ax=ax, color="lightgray", linewidth=0.6)      # the roads in gray
+classes = [(1, "#d1242f", "dead end"), (3, "#bf8700", "T junction"), (4, "#2ea043", "crossing")]
+for k, color, label in classes:
+    nodes[nodes.streets == k].plot(ax=ax, color=color, markersize=6, label=label)    # the nodes of the class
+ax.legend(title="node", loc="lower right")
+ax.set_axis_off()
+plt.show()""")
+ch.md("""**What the output shows.** The counts are the classes of the `duckosm` view: 948 nodes with two streets, 567 T junctions, 207 dead ends and 44 crossings. Monaco has few crossings: its streets meet mostly at T junctions, on the slopes. Many dead ends are at the edge of the city, where the boundary cuts the streets, and at the entries of garages.""")
 
 ch.md("""## Street directions
 
@@ -135,7 +143,7 @@ ch.md("""## Street directions
 
 `bearings(view)` gives the compass bearing of each edge, from its source node to its target node: 0 is north, 90 is
 east, 180 is south and 270 is west. The result is a Series with the `edge_id` as its index. A self-loop has `NaN`.""")
-ch.code("""brg = an.bearings(drive)                    # edge_id -> bearing in degrees
+ch.code("""brg = an.bearings(net.driving)                    # edge_id -> bearing in degrees
 brg.describe().round(1)                     # the spread of the bearings""")
 
 ch.md("""### Grid or not: `orientation_entropy`
@@ -149,15 +157,15 @@ entropy of the bins. The entropy is large when the streets go in all directions,
 | a perfect grid (four directions) | ln(4) = 1.39 |
 
 `weight="length"` lets a long street count more than a short street.""")
-ch.code("""print("orientation entropy:", round(an.orientation_entropy(drive), 3))                        # each street counts once
-print("weighted by length:", round(an.orientation_entropy(drive, weight="length"), 3))         # a long street counts more""")
+ch.code("""print("orientation entropy:", round(an.orientation_entropy(net.driving), 3))                        # each street counts once
+print("weighted by length:", round(an.orientation_entropy(net.driving, weight="length"), 3))         # a long street counts more""")
 ch.md("""The entropy of Monaco is 3.528, near the largest value of 3.58: the streets go in almost all directions. With `weight="length"` it is 3.48: the long streets have a few more common directions, along the coast from southwest to northeast.""")
 
 ch.md("""### The polar histogram: `plot_orientation`
 
 `plot_orientation(view)` draws the bearings as a polar histogram, as OSMnx does. The area of each bar shows its share.
 It gives `(fig, ax)`, so you can put it into your own figure with `ax=` and give it a `title=`.""")
-ch.code("""fig, ax = an.plot_orientation(drive, title="Monaco, driving")          # the polar histogram
+ch.code("""fig, ax = an.plot_orientation(net.driving, title="Monaco, driving")          # the polar histogram
 plt.show()                                                             # the picture""")
 ch.md("""The bars are of almost equal size in all directions. The longest bars point to the northeast and to the southwest, along the coast. A city with a grid shows four long bars at right angles.""")
 
@@ -169,9 +177,9 @@ A **strongly connected component** is a set of nodes in which you can go from ea
 directions of the edges. `components(view)` gives the component of each node, as a Series with the `node_id` as its
 index. Component 0 is the largest, 1 is the next, and so on. `strong=False` gives the weakly connected components: the
 directions of the edges do not count.""")
-ch.code("""comp = an.components(drive)                                               # node_id -> part (0 = the largest)
+ch.code("""comp = an.components(net.driving)                                               # node_id -> part (0 = the largest)
 print(f"{comp.nunique()} parts; the largest has {(comp == 0).sum():,} of {len(comp):,} nodes")    # the sizes
-weak = an.components(drive, strong=False)                                 # the directions do not count
+weak = an.components(net.driving, strong=False)                                 # the directions do not count
 print(f"weakly connected: {weak.nunique()} parts; the largest has {(weak == 0).sum():,} nodes")""")
 ch.md("""**What the output shows.** The driving network has 122 strongly connected parts. The largest has 1,600 of the 1,768 nodes. The other 121 parts are small: most are one node, for example the end of a one-way garage ramp that only leaves the network. When the directions do not count, the network has only 16 parts, and the largest has 1,718 nodes.""")
 
@@ -181,10 +189,11 @@ ch.md("""### The largest part: `largest_component`
 keeps the nodes, the edges and the turn tables of that component. The other modes of the file do not change. Use it
 before an analysis that needs a connected graph, for example a matrix of all pairs. The map shows the edges outside
 the largest part in orange.""")
-ch.code("""big = an.largest_component(drive, out="data/monaco_largest.duckdb")       # a new network file with the largest part
-edges = net.driving.edges()                                                       # all edges
-print(len(big.driving.edges()), "of", len(edges), "edges are in the largest part")
-net.driving.plot(highlight=edges.edge_id[~edges.edge_id.isin(big.driving.edges().edge_id)])    # the edges outside the largest part""")
+ch.code("""big = an.largest_component(net.driving, out="data/monaco_largest.duckdb")    # a new network file
+edges = net.driving.edges()                                  # all driving edges
+inside = edges.edge_id.isin(big.driving.edges().edge_id)     # True for an edge of the largest part
+print(inside.sum(), "of", len(edges), "edges are in the largest part")""")
+ch.code("""net.driving.plot(highlight=edges.edge_id[~inside])    # the edges outside the largest part, in orange""")
 ch.md("""The largest part has 2,622 of the 2,840 edges. The 218 orange edges are outside it: garage ramps, private service roads, and short roads at the boundary of the city that you can enter but not leave (or leave but not enter).""")
 
 ch.md("""## From points to the network
@@ -199,16 +208,18 @@ distance, so the edge with the lower `edge_id` comes.
 Here the points are ten random points in the box of the network (black). The edge of each point is orange.""")
 ch.code("""import numpy as np
 
-rng = np.random.default_rng(1)                                    # random points that do not change
-w, south, e, north = net.driving.edges().total_bounds                     # the box of the network
-xs, ys = rng.uniform(w, e, 10), rng.uniform(south, north, 10)     # 10 points (lon, lat)
-ids, dist = an.nearest_edges(drive, xs, ys, return_dist=True)     # the nearest edge of each point
-node_ids = an.nearest_nodes(drive, xs, ys)                        # the nearest node of each point
-print({"edge_id": ids[:3], "distance_m": dist[:3].round(1), "node_id": node_ids[:3]})    # the first three
-ax = plt.subplots(figsize=(7, 7))[1]                              # a new picture
-net.driving.plot(highlight=ids, ax=ax)                                    # the edges of the points in orange
-ax.scatter(xs, ys, color="black", s=20, zorder=3); plt.show()     # the points""")
-ch.md("""The arrays have the `edge_id` and the `node_id` of each point, and the distance to the edge in metres. The first two points are 375 m and 618 m from a road: they are in the sea, in the box of the network but outside the city. The third point is 12 m from its road. The map shows each point and its edge.
+rng = np.random.default_rng(1)                           # random points that do not change
+west, south, east, north = edges.total_bounds            # the box of the network
+xs = rng.uniform(west, east, 10)                         # 10 longitudes
+ys = rng.uniform(south, north, 10)                       # 10 latitudes""")
+ch.code("""ids, dist = an.nearest_edges(net.driving, xs, ys, return_dist=True)    # the nearest edge of each point
+node_ids = an.nearest_nodes(net.driving, xs, ys)                        # the nearest node of each point
+pd.DataFrame({"edge_id": ids, "distance_m": dist.round(1), "node_id": node_ids}).head(3)    # the first three""")
+ch.code("""fig, ax = plt.subplots(figsize=(7, 7))
+net.driving.plot(highlight=ids, ax=ax)                        # the edges of the points in orange
+ax.scatter(xs, ys, color="black", s=20, zorder=3)             # the points
+plt.show()""")
+ch.md("""The table has the `edge_id` and the `node_id` of each point, and the distance to the edge in metres. The first two points are 375 m and 618 m from a road: they are in the sea, in the box of the network but outside the city. The third point is 12 m from its road. The map shows each point and its edge.
 
 > **Tip:** to put your own data on the network, join the `edge_id` of `nearest_edges` to your rows. Chapter
 > [4. Join your data by edge_id](04_join_by_edge_id.md) shows the join.""")
@@ -236,11 +247,10 @@ ch.md("""## Random points on the roads: `sample_points`
 each point. A street is chosen with a chance that follows its length, so a longer street gets more points. The two
 edges of a two-way road count as one street. The same `seed` gives the same points. Use the points as random trip
 starts or to test a sensor plan.""")
-ch.code("""pts = an.sample_points(drive, 200, seed=1)                  # a GeoDataFrame of points with edge_id
+ch.code("""pts = an.sample_points(net.driving, 200, seed=1)          # a GeoDataFrame of points with edge_id
 print(len(pts), "points on", pts.edge_id.nunique(), "edges")
-ax = plt.subplots(figsize=(7, 7))[1]                         # a new picture
-net.driving.plot(ax=ax)                                              # the roads
-pts.plot(ax=ax, color="#2ea043", markersize=8); plt.show()   # the points""")
+pts.head(3)                                               # the first points""")
+ch.md("""The 200 points are on 168 edges: a long edge can get more than one point.""")
 
 ch.md("""## Heights and grades
 
@@ -250,7 +260,7 @@ ch.md("""## Heights and grades
 changes the file in place. `dem=` takes a DEM file (GeoTIFF) of your own. Without it, the call finds a source for the
 area (`source="auto"`) and downloads its tiles into the cache. For Monaco the source is Copernicus.
 [Add elevation](../guides/elevation.md) gives the sources and the options.""")
-ch.code("""an.add_elevation(drive)                                     # the heights of a DEM source for the area
+ch.code("""an.add_elevation(net.driving)                               # the heights of a DEM source for the area
 net.driving.nodes()["ele"].describe().round(1)                      # the heights of the nodes in metres""")
 ch.md("""The progress lines show the source (Copernicus, one tile of 12.6 MB) and the 1,768 nodes that got a height. The heights go from -0.5 m at the sea to 336 m, and the median is 34 m. Monaco rises fast from the coast.""")
 
@@ -258,12 +268,15 @@ ch.md("""### The grade of each edge: `grades`
 
 `grades(view)` gives `(z_to - z_from) / length_m` for each edge, as a Series with the `edge_id` as its index. 0.05 is
 5 % up, and -0.05 is 5 % down. It needs `add_elevation` first.""")
-ch.code("""g = an.grades(drive)                                                       # edge_id -> grade
-e = net.driving.edges().set_index("edge_id")                                       # the edge columns
-ok = g[(e.length_m >= 50) & e.tunnel.isna() & e.bridge.isna()]             # edges of 50 m or more, on the ground
-print(f"all edges: {g.abs().max():.0%} the steepest; on the ground and 50 m or more: {ok.abs().max():.0%}")
-ok.abs().describe(percentiles=[0.5, 0.9]).round(3)                          # the spread of the grades""")
-ch.md("""Over all edges the steepest grade is 880 %: a wrong value on a tunnel or a short edge. For the 471 edges of 50 m or more that are not tunnels or bridges, the steepest is 35 %, the median is 5.1 % and 90 % of the edges are below 15.8 %. Monaco is a steep city.
+ch.code("""g = an.grades(net.driving)                                # edge_id -> grade
+print(f"the steepest of all edges: {g.abs().max():.0%}")""")
+ch.code("""e = net.driving.edges().set_index("edge_id")              # the edge columns
+long = e.length_m >= 50                                   # 50 m or more
+ground = e.tunnel.isna() & e.bridge.isna()                # not a tunnel, not a bridge
+ok = g[long & ground]                                     # the grades that you can use
+ok.abs().describe(percentiles=[0.5, 0.9]).round(3)        # the spread of the grades""")
+ch.md("""Over all edges the steepest grade is 880 %: a wrong value on a tunnel or a short edge. The second cell keeps only
+the edges of 50 m or more that are on the ground. For these 471 edges of 50 m or more that are not tunnels or bridges, the steepest is 35 %, the median is 5.1 % and 90 % of the edges are below 15.8 %. Monaco is a steep city.
 
 > **Warning:** a DEM gives the height of the ground. A tunnel or a bridge is not on the ground, so its grade from the
 > DEM is wrong. A short edge on a slope can also get a large grade from the cells of the DEM. Remove these edges
@@ -275,18 +288,18 @@ ch.md("""## OSMnx on the network: `to_osmnx`
 passes `ox.convert.validate_graph`. The node keys are the `node_id`. Each edge keeps its `edge_id` and has the OSMnx
 names: `osmid`, `length`, `geometry`, `highway`, `name`, `oneway`, `lanes`, `speed_kph` and `travel_time`.
 
-Here OSMnx finds a route on the largest part (`big`, above) with its own `shortest_path`, and draws it.""")
+Here OSMnx finds a route on the largest part (`big`, above) with its own `shortest_path`.""")
 ch.code("""import osmnx as ox
 
-G = an.to_osmnx(big.driving)                                                 # the largest part as a networkx MultiDiGraph
-print(G)                                                                     # the size of the graph
-orig, dest = an.nearest_nodes(big.driving, [7.4155, 7.4370], [43.7310, 43.7480])  # two nodes (duckOSM finds them)
-route = ox.routing.shortest_path(G, orig, dest, weight="travel_time")        # OSMnx's route
-fig, ax = ox.plot.plot_graph_route(G, route, route_color="#d1242f", node_size=0, bgcolor="white",
-                                   edge_color="#999999", figsize=(7, 7))    # OSMnx's picture""")
+G = an.to_osmnx(big.driving)          # the largest part as a networkx MultiDiGraph
+print(G)                              # its size""")
+ch.code("""orig, dest = an.nearest_nodes(big.driving, [7.4155, 7.4370], [43.7310, 43.7480])    # two nodes (duckOSM finds them)
+route = ox.routing.shortest_path(G, orig, dest, weight="travel_time")              # OSMnx's route: a list of node_id
+route_edges = ox.routing.route_to_gdf(G, route)                                    # its edges, with the OSMnx columns
+len(route_edges), round(route_edges["length"].sum()), round(route_edges["travel_time"].sum())    # edges, metres, seconds""")
 
 ch.md("""The graph of the largest part has 1,600 nodes and 2,622 edges, the same as `big`. OSMnx found a route on it with
-its own `shortest_path` and drew it.
+its own `shortest_path`: 67 edges, 2,889 m and 202 s.
 
 ### Check: the `osmnx` view gives the numbers of OSMnx
 
@@ -295,23 +308,98 @@ it computes the same numbers in two ways, on the same driving network of Monaco,
 
 | Way | What it does |
 |---|---|
-| duckOSM | `an.stats(drive)["osmnx"]`: the `osmnx` view of duckOSM's own statistics |
+| duckOSM | `an.stats(net.driving)["osmnx"]`: the `osmnx` view of duckOSM's own statistics |
 | OSMnx | `to_osmnx` gives the network to OSMnx, OSMnx simplifies it (it removes the nodes where only two roads meet), and `ox.basic_stats` counts it |
 
 One detail: `to_osmnx` marks the graph as simplified, because each edge already has its full line. OSMnx does not
 simplify a graph with that mark. So the cell sets `H.graph["simplified"] = False` first, and then OSMnx simplifies it
 as it does with its own graphs.""")
-ch.code("""import pandas as pd
-
-H = an.to_osmnx(drive)                                     # the whole driving network, as an OSMnx graph
+ch.code("""H = an.to_osmnx(net.driving)                                     # the whole driving network, as an OSMnx graph
 H.graph["simplified"] = False                              # allow OSMnx to simplify it
 theirs = ox.basic_stats(ox.simplify_graph(H))              # the numbers of OSMnx
-ours = an.stats(drive)["osmnx"]                            # the numbers of duckOSM's osmnx view
+ours = an.stats(net.driving)["osmnx"]                            # the numbers of duckOSM's osmnx view
 keys = ["n", "m", "intersection_count", "street_segment_count"]
 pd.DataFrame({"duckOSM": [ours[k] for k in keys], "OSMnx": [theirs[k] for k in keys]}, index=keys)    # side by side""")
 ch.md("""The two columns are the same: 843 nodes (`n`), 1,484 edges (`m`), 636 intersections and 1,070 street segments.
 So you can use `an.stats` and compare its `osmnx` view with any number that OSMnx gives for another city. The tests
 of duckOSM run this check for each key.""")
+
+
+ch.md("""## City blocks with momepy
+
+A city block is the land between streets, with its buildings. Planners use blocks to compare parts of a city: small
+blocks make a city easy to walk, and large blocks make long detours. [momepy](https://docs.momepy.org) is a Python
+library that measures the shape of a city. It makes the blocks from three layers. duckOSM gives all three from the same
+OSM file:
+
+| Layer | From duckOSM |
+|---|---|
+| The streets | the edges of the network (`net.driving.edges()`, `net.walking.edges()`) |
+| The buildings | `duckosm.gis.features(net, tags={"building": True})` (chapter 10) |
+| The land | the boundary of the area (`net.boundary`) less the water |
+
+momepy makes the blocks in three steps:
+
+1. **Enclosures:** it cuts the land along the streets. Each enclosure is an area with streets around it.
+2. **Cells:** it divides each enclosure into one cell for each building (a tessellation). A cell is the land that is
+   nearer to its building than to other buildings.
+3. **Blocks:** it joins the cells of the buildings that are between the same streets.
+
+### The streets
+
+momepy needs one line for each street, in metres. The network has one edge for each direction of a two-way street,
+so the cell keeps the edges with `is_reverse` false. It takes the walking edges too: in Monaco many streets join only
+by steps and footways. It removes the tunnels, because a tunnel does not cut the land above it.""")
+ch.code("""import momepy
+
+lines = pd.concat([net.driving.edges(), net.walking.edges()])      # the edges of two modes
+lines = lines.drop_duplicates("edge_id")                           # a road of both modes counts once
+lines = lines[~lines.is_reverse & lines.tunnel.isna()]             # one line for each street, no tunnels
+crs = lines.estimate_utm_crs()                                     # the UTM zone of Monaco: coordinates in metres
+streets = lines.to_crs(crs)[["edge_id", "highway", "geometry"]]
+len(streets)""")
+ch.md("""### The buildings and the land
+
+The buildings are the OSM areas with a `building` tag. The land is the boundary less the water: the lakes
+(`natural=water`) and the two ports of Monaco (`leisure=marina`).""")
+ch.code("""buildings = duckosm.gis.features(net, tags={"building": True}).to_crs(crs)       # the OSM buildings
+buildings = buildings[buildings.geom_type.isin(["Polygon", "MultiPolygon"])]       # only the areas
+buildings = buildings.explode(index_parts=False).reset_index(drop=True)[["geometry"]]   # one polygon for each row
+water = duckosm.gis.features(net, tags={"natural": ["water"], "leisure": ["marina"]}).to_crs(crs)   # lakes and ports
+land = net.boundary.to_crs(crs).difference(water.union_all())                      # the city without its water
+len(buildings), round(land.area.sum() / 1e6, 2)                                    # buildings, land in km²""")
+ch.md("""### The three steps
+
+`momepy.enclosures` cuts the land along the streets. A port is a hole in the land, and momepy also gives the hole as
+an enclosure, so the second line removes the enclosures that are not on the land. `momepy.generate_blocks` gives two
+results: the blocks, and the block of each building.""")
+ch.code("""enc = momepy.enclosures(streets, limit=land)                       # step 1: the areas between the streets
+enc = enc[enc.representative_point().within(land.union_all())]     # remove the ports (holes in the land)
+cells = momepy.enclosed_tessellation(buildings, enc)               # step 2: one cell for each building
+blocks, block_of = momepy.generate_blocks(cells, streets, buildings)    # step 3: the cells joined into blocks
+len(enc), len(cells), len(blocks)""")
+ch.md("""The land has 2.08 km² and 1,710 enclosures. The 1,258 buildings give 2,711 cells. There are more cells than
+buildings, because an enclosure with no building is also a cell. momepy joins the cells into 292 blocks.""")
+ch.md("""### The size of the blocks
+
+The cell gives each block its area in hectares (1 ha = 10,000 m², about a football field and a half) and puts it in a
+size class.""")
+ch.code("""blocks["ha"] = blocks.area / 10_000                                # the area in hectares
+classes = ["< 0.1 ha", "0.1-0.5 ha", "0.5-1 ha", "1-5 ha", "> 5 ha"]
+blocks["size"] = pd.cut(blocks.ha, [0, 0.1, 0.5, 1, 5, 1000], labels=classes)
+blocks["size"].value_counts().sort_index()                         # the blocks in each class""")
+ch.code("""fig, ax = plt.subplots(figsize=(12, 13), dpi=200)          # a large picture with many pixels: zoom in to see each block
+streets.plot(ax=ax, color="lightgray", linewidth=0.4)              # the streets first, in light gray
+blocks.plot(ax=ax, column="size", cmap="viridis", legend=True,
+            legend_kwds={"title": "block area", "loc": "lower right"})    # the blocks by size
+buildings.plot(ax=ax, color="black", alpha=0.25)                   # the buildings on top
+ax.set_axis_off()""")
+ch.md("""Most blocks are small: 149 blocks have 0.1 to 0.5 ha, and 57 have less than 0.1 ha. Only 4 blocks have more
+than 5 ha. They are on the coast and on the slopes, where few streets cut the land, for example at the Larvotto beach
+in the northeast. The white areas in the middle are the two ports.
+
+The blocks change with the streets that you give to momepy. With the driving streets only, many steps and footways
+do not cut the land, and the blocks become larger.""")
 
 
 ch.md("""## Try it yourself
@@ -321,8 +409,7 @@ ch.md("""## Try it yourself
 <details><summary>Show the answer</summary>
 
 ```python
-walk = duckosm.open("monaco.duckdb")
-an.stats(walk.walking).loc[["n", "m", "streets_per_node_avg"]]
+an.stats(net.walking).loc[["n", "m", "streets_per_node_avg"]]
 ```
 </details>
 

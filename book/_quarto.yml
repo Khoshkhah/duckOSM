@@ -1,6 +1,8 @@
 project:
   type: book
   output-dir: _book
+  resources:
+    - panzoom.min.js
 
 book:
   title: "duckOSM"
@@ -68,4 +70,6 @@ format:
     fig-cap-location: bottom
     callout-appearance: default
     smooth-scroll: true
+    lightbox: auto         # click a picture: it opens full screen
+    include-after-body: zoom.html    # in the full-screen picture: the wheel or two fingers zoom, a drag moves it
     link-external-newwindow: true

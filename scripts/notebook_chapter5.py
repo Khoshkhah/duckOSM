@@ -291,8 +291,8 @@ Chapter 1 builds Monaco with three modes and saves it as `monaco.duckdb`, with n
 fix needs these two files, because the build with the fix starts again from the OSM data.""")
 ch.code("""net = duckosm.open("monaco.duckdb")    # the network of chapter 1: Monaco, three modes, no fixes file
 net                                    # the card""")
-ch.md("""The card shows the file `monaco.duckdb` and its three networks: the number of
-edges and nodes and the length in km of each mode. This is the network before the fix.""")
+ch.md("""The card shows the file `monaco.duckdb`, its size and the number of edges of each mode: 2840 driving edges.
+This is the network before the fix.""")
 
 
 ch.md("""## Make the file and add records
@@ -310,13 +310,12 @@ ch.md("""### The editing page: `net.edit()`
 
 The easiest way is the editing page. You find a road on a map, change it in a form, and the page writes the record
 into the fixes file. It is also the only way for some fixes: a turn that a driver cannot make, a new road, the walls of
-a building. `net.edit()`
-starts the editor **Edit OSM data** on the database, on your computer. The page shows the roads and the buildings of
-the area on a map, and it writes the same format as `Fixes`.
+a building. `net.edit()` starts the editor **Edit OSM data** on the database, on your computer. The page shows the
+roads and the buildings of the area on a map.
 
 You choose the files. The page reads one file into its list (`load`) and writes one file (`save`). duckOSM never
-chooses a name or a folder for a fixes file. Thus you can load a base file, save a variant to another file, and the
-base file does not change:
+chooses a name or a folder for a fixes file. So you can load a base file and save a variant to another file. The base
+file does not change:
 
 ```python
 net.edit(load="osm_fixes.yaml", save="osm_fixes_v2.yaml")
@@ -327,14 +326,14 @@ net.edit(load="osm_fixes.yaml", save="osm_fixes_v2.yaml")
 ```
 
 `net.edit()` starts the page in the background and gives its address. Open the address in your browser. Two lines
-over the tabs show the files: **Loaded: osm_fixes.yaml** and **Saving to: osm_fixes_v2.yaml**. Each change goes into
-the save file at once. **Open** loads another file, **Save** writes the list, and **Save as** writes it to another
-file. A path is relative to the folder where Python runs.
+over the tabs show the files: **Loaded: osm_fixes.yaml** and **Saving to: osm_fixes_v2.yaml**. **Open** loads another
+file, **Save** writes the list, and **Save as** writes it to another file. A path is relative to the folder where
+Python runs.
 
 | Argument | Default | Does |
 |---|---|---|
-| `load` | none: the list is empty | a fixes file that the page reads; the page does not write it |
-| `save` | none: the first **Save** asks for the file | the file that the page writes, each change at once; it can be the `load` file |
+| `load` | none: the list is empty | a fixes file that the page reads. The page does not write it |
+| `save` | none: the first **Save** asks for the file | the file that the page writes, each change at once. It can be the `load` file |
 | `port` | `8790` | the port of the page on `127.0.0.1` |
 
 With `load` only, the first **Save** asks where to save. With neither, the list is empty, and the page writes nothing
@@ -358,7 +357,7 @@ To add one record:
 
 1. Pick a tab.
 2. Click the road on the map, or type its OSM id and click **Load**.
-3. Change the fields, then click **Add to changes**. The page writes the record into the save file at once.
+3. Change the fields, then click **Add to changes**. The page writes the record into the save file.
 4. In the **Changes** tab, click **Build again** to build the network again with the save file. The database records
    the save file, so `net.fixes` and `net.rebuild()` find it.
 
@@ -379,9 +378,9 @@ button of the page.
 ch.md("""### From Python: `duckosm.fixes.Fixes`
 
 `duckosm.fixes.Fixes()` holds the rules of a fixes file in Python. `Fixes(load="osm_fixes.yaml")` reads a file that
-you have; `Fixes()` starts with no rules. The calls that change the rules change them in memory only. `fixes.save(path)`
-writes them to a file, as its own step. duckOSM never chooses a file name, and a load never writes the loaded file, so
-you can load a base file and save a variant to another file.
+you have. `Fixes()` starts with no rules. The calls that change the rules change them in memory only.
+`fixes.save(path)` writes them to a file, as a separate step. As on the editing page, a load never writes the loaded
+file.
 
 `fixes.set(way, **fields)` adds a rule for the way, or changes its rule. A keyword that is a field of a rule (`oneway`,
 `lanes`, `layer`, `note` ...) goes into the rule. Each other keyword is an OSM tag: `maxspeed=10` sets the tag
@@ -393,7 +392,7 @@ fixes = duckosm.fixes.Fixes()                          # no rules yet (load="fil
 fixes.set(way=way, maxspeed=10, note="road works")     # one rule: the tag maxspeed of the way, and a note
 fixes                                                  # the card: a table of the rules""")
 ch.md("""The card gives the number of rules (1) and says "not saved": the rule is only in memory. The table has one row
-for each way: `osm_id`, the OSM `tags` of the rule (`maxspeed` is the text `'10'`) and the `note`.
+for each way: `osm_id`, the OSM `tags` of the rule (`maxspeed` is the text `'10'`, not the number) and the `note`.
 
 `fixes.save(path)` writes the rules to a file. The first save needs a path. A later `fixes.save()` writes the same file
 again.""")
@@ -409,8 +408,9 @@ the `note`. This is the format that the map editor writes, so the two tools can 
 
 ch.md("""#### The other calls
 
-`set` is one of five calls that change the rules. The table shows all of them. Each call returns the `Fixes`, so you
-can chain the calls. They change the rules in memory; `save` writes them.
+Four calls change the rules: `set`, `exclude`, `remove` and `drop`. They change the rules in memory, and `save` writes
+them. These four calls and `save` return the `Fixes`, so you can chain them, for example
+`Fixes().exclude(...).save("closed.yaml")`.
 
 | Call | Does | The field in the file |
 |---|---|---|
@@ -447,19 +447,20 @@ also `remove: true`. `len(fixes)` is the number of rules.
 ch.md("""### In a text editor
 
 The file is plain text, so you can also write it yourself in any text editor, in the format of section "The format of
-the file". The cell below writes a file `hand.yaml` with one rule from Python, as a text editor would. Then `Fixes`
-loads it and shows its rule: the file is the same as a file that `Fixes` or the editing page writes.""")
+the file". The cell below writes a file `hand.yaml` with one rule from Python, the same text that you type in a text editor. Then `Fixes`
+loads it and shows its rule: the same rule as the rule that `Fixes` wrote into `osm_fixes.yaml`.""")
 ch.code('''from pathlib import Path
 
-Path("hand.yaml").write_text("""overrides:
-  - osm_id: 4230891
-    tags:
-      maxspeed: "10"
-    note: road works
-""")                                                     # the file, written as text
+text = """overrides:
+- osm_id: 4230891
+  tags:
+    maxspeed: '10'
+  note: road works
+"""                                                      # the text of the file, as in a text editor
+Path("hand.yaml").write_text(text)                     # write the file
 duckosm.fixes.Fixes(load="hand.yaml").rules()          # load it: one rule''')
-ch.md("""> **Warning:** YAML uses the spaces at the start of each line. Keep two spaces for each level, as in the example,
-> and write a number in a tag in quotes (`"10"`), because an OSM tag is text.""")
+ch.md("""If the load gives an error or a wrong rule, look at the spaces and the dashes first (section "The rules of the
+file").""")
 
 ch.md("""## Build with the fixes
 
@@ -480,16 +481,18 @@ ch.md("""### Build again: `net.rebuild`
 database. It takes a `Fixes` or the path of a fixes file. The new network goes to `<name>_fixed.duckdb` beside the old
 one (`out=` sets another file), so the old network stays and you can compare the two. To see the effect of the
 fix, the cell compares one route by car across Monaco, from Fontvieille to Larvotto, before and after the fix.""")
-ch.code("""fixed = net.rebuild(fixes=fixes)                     # the same build, with the fixes file: monaco_fixed.duckdb
-a, b = (7.4155, 43.7285), (7.4335, 43.7468)          # Fontvieille and Larvotto, as (lon, lat)
-before = net.driving.route(a, b)                             # a route by car across Monaco, before the fix
-after = fixed.driving.route(a, b)                            # the same route on the fixed network
-round(before.time_s), round(after.time_s)            # the seconds before and after the fix""")
+ch.code("""fixed = net.rebuild(fixes=fixes)                     # the same build, with the fixes file: monaco_fixed.duckdb""")
+ch.code("""a, b = (7.4155, 43.7285), (7.4335, 43.7468)          # Fontvieille and Larvotto, as (lon, lat)
+before = net.driving.route(a, b)                     # a route by car across Monaco, before the fix
+after = fixed.driving.route(a, b)                    # the same route on the fixed network
+print("seconds:", round(before.time_s), "before,", round(after.time_s), "after")
+print("metres: ", round(before.length_m), "before,", round(after.length_m), "after")""")
 ch.md("""The route now takes 252 s, not 229 s. It does not use Boulevard Louis II now: it
 takes other streets around it. The new route is longer (3,302 m, not 2,939 m), but at 10 km/h the old way is slower.
 
-The new network remembers its fixes file. `fixed.fixes` gives the `Fixes` of the build. `net.fixes` is `None`,
-because `net` has no fixes file.""")
+The new network keeps the rules of its fixes file inside the database, in the table `main.fixes`. `fixed.fixes`
+gives these rules as a `Fixes`. It shows `load=None` and `saved=None`, because the rules come from the database, not
+from a file. `net.fixes` is `None`, because `net` was built with no fixes.""")
 ch.code("""fixed.fixes, net.fixes        # the fixes file of each network""")
 
 
@@ -520,10 +523,10 @@ ch.md("""### Compare the two networks
 | `changed` | for a changed edge: the names of the columns with a new value |
 
 `net.diff(fixed)` is the same as `duckosm.fixes.diff(net, fixed)`. `mode=` compares one mode only. DuckDB joins the
-two files, so the comparison is fast also for a large area.""")
+two files, and only the different edges come to Python.""")
 ch.code("""changes = net.diff(fixed, mode="driving")                     # the edges that are different in the fixed network
-changes.change.value_counts()                 # the number of edges of each kind of change""")
-ch.code("""changes.head()                                # the first changed edges, with the columns that changed""")
+changes.change.value_counts()                                 # the number of edges of each kind of change""")
+ch.code("""changes.head()                                                # the first changed edges, with the columns that changed""")
 ch.md("""**What the output shows.** Eight edges changed. No edge was added or removed. The eight edges are the fixed way:
 Boulevard Louis II is a two-way road, so it has four edges in each direction. On each edge, two columns changed:
 `maxspeed_kmh` (now 10) and `cost_s`, the travel time, which the build calculates from the speed.""")
@@ -533,8 +536,10 @@ ch.md("""### See the change on a map
 `fixed.map(routes=...)` draws routes on the network, each in its own color. The cell draws three lines: the route
 before the fix, the route after the fix, and the fixed way (its edges, as a route). Run the cell to see the live map:
 you can zoom, and click a road to see its columns. The manual page shows a picture of the map.""")
-ch.code("""way_edges = {"edges": list(fixed.driving.edges(where=f"osm_id = {way}").edge_id)}                   # the edges of the fixed way, as a route to draw
-fixed.driving.map(routes={"before the fix": before, "after the fix": after, "the fixed way": way_edges})    # the three as lines, each in its own color""")
+ch.code("""way_ids = fixed.driving.edges(where=f"osm_id = {way}").edge_id    # the edges of the fixed way
+way_edges = {"edges": list(way_ids)}                               # as a route, so that the map can draw it
+lines = {"before the fix": before, "after the fix": after, "the fixed way": way_edges}
+fixed.driving.map(routes=lines)                                    # the three lines, each in its own color""")
 ch.md("""The route after the fix leaves the fixed way. It takes other streets around the slow
 part, because they are now faster.""")
 
@@ -556,9 +561,11 @@ again into `monaco_closed.duckdb` (`out=`).""")
 ch.code("""closed = duckosm.fixes.Fixes().exclude(way=way, modes=["driving"]).save("closed.yaml")   # no cars on the way
 shut = net.rebuild(fixes=closed, out="monaco_closed.duckdb")                        # a third network
 gone = net.diff(shut, mode="driving")                                               # the edges that are different
-gone.change.value_counts(), set(fixed.driving.edges(where=f"osm_id = {way}").edge_id) == set(gone.edge_id[gone.change == "removed"])""")
-ch.md("""The diff has eight removed edges and no other change. The second value is `True`: the
-removed edges are the eight edges of the fixed way. All the other edges of the network keep their ids.""")
+gone.change.value_counts()""")
+ch.code("""removed = set(gone.edge_id[gone.change == "removed"])      # the ids of the removed edges
+removed == set(way_ids)                                     # are they the edges of the fixed way?""")
+ch.md("""The diff has eight removed edges and no other change. The second cell gives `True`: the removed edges are the
+eight edges of the fixed way. All the other edges of the network keep their ids.""")
 
 ch.md("""### Every output takes the fix
 
@@ -576,7 +583,7 @@ oneway = net.rebuild(fixes=fixes, out="monaco_oneway.duckdb")
 d = net.diff(oneway, mode="driving")
 (d.change == "removed").sum()                                 # the edges of the other direction"""),
     ("Close Boulevard Albert 1er (`w3`) to cars only, and find the new time of the route.",
-     """closed3 = duckosm.fixes.Fixes().exclude(way=w3, modes="driving").save("closed3.yaml")
+     """closed3 = duckosm.fixes.Fixes().exclude(way=w3, modes=["driving"]).save("closed3.yaml")
 net.rebuild(fixes=closed3, out="monaco_closed3.duckdb").driving.route(a, b).time_s     # about 252 s"""),
     ("Delete the rule of the fixed way, so that the way is as in OSM again, and look at the file.",
      """fixes.drop(way=way).save("as_in_osm.yaml")                 # a file of its own: osm_fixes.yaml keeps its rule
@@ -585,10 +592,10 @@ print(open("as_in_osm.yaml").read())                           # overrides: []""
 
 ch.glossary([
     ("fix", "a correction of the OSM data, written in a fixes file"),
-    ("fixes file", "the YAML file of your fixes (`osm_fixes.yaml`); each build reads it"),
+    ("fixes file", "the YAML file of your fixes (`osm_fixes.yaml`), which each build reads"),
     ("rule", "one item of `overrides`: what to change on one OSM way"),
     ("way", "an OSM line (a road, a path); a way becomes one edge or more"),
-    ("`osm_id`", "the id of the OSM way of an edge; the key of a rule"),
+    ("`osm_id`", "the id of the OSM way of an edge, and the key of a rule"),
     ("tag", "an OSM key and value on a way, for example `maxspeed=30`"),
     ("rebuild", "a new build of the same area and modes, with a fixes file"),
     ("diff", "the edges that are added, removed or changed between two networks, by `edge_id`"),
@@ -596,13 +603,13 @@ ch.glossary([
 
 ch.summary([
     ("`duckosm.fixes.Fixes(load=None)`", "the rules of a fixes file, in memory"),
-    ("`fixes.save(path=None)`", "writes the rules to a file; the first save needs a path"),
+    ("`fixes.save(path=None)`", "writes the rules to a file (the first save needs a path)"),
     ("`fixes.set(way, **fields)`", "adds or changes the rule of a way: fields of a rule and OSM tags"),
     ("`fixes.exclude(way, modes)`", "removes the way from the networks of `modes`"),
     ("`fixes.remove(way)`", "removes the way from the build"),
     ("`fixes.drop(way)`", "deletes the rule of the way"),
     ("`fixes.rules()`, `len(fixes)`", "the rules as a DataFrame, and their number"),
-    ("`net.rebuild(fixes=..., out=...)`", "builds the area again with the fixes; gives the new `Network`"),
+    ("`net.rebuild(fixes=..., out=...)`", "builds the area again with the fixes and gives the new `Network`"),
     ("`net.fixes`", "the `Fixes` of the build, or `None`"),
     ("`net.diff(other, mode=None)`, `duckosm.fixes.diff(net, other)`", "the edges that are different, by `edge_id`"),
     ("`net.edit(load=None, save=None, port=8790)`", "starts the editing page and gives its URL"),

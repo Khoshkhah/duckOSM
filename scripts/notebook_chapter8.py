@@ -10,8 +10,8 @@ from notebook_book import IMAGES, Chapter  # noqa: E402
 
 ch = Chapter(8, "08_routing_advanced", "Advanced routing",
              "The Route object, many routes, the k best routes, travel time matrices, isochrones and accessibility",
-             learn="the graph that all routing calls search; the members of a `Route`; place names; many routes in "
-                   "parallel; the k best routes; a travel time matrix; isochrones; accessibility; your own cost of each edge and of each change of mode",
+             learn="the graph that all routing calls search; the members of a `Route`; the fastest or the shortest "
+                   "route; the k best routes; many routes in parallel; a travel time matrix; isochrones; accessibility; your own cost of each edge and of each change of mode",
              time="about 2 minutes", extras="widget,viz,graph",
              next_=("09_analysis", "9. Street network analysis", "the numbers of OSMnx, junctions, components and points"))
 
@@ -21,13 +21,10 @@ ch.md(f"""## One graph for all routing calls
 `duckosm.routing`. They answer larger questions: the next best routes, a route for each of 100 pairs, the travel time
 between all pairs of 100 places, the area that you reach in 10 minutes on foot, and the nearest stop from each street.
 
-All these calls search **the same graph**: the edge graph of the mode (the table `<mode>.edge_graph`). In this graph a
-**node is an edge** of the road network, and an **arc is a legal turn** from one edge to the next. A turn that a turn
-restriction forbids has no arc. An arc costs the time (`cost_s`) or the length (`length_m`) of its from-edge. The
-picture of the turn graph is in [7. Routing](07_routing.md), section "How duckOSM finds a route".
-
-The search runs in Rust. Each call opens the database file, reads the graph once, and searches it with Dijkstra's
-algorithm.
+All these calls search **the same graph**: the turn graph of the mode (the table `<mode>.edge_graph`). A node is an
+edge of the road network, and an arc is a legal turn ([7. Routing](07_routing.md), section "How duckOSM finds a
+route"). The search runs in Rust. Each call opens the database file, reads the graph once, and searches it with
+Dijkstra's algorithm.
 
 | Call | Question | Algorithm |
 |---|---|---|
@@ -41,28 +38,18 @@ algorithm.
 Each call is a function of the module, `duckosm.routing.matrix(net.driving, ...)`, and also a method of a mode view,
 `net.driving.matrix(...)`. This chapter uses the methods.
 
-> **Key idea:** all routing calls search the same edge graph, with the same turn rules. So a cell of the matrix is
+> **Key idea:** all routing calls search the same turn graph, with the same turn rules. So a cell of the matrix is
 > the time of `route` for the same pair, the first of the k best routes is `route`, and an isochrone holds the edges
 > whose matrix time is in the limit.""")
 
-ch.md("""### Places
-
-Each call takes **places**: the start and the end of a route, the origins and the destinations of a matrix. A place
-can be one of three things.
-
-| Place | Example | How it joins the network |
-|---|---|---|
-| an edge id | `1234567890123` | that edge |
-| a `(lon, lat)` point | `(7.4155, 43.7285)` | the nearest edge (`route` with two points: the nearest road within `radius_m`, and the walk to it) |
-| a place name | `"Boulevard Albert 1er"` | the middle of the longest edge with that name, else Nominatim in the box of the network |
-
-An edge id is the fastest place: it needs no search for the nearest edge.""")
-
 ch.md("""## Open the network of chapter 1
 
-Chapter 1 builds Monaco with three modes (driving, walking and cycling) and saves it as `monaco.duckdb`. This chapter opens that file with `duckosm.open`: it builds nothing. The routes use the driving network and the walking network.""")
+Chapter 1 builds Monaco with three modes (driving, walking and cycling) and saves it as `monaco.duckdb`. This chapter
+opens that file with `duckosm.open`: it builds nothing. The routes use the driving network and the walking network.
+The start and the end of each call are places, as in chapter 7: an edge id, a `(lon, lat)` point or a place name. An
+edge id is the fastest place, because it needs no search for the nearest edge.""")
 ch.code("""net = duckosm.open("monaco.duckdb")    # the network of chapter 1: Monaco, three modes
-net                                                                                 # the card of the network""")
+net                                    # the card of the network""")
 
 ch.md("""## The Route object
 
@@ -113,30 +100,12 @@ places near it. `r.directions()` gives the turn-by-turn steps, as [7. Routing](0
 ch.code("""print(r.geometry.geom_type, len(r.geometry.coords), "points")    # one line
 [step["text"] for step in r.directions()][:5]                   # the first turn-by-turn steps""")
 
-ch.md("""### The route on the map
-
-`r.map()` draws the route on the map of the network.""")
-ch.code("""r.map()    # the route on the map""")
-
 ch.md("""### A Route is also a dict
 
 A `Route` is a Python `dict` too, with the keys of the table above: `edges`, `time_s`, `length_m`, `start`, `end`
 and `path`. The code that used the dict of older duckOSM versions works without a change, and `net.map(routes=r)` takes a
 `Route`.""")
 ch.code("""sorted(r.keys()), r["edges"][:3]    # the keys of the dict, and the first edge ids""")
-
-ch.md("""## Place names: `geocode`
-
-`duckosm.routing.geocode` gives the `(lon, lat)` of a place name. It looks first in the network: the middle of the
-longest edge with that name (the case of the letters does not count). When no edge has the name, it asks Nominatim,
-only inside the box of the network. Nominatim needs the internet. `route` calls `geocode` for each name that you
-give.""")
-ch.code("""duckosm.routing.geocode(net.driving, "Boulevard Albert 1er")    # a street of the network: no internet""")
-ch.md("""The point is on Boulevard Albert 1er, the street along the port. The network had
-the name, so the call did not use Nominatim.
-
-> **Warning:** a name that is not in the network goes to Nominatim. If Nominatim finds nothing in the box of the
-> network, the call stops with the error `no place ... in the network or in Nominatim inside the box of the network`.""")
 
 ch.md("""## The fastest or the shortest: `weight`
 
@@ -164,7 +133,7 @@ ch.code("""a, b = r.edge_ids[0], r.edge_ids[-1]                       # the firs
 best = net.driving.k_shortest_paths(a, b, k=3)              # the 3 fastest routes
 [(round(x.time_s), round(x.length_m), len(x.edge_ids)) for x in best]    # seconds, metres and edges of each""")
 ch.code("""best[0].edge_ids == net.driving.route(a, b).edge_ids    # the first route is the route of route()""")
-ch.md("""The three routes take 126 s, 127 s and 127 s, with 1,453 m, 1,459 m and 1,464 m. The second and the third route have 35 edges, two more than the first. The first route is the same as the route of `route` for the two edges (`True`). The times do not decrease from one route to the next.""")
+ch.md("""The three routes take 126 s, 127 s and 127 s, with 1,453 m, 1,459 m and 1,464 m. The second and the third route have 35 edges, two more than the first. The first route is the same as the route of `route` for the two edges (`True`). Each route takes as long as the route before it, or longer.""")
 ch.code("""net.map("driving", routes={f"route {i + 1}": x for i, x in enumerate(best)})    # the 3 routes on the map""")
 
 ch.md("""## Many routes in parallel: `routes`
@@ -174,18 +143,15 @@ destination at the same place in the other list, as Python's `zip` pairs them. T
 the cores of the computer. The result is a list of `Route`, with `None` for a pair that no route connects.
 
 Here the places are the 200 random driving edges of the section above: 100 origins and 100 destinations.""")
-ch.code("""import time
-
-t = time.perf_counter()                                       # start the clock
-many = net.driving.routes(ids[:100], ids[100:])               # 100 routes
-print(f"100 routes in {time.perf_counter() - t:.2f} s")       # the time
-sum(x is not None for x in many)                              # the routes found""")
-ch.md("""**What the output shows.** The 100 routes took about 0.1 s. 90 pairs have a route. The other 10 pairs have `None`: one of their edges cannot reach the other, for example an edge in a garage that only leaves the network, or an edge that is not in the graph of the mode (see `routed_graph` below). The histogram shows that most routes take 1.5 to 4.5 minutes by car, and the longest take about 7 minutes.""")
+ch.code("""many = net.driving.routes(ids[:100], ids[100:])    # 100 routes: ids[0] to ids[100], ids[1] to ids[101] ...
+sum(x is not None for x in many)                    # the routes found""")
+ch.md("""**What the output shows.** 90 of the 100 pairs have a route. The other 10 pairs have `None`: one of their edges cannot reach the other, for example an edge in a garage that only leaves the network, or an edge that is not in the graph of the mode (see `routed_graph` below). The histogram shows the time of the 90 routes.""")
 ch.code("""import matplotlib.pyplot as plt
 
 times = [x.time_s / 60 for x in many if x is not None]        # the time of each route in minutes
 plt.hist(times, bins=20, color="#1f6feb")                     # a histogram
 plt.xlabel("minutes by car"); plt.ylabel("routes"); plt.show()    # the labels""")
+ch.md("""Most routes take 1.5 to 4.5 minutes by car, and the longest take about 7 minutes.""")
 ch.md("""> **Warning:** the two lists must have the same length. `routes([e1, e2], [e3])` stops with the error
 > `2 origins and 1 destinations: give the same number`. For all pairs of two lists, use `matrix`.""")
 
@@ -208,11 +174,9 @@ routes.
 
 A cell is `NaN` when no route connects the pair, when the cost is more than `max_cost`, or when the edge is not in the
 graph of the mode (for example an edge for buses only).""")
-ch.code("""t = time.perf_counter()                                       # start the clock
-m = net.driving.matrix(ids[:100])                             # 100 x 100 travel times in seconds
-print(f"100 x 100 matrix in {time.perf_counter() - t:.2f} s") # the time
+ch.code("""m = net.driving.matrix(ids[:100])                             # 100 x 100 travel times in seconds
 m.iloc[:5, :5].round()                                        # the first cells""")
-ch.md("""**What the output shows.** The 100 × 100 matrix took about 0.1 s too: the time of the 100 routes, for 100 times more cells. The rows and the columns have the edge ids as their labels. A cell on the diagonal is the time of the edge itself: from its start to its end (6 s for the first edge). The matrix is not symmetric: 96 s from the first edge to the second, but 121 s back, because of the one-way streets.""")
+ch.md("""**What the output shows.** The rows and the columns have the edge ids as their labels. A cell on the diagonal is the time of the edge itself: from its start to its end (6 s for the first edge). The matrix is not symmetric: 96 s from the first edge to the second, but 121 s back, because of the one-way streets.""")
 ch.code("""plt.imshow(m.iloc[:30, :30] / 60, cmap="viridis")           # a heat map of 30 x 30 cells, in minutes
 plt.colorbar(label="minutes by car")                          # the scale
 plt.xlabel("destination"); plt.ylabel("origin"); plt.show()   # the labels""")
@@ -483,12 +447,12 @@ walk = net.walking.k_shortest_paths((7.4280, 43.7393), (7.4246, 43.7384), k=3)
 ```
 </details>
 
-**2.** Make a matrix of walking distances in metres between the three stops of the accessibility section.
+**2.** Make a matrix of walking distances in metres between the three targets of the accessibility section.
 
 <details><summary>Show the answer</summary>
 
 ```python
-net.walking.matrix(stops, weight="length").round()     # rows and columns 0, 1, 2
+net.walking.matrix(list(targets.values()), weight="length").round()     # rows and columns 0, 1, 2
 ```
 </details>
 
@@ -502,7 +466,7 @@ iso_car.iloc[::-1].plot(column="minutes", categorical=True, legend=True)
 ```
 </details>
 
-**4.** Find the walking edges that have no stop within 10 minutes.
+**4.** Find the walking edges that have no target within 10 minutes, and draw them on the map.
 
 <details><summary>Show the answer</summary>
 
@@ -513,9 +477,6 @@ net.map("walking", highlight=list(far))
 </details>""")
 
 ch.glossary([
-    ("edge graph", "the graph that routing searches: a node is an edge of the network, an arc is a legal turn"),
-    ("arc", "one legal turn from one edge to the next. It costs the time or the length of its from-edge"),
-    ("place", "the start or the end of a route: an edge id, a `(lon, lat)` point or a place name"),
     ("`Route`", "the result of a route: the edges, the length, the time, the line, the steps and a map"),
     ("weight", "what a route makes smallest: `\"time\"` (`cost_s`) or `\"length\"` (`length_m`)"),
     ("Dijkstra's algorithm", "a search that finds the cheapest route from one place to all other places"),
@@ -529,13 +490,12 @@ ch.summary([
     ("`net.driving.route(a, b, weight=...)`", "the best route, a `Route` (or `None`)"),
     ("`r.edge_ids`, `r.edges`, `r.length_m`, `r.time_s`", "the edges and the sums of a route"),
     ("`r.geometry`, `r.directions()`, `r.map()`", "the line, the steps and the map of a route"),
-    ("`duckosm.routing.geocode(view, name)`", "the `(lon, lat)` of a place name"),
     ("`net.driving.k_shortest_paths(a, b, k=3)`", "the `k` best routes, the best first"),
     ("`net.driving.routes(origins, destinations)`", "a route for each pair (`zip`), in parallel"),
     ("`net.driving.matrix(origins, destinations, max_cost=...)`", "a travel time (or distance) matrix, a DataFrame"),
     ("`net.walking.isochrones(origins, minutes, buffer_m=...)`", "the polygons reached within each time"),
     ("`net.walking.accessibility(origins, targets, minutes)`", "the targets reached from each origin, and the nearest"),
-    ("`duckosm.routing.routed_graph(view)`", "the SQL relation of the graph of all calls"),
+    ("`duckosm.routing.routed_graph(view)`", "the turns that the mode routes on, as SQL text for your own query"),
     ("`net.driving.route(a, b, weight=series, missing=\"skip\")`", "the route with your own cost of each edge"),
     ("`net.add_multimodal(node_costs=df, only_listed_nodes=True)`", "the cost of a change of mode at each junction"),
 ], reference="[duckosm.routing](../reference/sdk/routing.md)")

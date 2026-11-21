@@ -199,14 +199,14 @@ counts = pd.read_xml("out/sumo/edgedata.xml", xpath=".//edge", parser="etree", d
 cars = counts.merge(edges, on="id").groupby("edge_id").entered.sum()               # the cars of each edge_id
 cars.describe()                                                                    # the counts""")
 ch.md("""Each of the 2840 edges has a count. Half of the edges have 7 cars or fewer in the 30
-minutes, and some have none. The busiest edge has 146 cars.""")
+minutes, and some have none. The busiest edge has 144 cars.""")
 ch.code("""net.driving.map(color_by=cars)    # the edges colored by the number of cars (a picture here; live when you run it)""")
 ch.md("""The main roads and the tunnels have the most cars (green and yellow): the random trips cross Monaco
 on them. The small streets have few cars or none.""")
 ch.code("""top = net.driving.edges(where=f"edge_id IN ({','.join(map(str, cars.nlargest(3).index))})")[["edge_id", "name", "highway"]]
 top.assign(cars=top.edge_id.map(cars)).sort_values("cars", ascending=False)        # the three edges with the most cars""")
-ch.md("""**What the output shows.** The busiest edges are on the Place d'Armes (146 cars), the roundabout Giratoire
-Aureglia (127) and the Boulevard Albert 1er (127): primary and secondary roads. The names come from the duckOSM
+ch.md("""**What the output shows.** The busiest edge is on the Place d'Armes (144 cars). The next two are two edges of
+the Boulevard Albert 1er (128 cars each). These are secondary roads. The names come from the duckOSM
 edges, through the `edge_id`.""")
 
 ch.md("""## MATSim

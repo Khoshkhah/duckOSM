@@ -10,7 +10,7 @@ from notebook_book import IMAGES, Chapter  # noqa: E402
 
 ch = Chapter(14, "14_hdmap", "HD maps",
              "From the roads of an area to lane maps for automated driving: CommonRoad, Lanelet2, OpenDRIVE",
-             learn="what a lane map is; the lanes of GMNS; a CommonRoad map and how commonroad-io reads it; a Lanelet2 map "
+             learn="what a lane map is; the lanes of GMNS; the road surfaces of lanes and junctions; a CommonRoad map and how commonroad-io reads it; a Lanelet2 map "
                    "and how the `lanelet2` library reads it; the lane graph and a route from lane to lane; an OpenDRIVE file "
                    "with and without junctions",
              time="about 3 minutes", extras="sim,hdmap", more_install=" lanelet2",
@@ -37,6 +37,8 @@ database (chapter 13). Then each call of `duckosm.hdmap` reads that database and
 exception: it can also read the network file directly.
 
 <img src="{IMAGES}/hdmap-flow.svg" alt="The flow: the network, the GMNS lanes, then CommonRoad, Lanelet2, the lane graph and OpenDRIVE" width="100%">
+
+The table lists the formats of this chapter, the tools that read them, and the call that writes each one.
 
 | Format | Used by | The call |
 |---|---|---|
@@ -85,6 +87,43 @@ lanes""")
 ch.md("""**What the output shows.** The first line is the number of lane connectors: 4123 paths through the junctions.
 The table shows lane 3 of roads with three lanes. Here the rightmost lane is a bus lane (`allowed_uses` is `bus`).
 `edge_id` is the road of each lane, so a lane joins to `driving.edges`.""")
+
+ch.md("""## The road surfaces: `surfaces`
+
+A lane in GMNS is a line with a width. For a map, a GIS study or a simulator you often need the surface: the area of
+the road that the lane covers. `duckosm.hdmap.surfaces(gmns_db)` gives the surfaces as two GeoDataFrames, in degrees:
+
+| Result | One row for | The polygon | Columns |
+|---|---|---|---|
+| `lanes` | each lane | the lane line to the edge of the junction, with the width of the lane | `lane_id`, `edge_id`, `lane_num`, `width`, `allowed_uses` |
+| `junctions` | each junction node | all the lane connectors of the node, each with its width, as one area | `node_id`, `connectors` |
+
+`connectors` is the number of lane connectors through the junction: a simple measure of how complex the junction
+is.""")
+ch.code("""lanes, junctions = duckosm.hdmap.surfaces("out/gmns.duckdb")    # two GeoDataFrames (EPSG:4326)
+len(lanes), len(junctions)""")
+ch.code("""junctions.sort_values("connectors", ascending=False).head(3)    # the junctions with the most lane connectors""")
+ch.md("""Monaco has 3,318 lane surfaces and 1,727 junction surfaces. The junction with the most turns has 12 lane
+connectors, and the next two have 9. A junction polygon can be a `MULTIPOLYGON` when its connectors do not touch.""")
+ch.md("""### How much land the roads use
+
+The areas need metres, so the cell changes the coordinates to the UTM zone of Monaco first.""")
+ch.code("""utm = lanes.estimate_utm_crs()                                  # the UTM zone of Monaco: metres
+lanes_m, junctions_m = lanes.to_crs(utm), junctions.to_crs(utm)
+round(lanes_m.area.sum()), round(junctions_m.area.sum())        # m² of lanes, m² of junctions""")
+ch.md("""The lanes cover 273,212 m² and the junctions 51,739 m². Together this is about 0.32 km², or 14 % of the
+2.39 km² of Monaco. The junctions are 16 % of the road surface.""")
+ch.code("""import matplotlib.pyplot as plt
+
+fig, ax = plt.subplots(figsize=(9, 8))
+lanes_m.plot(ax=ax, color="lightgray")                          # the lanes first, in light gray
+junctions_m.plot(ax=ax, column="connectors", cmap="viridis", legend=True,
+                 legend_kwds={"label": "lane connectors", "shrink": 0.6})    # the junctions by their connectors
+ax.set_xlim(372650, 373050)                                     # a part of the center, in metres (UTM)
+ax.set_ylim(4843350, 4843700)
+ax.set_axis_off()""")
+ch.md("""The picture shows a part of the center. The lanes are light gray. Each junction has the color of its number of
+connectors: a junction with many turns is light, and a junction with one or two connectors is dark.""")
 
 ch.md("""## CommonRoad
 
@@ -330,6 +369,7 @@ ch.glossary([
 
 ch.summary([
     ("`net.driving.to_gmns(path)`", "the lanes, the lane connectors and the turns, in a GMNS file (chapter 13)"),
+    ("`duckosm.hdmap.surfaces(gmns_db)`", "the road surface of each lane and each junction, as two GeoDataFrames"),
     ("`duckosm.hdmap.to_commonroad(gmns_db, path, ...)`", "a CommonRoad map, with its numbers and `ids` (lanelet to `edge_id`)"),
     ("`duckosm.hdmap.to_lanelet2(gmns_db, out_path, snap_m=0.01)`", "a Lanelet2 map (OSM XML), one lanelet for each lane"),
     ("`duckosm.hdmap.lane_graph(gmns_db)` (`build_lane_graph`)", "the lane graph, as `lane_driving.lane_edges` in the GMNS file"),

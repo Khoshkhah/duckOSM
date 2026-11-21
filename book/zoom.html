@@ -1,0 +1,22 @@
+<!-- Zoom in the lightbox: the mouse wheel or two fingers zoom the picture, a drag moves it, a double click resets it. -->
+<script>window.__amd = window.define; window.define = undefined;</script>  <!-- require.js on the page: load Panzoom as a global -->
+<script src="panzoom.min.js"></script>  <!-- @panzoom/panzoom 4.5.1, MIT license -->
+<script>window.define = window.__amd;</script>
+<script>
+window.addEventListener("load", () => {
+  if (typeof lightboxQuarto === "undefined" || typeof Panzoom === "undefined") return;
+  lightboxQuarto.settings.draggable = false;          // a drag moves the picture, not to the next picture
+  lightboxQuarto.settings.touchNavigation = false;    // the same for a finger on a phone
+  lightboxQuarto.settings.zoomable = false;           // Panzoom zooms, not GLightbox
+  lightboxQuarto.on("slide_after_load", ({ slideNode }) => {
+    const img = slideNode.querySelector(".gslide-image img");
+    if (!img || img.dataset.zoom) return;
+    img.dataset.zoom = "1";
+    const pz = Panzoom(img, { maxScale: 8, minScale: 1, contain: "outside", cursor: "zoom-in" });
+    img.parentElement.style.touchAction = "none";
+    img.parentElement.style.overflow = "visible";      // the zoomed picture can fill the whole screen
+    img.parentElement.addEventListener("wheel", (e) => pz.zoomWithWheel(e));
+    img.addEventListener("dblclick", () => pz.reset());
+  });
+});
+</script>

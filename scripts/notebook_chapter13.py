@@ -43,6 +43,8 @@ GMNS has three levels. duckOSM makes all three in one DuckDB file.
 
 <img src="{IMAGES}/gmns-levels.svg" alt="The levels of a GMNS network: the duckOSM network, the GMNS macro network, the meso network, the micro network, and the tools" width="100%">
 
+The table compares the three levels: what one link is, the call that makes it, and its use.
+
 | Level | One link for | The call | Use it for |
 |---|---|---|---|
 | macro | each road in one direction | `to_gmns` | static assignment, shortest paths |

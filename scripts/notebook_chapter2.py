@@ -10,8 +10,8 @@ from notebook_book import IMAGES, Chapter  # noqa: E402
 
 ch = Chapter(2, "02_inspect", "Look inside the file",
              "The schemas, the tables, the columns, the edges and SQL of one network file",
-             learn="the schemas and tables of a network file; the columns and their descriptions; the numbers of a table; "
-                   "the mode views; edges and nodes as GeoDataFrames; SQL on the file; your own DuckDB connection; what `edge_id` is",
+             learn="the schemas and tables of a network file, the columns and their descriptions, the numbers of a table, "
+                   "the mode views, edges and nodes as GeoDataFrames, SQL on the file, your own DuckDB connection, what `edge_id` is",
              time="about 2 minutes", extras="gis",
              next_=("03_maps", "3. Draw maps", "the live map, the dashboard and the static picture"))
 
@@ -23,7 +23,7 @@ that you build is one schema, with the same table names. The other schemas hold 
 | Schema | What it holds | The main tables |
 |---|---|---|
 | `driving`, `walking`, `cycling` | the network of one mode | `edges` (the roads), `nodes` (the junctions), `edge_graph` (the turns from edge to edge), `ways` and `way_nodes` (the OSM ways of the mode), `private_edges` (roads that the mode cannot use) |
-| `main` | the facts of the area | `boundary` (the polygon), `global_junctions` (the nodes of all modes), `visualization_metadata` (the build time, the version, the config) |
+| `main` | the facts of the area | `boundary` (the polygon), `global_junctions` (the nodes of all modes), `osm_source` (the OSM file of the build), `visualization_metadata` (the build time, the version, the config) |
 | `raw` | the OSM data of the cut | `nodes`, `ways`, `relations` |
 | `features` | the base map | `buildings`, `water_polygons`, `land`, `ocean`, `pois` and more |
 | `visualization` | the drawing order | `edge_levels` (which road is drawn over which: bridges over tunnels) |
@@ -42,11 +42,12 @@ edges and the nodes make a directed graph.
 
 ch.md("""## Open the network of chapter 1
 
-Chapter 1 builds Monaco with three modes (driving, walking and cycling) and saves it as `monaco.duckdb`. This chapter opens that file with `duckosm.open`: it builds nothing. The chapter compares the three modes.""")
+Chapter 1 builds Monaco with three modes (driving, walking and cycling) and saves it as `monaco.duckdb`. This
+chapter opens that file with `duckosm.open`. It builds nothing.""")
 ch.code("""net = duckosm.open("monaco.duckdb")    # the network of chapter 1: Monaco, three modes
 net                                                                                               # the card""")
-ch.md("""The card names the file, its size (36.5 MB) and the build time. The table has one
-row for each mode: driving has 2840 edges, walking 11938 and cycling 11305.""")
+ch.md("""The card names the file and its size (37.0 MB), and says that it is saved. The table has one row for each
+mode: driving has 2840 edges, walking 11938 and cycling 11305.""")
 
 ch.md("""## The file and its modes
 
@@ -72,7 +73,7 @@ tables[:8]                 # the first eight""")
 ch.code("""import pandas as pd
 pd.set_option("display.max_colwidth", 120)    # show more of each description
 net.schema()                                  # one row for each table: rows, columns, description""")
-ch.md("""**What the output shows.** The file has 53 tables in eight schemas. The largest tables are the turns of walking
+ch.md("""**What the output shows.** The file has 54 tables in eight schemas. The largest tables are the turns of walking
 (`walking.edge_graph`, 35074 rows) and the OSM nodes (`raw.nodes`, 34461 rows). Some tables have 0 rows: Monaco has
 no turn permissions and no virtual nodes, but the table is there, so the same query works on each file.
 
@@ -84,9 +85,9 @@ ch.md("""### The tables of one schema
 `net.schema("driving")` gives only the tables of one schema. A wrong name gives an error that lists the schemas of
 the file.""")
 ch.code("""net.schema("main")         # the facts of the area""")
-ch.md("""**What the output shows.** `main` has three tables: the boundary (1 row), the junctions of all modes (4326 rows)
-and the metadata of the build (1 row). The description of `global_junctions` starts with "The nodes where every
-mode cuts its ways". `boundary` has no description: its section of the reference page has no text before its table.""")
+ch.md("""**What the output shows.** `main` has four tables: the boundary (1 row), the junctions of all modes (4326 rows),
+the OSM file of the build (1 row) and the metadata of the build (1 row). The description of `global_junctions` starts with "The nodes where every
+mode cuts its ways". The description of `boundary` tells which columns the table has for each type of build.""")
 
 ch.md("""## The columns: `net.columns()`
 
@@ -101,8 +102,8 @@ columns are keys of H3 cells and map tiles, for fast spatial reads.
 
 | Column | Type | What it is |
 |---|---|---|
-| `edge_id` | BIGINT | the number of the edge; the same in every build and in every mode (section "What edge_id is") |
-| `edge_ref` | VARCHAR | a readable name, `<osm_id>#<part>` and `f` or `r` for the direction |
+| `edge_id` | BIGINT | the number of the edge. It is the same in every build and in every mode (section "What edge_id is") |
+| `edge_ref` | VARCHAR | a readable name: `<osm_id>#<part>`, then `f` or `r` for the direction |
 | `source`, `target` | BIGINT | the node where the edge starts, and the node where it ends |
 | `osm_id` | BIGINT | the OSM way of the edge |
 | `highway` | VARCHAR | the road class of OSM: `primary`, `residential`, `footway` ... |
@@ -116,10 +117,12 @@ ch.md("""### Compare the modes
 
 The `edges` tables of the modes have almost the same columns. Set operations on the column names show the
 differences.""")
-ch.code("""cols = {m: set(net.columns(f"{m}.edges").column_name) for m in net.modes}   # the column names of each mode
-print("walking only:", cols["walking"] - cols["driving"])
-print("cycling only:", cols["cycling"] - cols["driving"])""")
-ch.md("""Walking adds `walk_type` (for example a sidewalk or a crossing). Cycling adds
+ch.code("""driving = set(net.columns("driving.edges").column_name)    # the column names of each mode
+walking = set(net.columns("walking.edges").column_name)
+cycling = set(net.columns("cycling.edges").column_name)
+print("walking only:", walking - driving)
+print("cycling only:", cycling - driving)""")
+ch.md("""Walking adds `walk_type` (for example `sidewalk`, `crossing` or `steps`). Cycling adds
 `cycle_type` and `dismount` (`true` where you must push the bicycle). Every other column is the same in the three
 modes, so one query works on each mode.""")
 
@@ -147,11 +150,9 @@ ch.md("""## The view of one mode
 | `net.walking.route(a, b)` and the other routes | `net.route(a, b, mode="walking")` (chapter 7) |
 | `net.walking.to_sumo(...)` and the other exports | `net.to_sumo(..., mode="walking")` (chapter 6) |
 | `net.walking.summary()` | the row of walking in `net.summary()` |""")
-ch.code("""net.summary()          # one row for each mode""")
 ch.code("""walk = net["walking"]     # the same as net.walking
-walk.summary()            # the row of one mode""")
-ch.md("""Walking has 11938 edges and 4589 nodes, 260.6 km in all. Driving and cycling have
-35.5 km of one-way roads. Walking has 0.0 km: a person on foot can walk in both directions on each road.
+walk.summary()            # the row of walking in net.summary()""")
+ch.md("""The view gives only the row of walking: 11938 edges, 4589 nodes and 260.6 km.
 
 > **Warning:** a call that needs one network (a route, a graph, an export) stops with a `DuckOSMError` when the file
 > has more modes and you give none. The message lists the modes and shows `net['driving'].route(...)`. Use a mode
@@ -165,7 +166,7 @@ for the nodes). You can then use all of pandas and GeoPandas.
 
 | Argument | Default | What it does |
 |---|---|---|
-| `mode` | `None` | one mode; `None` gives the one mode of the file, or all modes with a `mode` column |
+| `mode` | `None` | one mode. `None` gives the one mode of the file, or all modes with a `mode` column |
 | `where` | `None` | a SQL filter on the columns, for example `"highway = 'primary'"` (only `edges`) |
 | `crs` | EPSG:4326 | the coordinate system of the result: an EPSG number, or `"utm"` for the UTM zone of the area |""")
 ch.code("""edges = net.driving.edges()                     # all driving edges
@@ -176,8 +177,8 @@ the smallest `edge_id` values.""")
 
 ch.md("""### Filter with `where`
 
-`where` puts a SQL filter into the read. DuckDB reads only the rows that you ask for, so this is faster than a filter
-in pandas on a large file.""")
+`where` puts a SQL filter into the read. DuckDB reads only the rows that you ask for, and Python gets only these
+rows, not the full table.""")
 ch.code("""primary = net.edges("driving", where="highway IN ('primary', 'primary_link')")   # the primary roads
 print(len(primary), "edges,", round(primary.length_m.sum() / 1000, 1), "km")""")
 ch.md("""218 edges, 12.3 km: the `primary` and `primary_link` rows of the SQL table in the
@@ -186,7 +187,7 @@ section "SQL on the file" below.
 > **Warning:** the text of `where` goes into the query as it is. Give only text that you write yourself, never text
 > that a user of your program types.""")
 
-ch.md("""### Meters: `crs="utm"`
+ch.md("""### Lengths in meters: `crs="utm"`
 
 The geometry in longitude and latitude has degrees, not meters. `crs="utm"` gives the edges in the UTM zone of the
 area (EPSG:32632 for Monaco), so `.length` and `.area` are in meters.""")
@@ -214,12 +215,17 @@ back to its start).""")
 ch.code("""nodes = net.nodes("walking")    # the junctions of the walking network
 print(len(nodes), "nodes")
 nodes.head(3)""")
+ch.md("""The walking network has 4589 nodes. The rows are in the order of `node_id`, so the first rows are the nodes that
+the build added, with negative ids. `h3_cell` and `tile` are the keys of the H3 cell and of the map tile of the
+node.""")
 
 ch.md("""## SQL on the file: `net.sql()`
 
 `net.sql(query)` runs a SQL query on the file and gives a pandas DataFrame. The connection is read-only, so a query
 cannot change the file. The DuckDB extension `spatial` is loaded, so the `ST_` functions work. Use SQL for counts,
-sums and joins: DuckDB computes them in the file, without a read of all the rows into Python.""")
+sums and joins: DuckDB computes them in the file, and Python gets only the result. The query below puts the driving
+edges into groups by road class (`GROUP BY highway`), and gives the number of edges and their length in km for each
+group.""")
 ch.code("""net.sql(\"\"\"
     SELECT highway, count(*) AS edges, round(sum(length_m) / 1000, 1) AS km
     FROM driving.edges
@@ -235,41 +241,41 @@ Put a value into a query with `$name` (or `?`) and `params`, not with Python tex
 value, and a quote in a name cannot break the query.""")
 ch.code("""net.sql("SELECT edge_id, edge_ref, length_m FROM driving.edges WHERE name = $name ORDER BY edge_ref",
         {"name": "Boulevard Albert 1er"})                 # the edges of one street""")
+ch.md("""The Boulevard Albert 1er has 20 driving edges, from 6 OSM ways. All of them are one-way: each `edge_ref` ends
+with `f`.""")
 
 ch.md("""### Spatial SQL
 
-The spatial functions take the geometry columns. Here the area of the boundary in km2, measured in the UTM zone, and
-the number of driving edges within 200 m of the casino square.""")
-ch.code("""net.sql(\"\"\"
-    SELECT round(ST_Area(ST_Transform(geom, 'EPSG:4326', 'EPSG:32632', always_xy := true)) / 1e6, 2) AS km2
-    FROM main.boundary
-\"\"\")                                                     # the area of Monaco""")
+The spatial functions work on the geometry columns. The query below counts the driving edges within 200 m of the
+casino square of Monte Carlo. The geometry is in degrees, so the query first changes it to meters (the UTM zone of
+Monaco, EPSG:32632).
+
+| Function | What it does |
+|---|---|
+| `ST_Point(lon, lat)` | a point |
+| `ST_Transform(g, 'EPSG:4326', 'EPSG:32632', always_xy := true)` | the geometry `g` in meters. `always_xy := true` tells DuckDB that the points are longitude first |
+| `ST_DWithin(a, b, 200)` | `true` when `a` and `b` are 200 m apart or less |""")
 ch.code("""net.sql(\"\"\"
     SELECT count(*) AS edges
     FROM driving.edges
     WHERE ST_DWithin(ST_Transform(geometry, 'EPSG:4326', 'EPSG:32632', always_xy := true),
                      ST_Transform(ST_Point(7.4280, 43.7393), 'EPSG:4326', 'EPSG:32632', always_xy := true), 200)
 \"\"\")                                                     # the edges near the casino square""")
-ch.md("""The boundary has 2.39 km2, the same value as the `area_km2` column of
-`net.boundary`. 223 driving edges are within 200 m of the casino square.
-
-> **Tip:** `always_xy := true` tells DuckDB that the points are longitude first. Without it, `ST_Transform` reads
-> EPSG:4326 as latitude first.""")
+ch.md("""223 driving edges are within 200 m of the casino square.""")
 
 ch.md("""## Your own DuckDB connection: `net.connect()`
 
 `net.sql()` opens a connection for each query and gives pandas. `net.connect()` gives a read-only DuckDB connection
 that stays open, with `spatial` loaded. Use it for many queries in a row, for DuckDB relations, for Arrow
 (`.arrow()`) or for Polars (`.pl()`). Close it after use: a `with` block closes it for you.""")
-ch.code("""with net.connect() as con:                                          # closed at the end of the block
-    rel = con.sql("SELECT edge_id, highway, length_m FROM walking.edges")    # a DuckDB relation: not read yet
-    print(rel.count("*").fetchone()[0], "walking edges")                     # DuckDB counts in the file
-    print(rel.filter("highway = 'steps'").count("*").fetchone()[0], "of them are steps")
-    table = rel.limit(5).to_arrow_table()                                    # an Arrow table, no pandas
-print(type(table).__name__, table.num_rows, "rows")""")
-ch.md("""11938 walking edges, and 1038 of them are steps. The Arrow table has 5 rows. The
-relation reads nothing until you ask for a result. The two counts run in
-DuckDB, and only the numbers come to Python. `to_arrow_table()` gives a pyarrow `Table` for tools that read Arrow.
+ch.code("""with net.connect() as con:                                       # closed at the end of the block
+    steps = con.sql("SELECT edge_id, name, length_m FROM walking.edges WHERE highway = 'steps'")  # a relation: not read yet
+    table = steps.to_arrow_table()                               # DuckDB reads the rows, into an Arrow table
+    frame = steps.df()                                           # the same rows, into pandas
+print(table.num_rows, "steps in Arrow,", len(frame), "steps in pandas")""")
+ch.md("""The walking network has 1038 edges that are steps. `steps` is a DuckDB **relation**: a query, not data. DuckDB
+runs it each time that you ask for a result: `to_arrow_table()` gives a pyarrow `Table`, `df()` gives pandas, and
+`pl()` gives Polars.
 
 > **Warning:** in DuckDB 1.5, `.arrow()` gives a `RecordBatchReader`, which reads the rows only when you use it.
 > Read it to the end (`.read_all()`) before the connection closes. A reader that you do not read keeps the query open,
@@ -285,12 +291,14 @@ of the edge: the OSM way (`osm_id`) and the two nodes (`source`, `target`).
 
 <img src="IMAGES/edge-id.svg" alt="A two-way road is two edges: each direction has its own edge_ref and edge_id" width="100%">
 
+The `edge_id` has three properties. The table says why each one is important for your data.
+
 | Property | Why it is important |
 |---|---|
 | It comes from the OSM data, not from the row number | a new build of the same OSM data gives the same `edge_id` to each edge |
 | Each direction has its own number | `source` and `target` change places, so the two edges of a two-way road get different numbers |
 | It is the same in each mode | a street with a sidewalk has the same `edge_id` in `driving.edges` and in `walking.edges` |
-| It is a `BIGINT` | keep it as `int64` in pandas; a `float64` loses the last digits (chapter 4) |
+| It is a `BIGINT` | keep it as `int64` in pandas. A `float64` loses the last digits (chapter 4) |
 
 `edge_ref` is a second name of an edge that people can read. It can change when a way gets more nodes in OSM, so join
 your data on `edge_id`, not on `edge_ref`.
@@ -333,20 +341,12 @@ all 2840 driving edges: 0 are different.
 
 ch.md("""### The same edge in each mode
 
-A road that more modes can use has the same `edge_id` in each mode. A join of two `edges` tables on `edge_id` gives
-the roads that the two modes share.""")
-ch.code("""net.sql(\"\"\"
-    SELECT 'driving and walking' AS modes, count(*) AS edges FROM driving.edges JOIN walking.edges USING (edge_id)
-    UNION ALL
-    SELECT 'driving and cycling', count(*) FROM driving.edges JOIN cycling.edges USING (edge_id)
-    UNION ALL
-    SELECT 'all modes, each road once', count(DISTINCT edge_id)
-    FROM (SELECT edge_id FROM driving.edges UNION ALL SELECT edge_id FROM walking.edges
-          UNION ALL SELECT edge_id FROM cycling.edges)
-\"\"\")                                                     # the roads that the modes share""")
-ch.md("""2201 of the 2840 driving edges are also walking edges, and 2829 are also cycling
-edges. The three modes have 13302 different edges in all, less than the 26083 rows of the three tables, because most
-roads are in two or three modes.""")
+A road that more modes can use has the same `edge_id` in each mode. `JOIN ... USING (edge_id)` keeps the pairs of
+rows that have the same `edge_id`, so a join of two `edges` tables gives the roads that the two modes share.""")
+ch.code("""net.sql("SELECT count(*) AS edges FROM driving.edges JOIN walking.edges USING (edge_id)")   # in driving and in walking""")
+ch.code("""print(len(all_edges), "rows,", all_edges.edge_id.nunique(), "different edges")   # all_edges: the three modes (above)""")
+ch.md("""2201 of the 2840 driving edges are also walking edges. The table of the three modes (section "All modes in one
+table") has 26083 rows, but only 13302 different edges, because most roads are in two or three modes.""")
 
 ch.exercises([
     ("Find the five longest walking edges that have a name. Use `net.sql`.",
@@ -366,8 +366,8 @@ ch.glossary([
     ("`ModeView`", "the view of one mode: `net.walking`, with the calls of the network and no `mode=`"),
     ("GeoDataFrame", "a pandas DataFrame with a geometry column (GeoPandas)"),
     ("CRS", "the coordinate system of a geometry: EPSG:4326 (degrees) or a UTM zone (meters)"),
-    ("`edge_ref`", "the readable name of an edge, `<osm_id>#<part>f` or `r`; it can change"),
-    ("`edge_id`", "the key of an edge: a hash of `osm_id`, `source` and `target`; the same in each build and mode"),
+    ("`edge_ref`", "the readable name of an edge, `<osm_id>#<part>f` or `r`. It can change"),
+    ("`edge_id`", "the key of an edge: a hash of `osm_id`, `source` and `target`, the same in each build and mode"),
     ("relation (DuckDB)", "a query that DuckDB runs only when you ask for its result"),
 ])
 
@@ -377,7 +377,7 @@ ch.summary([
     ("`net.schema(schema=None)`", "one row for each table: rows, columns, description"),
     ("`net.columns(table)`", "the columns of a table: name, type, description"),
     ("`net.summarize(table)`", "DuckDB's `SUMMARIZE`: the range, the distinct values and the NULLs of each column"),
-    ("`net.summary()`, `net.walking`, `net[\"walking\"]`", "one row for each mode; the view of one mode"),
+    ("`net.summary()`, `net.walking`, `net[\"walking\"]`", "one row for each mode, and the view of one mode"),
     ("`net.edges(mode, where=, crs=)`", "the edges as a GeoDataFrame"),
     ("`net.nodes(mode, crs=)`", "the nodes as a GeoDataFrame"),
     ("`net.sql(query, params=None)`", "a SQL query on the file, as a DataFrame"),
