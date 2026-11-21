@@ -357,7 +357,7 @@ lines = pd.concat([net.driving.edges(), net.walking.edges()])      # the edges o
 lines = lines.drop_duplicates("edge_id")                           # a road of both modes counts once
 lines = lines[~lines.is_reverse & lines.tunnel.isna()]             # one line for each street, no tunnels
 crs = lines.estimate_utm_crs()                                     # the UTM zone of Monaco: coordinates in metres
-streets = lines.to_crs(crs)[["edge_id", "highway", "geometry"]]
+streets = lines.to_crs(crs)[["edge_id", "highway", "lanes", "oneway", "geometry"]]
 len(streets)""")
 ch.md("""### The buildings and the land
 
@@ -507,15 +507,28 @@ ch.md("""### The street space
 
 On the first map the streets have no space of their own: two blocks on the two sides of a street touch at its center
 line. A real street has a width. This section gives momepy the two edges of each street, not only its center line, so
-that momepy itself makes blocks that stop at the street edge. Each street gets a width from its kind:
+that momepy itself makes blocks that stop at the street edge.
 
-| Kind | `highway` | Width |
+#### The width of each street
+
+OSM gives the width of few streets: in Monaco, 32 of 3,502 road ways have a `width` tag. So the next cell gives each
+road a width in one of three ways. The map reads only the column `streets["width"]`:
+
+| Way | How | Change it |
 |---|---|---|
-| main road | `motorway`, `trunk`, `primary`, `secondary`, `tertiary` (and their `_link`) | 12 m |
-| street | the other roads for cars | 8 m |
-| footway, steps | `footway`, `steps`, `pedestrian`, `path`, `cycleway`, `corridor` | 2 m |
-
-OSM gives the width of few streets, so these are typical widths, not measured widths.
+| By kind | one width for each kind: main road 12 m, street 8 m, footway or steps 2 m | the dict `widths` |
+| From the lanes (used here) | `lanes` × 3.25 m for each lane, on both sides of a two-way road, plus 2 m for the sidewalks. Footways and steps, and roads with no `lanes`, take the width of their kind | the lane width and the sidewalk width in the cell |
+| Your own | any width that you have, for example measured widths | put them into `streets["width"]` |""")
+ch.code("""widths = {"main road": 12.0, "street": 8.0, "footway, steps": 2.0}          # way 1: one width for each kind, in metres
+by_kind = kind.map(widths)
+sides = streets.oneway.map({True: 1, False: 2}).fillna(2)                     # a two-way road has lanes on both sides
+by_lanes = streets.lanes * sides * 3.25 + 2.0                                 # way 2: 3.25 m a lane, 2 m of sidewalks
+streets["width"] = by_lanes.where(kind != "footway, steps").fillna(by_kind)   # footways and roads with no lanes: by kind
+streets.groupby(kind).width.describe()[["count", "min", "50%", "max"]].round(1)    # the widths of each kind, in metres""")
+ch.md("""The footways and the steps are 2 m wide. Most streets and main roads are 8.5 m: one lane in each direction
+(2 × 3.25 m) plus 2 m of sidewalks. A one-way road with one lane is 5.25 m, and the widest main roads, with four
+lanes, are 15 m.""")
+ch.md("""#### Momepy with the street edges
 
 The steps of the first cell:
 
@@ -524,7 +537,7 @@ The steps of the first cell:
 2. Make the street space: each other road with its width, less the buildings. A street never goes through a building.
 3. Take the outline of the street space: the two edges of each street.
 4. Take the street space out of the extra areas (the parks and the sea), so that they do not fill the streets.""")
-ch.code("""half = kind.map({"main road": 6.0, "street": 4.0, "footway, steps": 1.0})       # half of the width, in metres
+ch.code("""half = streets["width"] / 2                                                     # half of the width, in metres
 inside = streets.sjoin(blocks[["geometry"]], predicate="within").index.unique()  # 1. the roads that stop inside a block
 between = streets.drop(inside)                                                  # the roads between the blocks
 space = between.buffer(half.drop(inside)).union_all().difference(buildings.union_all())    # 2. the street space
@@ -536,7 +549,7 @@ extra2 = extra2[extra2.geom_type.eq("Polygon") & (extra2.area > 20)]
 things2 = gpd.GeoDataFrame(geometry=pd.concat([buildings.geometry, extra2]), crs=crs).reset_index(drop=True)
 len(inside), round(space.intersection(land).area / 1e6, 2)                      # roads inside a block, km² of street space""")
 ch.md("""1,871 roads stop inside a block on the first map, so they get no street space. The street space of the other
-roads covers 0.35 km² of the land of Monaco.""")
+roads covers 0.30 km² of the land of Monaco.""")
 ch.md("""The second cell runs the same three steps of momepy as before, with the new lines, and cuts out the water
 again.""")
 ch.code("""enc2 = momepy.enclosures(cut, limit=gpd.GeoSeries([frame], crs=crs))             # step 1
@@ -545,7 +558,7 @@ blocks2, _ = momepy.generate_blocks(cells2, cut, things2)                       
 blocks2 = gpd.GeoDataFrame(geometry=blocks2.intersection(land), crs=crs).explode(index_parts=False)    # only the land
 blocks2 = blocks2[blocks2.area > 1].reset_index(drop=True)
 len(blocks2), round(blocks2.area.sum() / 1e6, 2)                                # blocks, km²""")
-ch.md("""momepy makes 432 blocks on the land, and they cover 1.75 km². There are more blocks than on the first map,
+ch.md("""momepy makes 441 blocks on the land, and they cover 1.78 km². There are more blocks than on the first map,
 because the street edges cut the land into more pieces.""")
 ch.code("""block_map(blocks2, space)                                                        # momepy's blocks with the street edges""")
 ch.md("""The street space is white between the blocks. Each block is a block of momepy: momepy made it with the street
