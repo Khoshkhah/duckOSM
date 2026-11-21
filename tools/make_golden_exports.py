@@ -244,7 +244,7 @@ def sumo_join(db, out):
     """duckosm sumo with junctions.join on (needs netconvert): the plain XML after the nodes that netconvert joins are merged."""
     with tempfile.TemporaryDirectory() as tmp:
         src = duckdb.connect(db, read_only=True)
-        to_sumo(src, tmp, mode="driving", net_name="monaco", config={"junctions.join": "true"})
+        to_sumo(src, tmp, mode="driving", net_name="monaco", config={"junctions.join": "true"}, run_netconvert=True)
         src.close()
         for f in ("nod", "edg", "con"):
             gz(Path(tmp) / f"monaco.{f}.xml", out / f"sumo_join_driving.{f}.xml.gz")
