@@ -316,10 +316,21 @@ starts the editor **Edit OSM data** on the database, on your computer. The page 
 the area on a map. Each change that you add on the page goes into the fixes file at once, in the same format as
 `Fixes`.
 
+`net.edit()` starts the page in the background and gives its address. Open the address in your browser:
+
 ```python
-url = net.edit()                       # the editor in the background; the fixes file of the build, else osm_fixes.yaml
-url                                    # http://127.0.0.1:8790/: open it in your browser
-net.edit(fixes="osm_fixes.yaml", port=8791)    # another file, another port
+net.edit()
+```
+
+```text
+'http://127.0.0.1:8790/'
+```
+
+The page writes the fixes file of the build. A network with no fixes file gets `osm_fixes.yaml` beside its database.
+To write another file, or to use another port, give them to `net.edit()`:
+
+```python
+net.edit(fixes="osm_fixes.yaml", port=8791)
 ```
 
 | Argument | Default | Does |
