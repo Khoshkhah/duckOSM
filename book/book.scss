@@ -397,3 +397,6 @@ $vs-dark: (bi: #dcdcaa, pp: #c586c0, kw: #569cd6, cf: #c586c0, im: #c586c0, fu: 
   body.quarto-dark div.sourceCode code span.#{$k} { color: $c !important; font-style: normal !important; font-weight: normal !important; } }
 body:not(.quarto-dark) div.sourceCode code { color: #001080 !important; }
 body.quarto-dark div.sourceCode code { color: #9cdcfe !important; }
+// a long chapter title wraps under its title, not under its number (a hanging indent as wide as the number badge)
+.sidebar-navigation .sidebar-link .menu-text { display: block; padding-left: 2.05rem; text-indent: -2.05rem; }
+.sidebar-navigation .sidebar-link .menu-text .chapter-number { text-indent: 0; }
