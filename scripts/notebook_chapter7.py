@@ -58,10 +58,14 @@ ch.md("""## Build Monaco with three modes and the multimodal graph
 
 The routing calls of this chapter search graphs that are tables of the network file. There are two kinds:
 
-| Graph | Made by default? | Where in the file | Rows (Monaco) |
+| Graph | Table | Made by default? | Rows in Monaco |
 |---|---|---|---|
-| the graph of one mode: its turns | **yes**, one for each mode that you build | `driving.edge_graph`, `walking.edge_graph`, `cycling.edge_graph` | 6,754 (driving) |
-| the multimodal graph: all modes and the changes between them | **no**: only with `multimodal: {enabled: true}` in the config | the schema `mm`: the tables `mm.edges` and `mm.transfers` | 26,083 and 12,140 |
+| **one mode**: the turns of the mode | `driving.edge_graph`, `walking.edge_graph`, `cycling.edge_graph` | **yes**, for each mode that you build | 6,754 turns (driving) |
+| **multimodal**: the edges of all modes | `mm.edges` | **no**, see below | 26,083 edges |
+| **multimodal**: the changes of mode | `mm.transfers` | **no**, see below | 12,140 changes |
+
+The build makes the two `mm` tables only when the config has `multimodal: {enabled: true}`. Without it, the file has
+no schema `mm`, and a route across modes is not possible.
 
 **The graph of one mode** is the table `edge_graph` in the schema of the mode. Each row is one turn that the mode can
 make, from one edge to the next edge:
