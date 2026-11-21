@@ -50,7 +50,7 @@ The routing calls of this chapter search graphs that are tables of the network f
 | **one mode**: the turns of driving | `driving.edge_graph` | **yes**, for each mode that you build | 6,754 turns |
 | **one mode**: the turns of walking | `walking.edge_graph` | **yes**, for each mode that you build | 35,074 turns |
 | **one mode**: the turns of cycling | `cycling.edge_graph` | **yes**, for each mode that you build | 31,366 turns |
-| **multimodal**: the edges of all modes | `mm.edges` | **no**, see below | 26,083 edges |
+| **multimodal**: the edges of all modes | `mm.edges` | **no**, see below | 26,083 rows: 13,302 edges, many in more than one mode |
 | **multimodal**: the changes of mode | `mm.transfers` | **no**, see below | 12,140 changes |
 
 The build makes the two `mm` tables only when the config has `multimodal: {enabled: true}`. Without it, the file has
@@ -71,7 +71,7 @@ make, from one edge to the next edge:
 
 | Table | Holds | Columns |
 |---|---|---|
-| `mm.edges` | the edges of all modes in one table, with their mode | `mode`, `edge_id`, `source`, `target`, `cost_s`, `length_m`, `highway`, `name`, `geometry` |
+| `mm.edges` | a view: the edges of all modes in one table, with their mode. An edge that two or three modes use has one row for each mode, with the same `edge_id` | `mode`, `edge_id`, `source`, `target`, `cost_s`, `length_m`, `highway`, `name`, `geometry` |
 | `mm.transfers` | the junctions where you can change mode, and the cost of a change | `node_id` (the junction), `from_mode`, `to_mode`, `cost_s` (seconds), `kind` (`park`, `retrieve`, `bike_park`, `bike_unpark`) |
 
 A route across modes uses `mm.edges` to move in each mode and `mm.transfers` to change mode, for example to park the

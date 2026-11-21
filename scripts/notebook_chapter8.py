@@ -23,9 +23,8 @@ between all pairs of 100 places, the area that you reach in 10 minutes on foot, 
 
 All these calls search **the same graph**: the edge graph of the mode (the table `<mode>.edge_graph`). In this graph a
 **node is an edge** of the road network, and an **arc is a legal turn** from one edge to the next. A turn that a turn
-restriction forbids has no arc. An arc costs the time (`cost_s`) or the length (`length_m`) of its from-edge.
-
-<img src="{IMAGES}/edge-graph.svg" alt="Four road edges at a junction, and the edge graph: each edge is a node, each legal turn is an arc" width="100%">
+restriction forbids has no arc. An arc costs the time (`cost_s`) or the length (`length_m`) of its from-edge. The
+picture of the turn graph is in [7. Routing](07_routing.md), section "How duckOSM finds a route".
 
 The search runs in Rust. Each call opens the database file, reads the graph once, and searches it with Dijkstra's
 algorithm.
