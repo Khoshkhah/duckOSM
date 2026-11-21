@@ -160,12 +160,38 @@ ch.code("""net.save_map("out/counts.html", color_by=by_edge, cmap="magma_r")    
 
 ch.md("""## A dashboard of your data
 
-The dashboard is the map with a panel at the left (chapter 3, "The dashboard"). With `color_by`, the roads have the
-colors of your counts, and when you click a road, its card in the panel shows its count in the row `vehicles_per_hour`,
-next to the OSM data of the road. Use it to look at single roads: which road has a high count, and what kind of road
-it is.""")
+A map shows the pattern of your data: where the counts are high and where they are low. A **dashboard** also lets you
+look at one road. It is the same colored map, with a panel at its left. When you click a road, the panel shows the
+**card** of the road: its OSM data and the value of your data for it.
+
+`net.dashboard()` takes the same `color_by` and `cmap` as `net.map()`. The cell below gives the dashboard of the
+counts.""")
 ch.code("""net.dashboard(color_by=by_edge, cmap="magma_r")    # the dashboard, colored by the count; click a road for its card""")
-ch.md("""On this page the dashboard is a picture, so you cannot click it. Run the cell in your notebook to use the panel.""")
+ch.md("""On this page the output is a picture, so you cannot click it. In your notebook the dashboard is live. The picture
+below shows it after a click on Boulevard du Larvotto:
+
+<img src="https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/docs/notebooks/images/dashboard-counts.png" alt="The dashboard of the counts: the colored map, and the card of Boulevard du Larvotto in the panel, with vehicles_per_hour 1151" width="100%">
+
+| Part | What it shows |
+|---|---|
+| the map | each counted road in the color of its count: light for a low count, dark for a high count. The gray roads have no count |
+| the card in the panel | the road that you clicked: its name, `edge_id`, `osm_id`, road class, lanes, speed limit and your column `vehicles_per_hour` (1151 for this road) |
+| the small box on the map | a short form of the card, at the clicked road |
+| the buttons at the right | zoom, 3D, the base map layers and the buildings |
+
+To use it:
+
+1. Run the cell.
+2. Click a road on the map.
+3. Read its count in the card. Click another road to compare.
+
+| Use | When |
+|---|---|
+| `net.map(color_by=...)` | you want to see the pattern of the data over the area |
+| `net.dashboard(color_by=...)` | you also want to look at single roads and read their values |
+
+To keep the dashboard as a file that opens in any browser, use
+`net.save_map("counts.html", dashboard=True, color_by=by_edge, cmap="magma_r")`.""")
 
 ch.md("""## The same data in more modes
 
