@@ -418,6 +418,6 @@ body.quarto-dark div.sourceCode code { color: #9cdcfe !important; }
 #quarto-sidebar ::-webkit-scrollbar-thumb, #quarto-sidebar::-webkit-scrollbar-thumb { background: var(--bk-line); border-radius: 3px; }
 // a wide screen (or a browser zoomed out): the sidebar, the text and the table of contents stay together in the
 // middle, not at the left with an empty area at the right
-@media (min-width: 1700px) {
-  #quarto-content.page-columns { max-width: 1700px; margin-left: auto; margin-right: auto; }
-}
+// (one rule for every width: the page grows to the width that its three columns need, then stays in the middle, so
+// each zoom level gives the same layout and no jump)
+#quarto-content.page-columns { max-width: 1490px; margin-left: auto; margin-right: auto; }
