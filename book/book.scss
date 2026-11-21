@@ -361,3 +361,39 @@ body:not(.quarto-dark) div.sourceCode { background: #dbe1e9 !important; }
 body:not(.quarto-dark) div.cell .cell-output { background: #edf0f4 !important; }
 // code below the page color, output above it: the two boxes differ in both themes
 body.quarto-dark div.cell .cell-output { background: #2d333b !important; }
+
+// ---- the code and its output are two boxes with a gap: the code box is gray, the output box has a bar on the left ----
+div.cell:has(.cell-output) div.sourceCode.cell-code, div.cell:has(.cell-output) > div.sourceCode {
+  border-radius: 8px !important; margin-bottom: .45rem !important; border: 1px solid var(--bk-line) !important; }
+div.cell .cell-output { border: 1px solid var(--bk-line) !important; border-left: 4px solid #8c959f !important;
+  border-radius: 0 !important; }
+div.cell .cell-output:first-of-type, div.cell .code-copy-outer-scaffold + .cell-output, div.cell div.sourceCode + .cell-output {
+  border-top-right-radius: 8px !important; }
+div.cell .cell-output:last-child { border-bottom-right-radius: 8px !important; }
+div.cell .cell-output + .cell-output { border-top: 1px dashed var(--bk-line) !important; }
+body:not(.quarto-dark) div.sourceCode { background: #eef1f5 !important; }
+body:not(.quarto-dark) div.cell .cell-output { background: #fafbfc !important; }
+body.quarto-dark div.cell .cell-output { border-left-color: #768390 !important; }
+// the code box has a bar on the left too, in the brand yellow: yellow = code, gray = output
+body div.cell div.sourceCode.cell-code, body div.cell:has(.cell-output) div.sourceCode.cell-code, body div.cell:has(.cell-output) > div.sourceCode { border-left: 4px solid #e8b800 !important;
+  border-top-left-radius: 0 !important; border-bottom-left-radius: 0 !important; }
+body.quarto-dark div.cell div.sourceCode.cell-code, body.quarto-dark div.cell:has(.cell-output) div.sourceCode.cell-code { border-left-color: #ffd43b !important; }
+// a small CODE label at the top of the code box, as the OUTPUT label of the output box
+div.cell div.sourceCode.cell-code::before { content: "CODE"; display: block; font-family: $font-family-sans-serif; font-size: .64rem;
+  font-weight: 700; letter-spacing: .08em; color: var(--bk-faint); padding: .45rem .9rem 0; }
+div.cell div.sourceCode.cell-code pre { padding-top: .25rem !important; }
+// the code of a cell is Python: the label says PYTHON, with the two-color Python mark
+div.cell div.sourceCode.cell-code::before { content: "PYTHON"; padding-left: 2.15rem;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath fill='%233776ab' d='M15.9 2C9 2 9.4 5 9.4 5v3.1h6.7V9H6.6S2 8.5 2 15.6s4 6.8 4 6.8h2.4v-3.3s-.1-4 3.9-4h6.7s3.8.1 3.8-3.6V5.4S23.4 2 15.9 2zm-3.7 2.1c.7 0 1.2.5 1.2 1.2s-.5 1.2-1.2 1.2-1.2-.5-1.2-1.2.5-1.2 1.2-1.2z'/%3E%3Cpath fill='%23ffd43b' d='M16.1 30c6.9 0 6.5-3 6.5-3v-3.1h-6.7V23h9.5s4.6.5 4.6-6.6-4-6.8-4-6.8h-2.4v3.3s.1 4-3.9 4H13s-3.8-.1-3.8 3.6v6.1S8.6 30 16.1 30zm3.7-2.1c-.7 0-1.2-.5-1.2-1.2s.5-1.2 1.2-1.2 1.2.5 1.2 1.2-.5 1.2-1.2 1.2z'/%3E%3C/svg%3E")
+    no-repeat .9rem .38rem / .95rem .95rem; }
+// the colors of Python code: the VS Code colors (Light+ and Dark+), which have more colors than the GitHub ones
+$vs-light: (bi: #795e26, pp: #af00db, kw: #0000ff, cf: #af00db, im: #af00db, fu: #795e26, bu: #267f99, st: #a31515, ss: #a31515, ch: #a31515, dv: #098658, fl: #098658,
+  bn: #098658, cn: #0000ff, op: #000000, va: #001080, at: #001080, co: #008000, dt: #267f99, ex: #267f99);
+$vs-dark: (bi: #dcdcaa, pp: #c586c0, kw: #569cd6, cf: #c586c0, im: #c586c0, fu: #dcdcaa, bu: #4ec9b0, st: #ce9178, ss: #ce9178, ch: #ce9178, dv: #b5cea8, fl: #b5cea8,
+  bn: #b5cea8, cn: #569cd6, op: #d4d4d4, va: #9cdcfe, at: #9cdcfe, co: #6a9955, dt: #4ec9b0, ex: #4ec9b0);
+@each $k, $c in $vs-light {
+  body:not(.quarto-dark) div.sourceCode code span.#{$k} { color: $c !important; font-style: normal !important; font-weight: normal !important; } }
+@each $k, $c in $vs-dark {
+  body.quarto-dark div.sourceCode code span.#{$k} { color: $c !important; font-style: normal !important; font-weight: normal !important; } }
+body:not(.quarto-dark) div.sourceCode code { color: #001080 !important; }
+body.quarto-dark div.sourceCode code { color: #9cdcfe !important; }
