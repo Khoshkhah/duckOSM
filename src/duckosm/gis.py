@@ -10,12 +10,15 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
+from duckosm._progress import shown
 from duckosm.errors import DuckOSMError, require
 
 
 def to_gis(net, out, modes=None, fmt="gpkg", boundary=True, name=None, srs="EPSG:4326", ogr2ogr_bin=None, mode=None):
     """The edges and nodes of the modes (default: all of the file; a ``ModeView`` or ``mode=``: one) as a GeoPackage
     (``fmt="gpkg"``), GeoParquet (``"geoparquet"``) or shapefiles (``"shp"``). Returns ``{path, dir, files, layers}``.
+    The layers are ``edges_<mode>``, ``nodes_<mode>`` and ``boundary``. GeoParquet also writes one layer for each table
+    of the base map (``features_<table>``, for example ``features_buildings``); the GeoPackage and the shapefiles do not.
 
     >>> duckosm.gis.to_gis(net, "out/monaco.gpkg")"""
     from duckosm import _api
@@ -57,12 +60,12 @@ def _pbf(source) -> Path:
     if isinstance(source, Network):
         pbf = source.path.with_name(source.path.name.split(".")[0] + ".osm.pbf")
         if not pbf.is_file():
-            raise DuckOSMError(f"{source.path}: no OSM file {pbf.name} beside it. Give the OSM file or the Area: "
+            raise DuckOSMError(f"{shown(source.path)}: no OSM file {pbf.name} beside it. Give the OSM file or the Area: "
                                f"duckosm.gis.features(duckosm.get(...), tags=...)")
         return pbf
     pbf = Path(getattr(source, "pbf", source))
     if not pbf.is_file():
-        raise DuckOSMError(f"{pbf}: no such OSM file")
+        raise DuckOSMError(f"{shown(pbf)}: no such OSM file")
     return pbf
 
 

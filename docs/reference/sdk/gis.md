@@ -4,7 +4,7 @@ GIS and data engineers: the network and the OSM data as GIS files and tables.
 
 | Call | Returns | Today |
 |---|---|---|
-| `to_gis(net, out, modes=None, fmt="gpkg", boundary=True, name=None, srs="EPSG:4326", mode=None)` | the edges and nodes of the modes (default all; a `ModeView` or `mode=`: one) as a GeoPackage (`"gpkg"`), GeoParquet (`"geoparquet"`) or shapefiles (`"shp"`): `{path, dir, files, layers}` | yes |
+| `to_gis(net, out, modes=None, fmt="gpkg", boundary=True, name=None, srs="EPSG:4326", mode=None)` | the edges and nodes of the modes (default all; a `ModeView` or `mode=`: one) as a GeoPackage (`"gpkg"`), GeoParquet (`"geoparquet"`) or shapefiles (`"shp"`): `{path, dir, files, layers}`. The layers are `edges_<mode>`, `nodes_<mode>` and `boundary`. GeoParquet also writes one layer for each table of the base map (`features_<table>`, for example `features_buildings`); the GeoPackage and the shapefiles do not | yes |
 | `quack(pbf_or_area, out=".", name="area", formats=None, gdal=False, fixes=None, ...)` | `duckosm quack`: the QuackOSM table, or GDAL's five layers with `gdal=True` | yes |
 | `admin(net, pbf, gpkg=None)` | adds the table `admin_boundaries` to the database | yes |
 | `features(source, tags=None, fixes=None)` | the OSM features of an `Area`, an OSM file or a `Network` (its OSM file beside it) as a GeoDataFrame: `feature_id`, one column for each key of `tags`, `tags` (a dict), `geometry`. `tags` as in OSMnx: `{"building": True}`, `{"amenity": "cafe"}`, `{"amenity": ["cafe", "bar"]}`; the keys are joined with OR | yes |

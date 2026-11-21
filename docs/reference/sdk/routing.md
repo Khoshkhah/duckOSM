@@ -43,7 +43,7 @@ A `Route` is also the dict of the old `route`: `r["edges"]` is the list of edge 
 |---|---|
 | `r.edge_ids` | the edge ids, in the order of the route |
 | `r.edges` | a GeoDataFrame of the edges in the order of the route: `seq`, `edge_id` and the columns of `<mode>.edges` |
-| `r.length_m`, `r.time_s` | the sums of `length_m` and `cost_s` of the edges |
+| `r.length_m`, `r.time_s` | the sums of `length_m` and `cost_s` of the edges. A route between two points also includes the access legs: `length_m` includes `start.access_m` and `end.access_m` (the distance from each point to its road), `time_s` includes `access_s` (walking time), and only the used parts of the first and the last edge count |
 | `r.geometry` | one shapely line (a `MultiLineString` where the edges do not join) |
 | `r.directions()` | the turn-by-turn steps |
 | `r.map()` | the route on the roadstyle map of the network |

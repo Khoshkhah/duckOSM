@@ -1,7 +1,11 @@
 # GMNS
 
 `duckosm gmns` writes the network in [GMNS](https://zephyr-data-specs.github.io/GMNS/), the table format of DTALite,
-Path4GMNS and other network models, with your OSM fixes. Each GMNS `link_id` is the duckOSM `edge_id`.
+Path4GMNS and other network models, with your OSM fixes. Each GMNS `link_id` is the duckOSM `edge_id`. In driving,
+the links are the edges of `driving.edges` and also the bus-only edges of `driving.private_edges` (`access = 'bus'`:
+a bus lane against a one-way street, or a bus-only road). duckOSM does not route on these edges, so they are not in
+`driving.edges`. In GMNS they have `allowed_uses` `bus` (or `bus,bike`) and one lane. On Monaco, the 18 bus-only edges
+give 18 links and 4 nodes more than `driving.edges` and `driving.nodes`.
 
 | Reference and format | |
 |---|---|

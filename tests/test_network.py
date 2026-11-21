@@ -38,6 +38,22 @@ def test_build_and_open_give_a_network(net):
         duckosm.open(net.path.with_name("none.duckdb"))
 
 
+def test_errors_show_the_home_folder_as_tilde():
+    missing = Path.home() / "no-such-folder" / "none.duckdb"
+    with pytest.raises(duckosm.DuckOSMError) as e:
+        duckosm.open(missing)
+    assert "~/no-such-folder/none.duckdb" in str(e.value) and str(Path.home()) not in str(e.value)
+
+
+def test_a_reader_of_connect_does_not_stop_sql(net):
+    """In DuckDB 1.5, .arrow() is a lazy reader. A reader not read to the end must not lock the file for net.sql."""
+    with net.connect() as con:
+        reader = con.sql("SELECT * FROM driving.edges").arrow()
+        assert con.sql("SELECT current_database()").fetchone()[0] == "monaco"
+    assert net.sql("SELECT count(*) AS n FROM driving.edges").n[0] > 0
+    del reader
+
+
 def test_modes_and_views(net, one):
     assert net.modes == ["driving", "walking"] and one.modes == ["walking"]
     assert isinstance(net.walking, duckosm.ModeView) and net["walking"].mode == "walking"

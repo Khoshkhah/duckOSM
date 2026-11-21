@@ -316,6 +316,10 @@ GeoJSON property, and the shape in `geom` (GEOMETRY). A `duckosm extract` result
 `OGC_FID`, `name`, `osm_id`, `admin_level`, `area_km2`, `source`, `geom`. With `boundary.buffer_m`,
 this is the grown boundary.
 
+| Column | Type | Description |
+|---|---|---|
+| `geom` | GEOMETRY | the shape of the feature |
+
 ### `global_junctions`
 
 The nodes where every mode cuts its ways, so a way has the same edges in every mode. A node is in the table when two
