@@ -338,7 +338,7 @@ net.edit(fixes="osm_fixes.yaml", port=8791)
 | `fixes` | the fixes file of the build, else `osm_fixes.yaml` beside the database | the file that the page writes |
 | `port` | `8790` | the port of the page on `127.0.0.1` |
 
-<img src="https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/docs/images/edit-page.png" alt="The editing page: the panel Edit OSM data at the left, the roads of the database on the map" width="100%">
+<img src="https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/docs/images/edit-road.png" alt="The editing page: Boulevard Charles III is picked in the Road tab, and its lanes are changed to 3" width="100%">
 
 The page has one tab for each kind of record:
 
@@ -358,7 +358,7 @@ To add one record:
 3. Change the fields, then click **Add to changes**. The page writes the record into the file at once.
 4. In the **Changes** tab, click **Build again** to build the network again with the file.
 
-<img src="https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/docs/images/edit-road.png" alt="The Road tab: the form shows the tags of the picked road" width="100%">
+<img src="https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/docs/images/edit-changes.png" alt="The Changes tab: the change of Boulevard Charles III, lanes 1 to 3, and the button Build again" width="100%">
 
 The editor runs while Python runs. The guide [Fix the OSM data](../guides/edit-osm-data.md) shows each tab and
 button of the page.
