@@ -171,7 +171,7 @@ def lanes_from_sumo(con, sch, mode="driving", geometry=True, source="s", netconv
     cur = con.cursor()
     cur.execute(f"USE {source}")
     with tempfile.TemporaryDirectory() as tmp:
-        net = to_sumo(cur, work_dir or tmp, mode=mode, net_name="gmns", netconvert_bin=netconvert_bin, bus_edges=mode == "driving",
+        net = to_sumo(cur, work_dir or tmp, mode=mode, net_name="gmns", netconvert_bin=netconvert_bin, run_netconvert=True, bus_edges=mode == "driving",
                       lanes=ours_lanes, edge_attrs=edge_attrs,
                       config={"lefthand": "true"} if drive_side == "left" else None)["net"]
         to_ll, lanes, conns, nxt = _read_net(net)

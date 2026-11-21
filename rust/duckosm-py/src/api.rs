@@ -31,16 +31,12 @@ fn to_sumo(py: Python<'_>, db: PathBuf, out_dir: PathBuf, mode: String, net_name
     let s = py
         .detach(|| duckosm_export::sumo::to_sumo(&db, &out_dir, &mode, &net_name, connections, config.as_deref(), netconvert))
         .map_err(err)?;
-    let mut v = json!({"nod": s.nod, "edg": s.edg, "n_nodes": s.n_nodes, "n_edges": s.n_edges, "n_connections": s.n_connections});
-    if let Some(c) = s.con {
-        v["con"] = json!(c);
-    }
-    let cfg = out_dir.join(format!("{net_name}.netccfg"));
-    if cfg.exists() {
-        v["netccfg"] = json!(cfg);
-    }
-    if let Some(n) = s.net {
-        v["net"] = json!(n);
+    let mut v = json!({"nod": s.nod, "edg": s.edg, "n_nodes": s.n_nodes, "n_edges": s.n_edges, "n_connections": s.n_connections,
+                       "n_traffic_lights": s.n_traffic_lights, "n_stop_signs": s.n_stop_signs, "n_bus_stops": s.n_bus_stops});
+    for (k, p) in [("con", s.con), ("add", s.add), ("netccfg", s.netccfg), ("net", s.net), ("tll", s.tll)] {
+        if let Some(p) = p {
+            v[k] = json!(p);
+        }
     }
     Ok(text(&v))
 }

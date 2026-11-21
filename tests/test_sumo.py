@@ -42,8 +42,9 @@ def _db(mode="driving"):
 
 
 def test_plain_xml_preserves_edge_id_and_emits_connections(tmp_path):
-    out = to_sumo(_db(), str(tmp_path), run_netconvert=False)
-    assert out["n_nodes"] == 3 and out["n_edges"] == 2 and "net" not in out
+    out = to_sumo(_db(), str(tmp_path))                       # the default: no netconvert, but the config for it
+    assert out["n_nodes"] == 3 and out["n_edges"] == 2 and "net" not in out and "tll" not in out
+    assert '<output-file value="network.net.xml"/>' in open(out["netccfg"]).read()
     edg = (tmp_path / "network.edg.xml").read_text()
     assert f'id="{E1}"' in edg and f'id="{E2}"' in edg        # edge_id == SUMO edge id
     assert 'from="1"' in edg and 'to="2"' in edg
@@ -93,14 +94,14 @@ def test_netconvert_with_a_relative_out_dir(tmp_path, monkeypatch):
     """SUMO resolves .netccfg paths against the config's folder: a relative out_dir (the CLI default,
     `sumo`) once produced `sumo/sumo/...` paths and netconvert failed with "No nodes loaded"."""
     monkeypatch.chdir(tmp_path)
-    out = to_sumo(_db(), "sumo", net_name="t")
+    out = to_sumo(_db(), "sumo", net_name="t", run_netconvert=True)
     assert (tmp_path / "sumo" / "t.net.xml").exists(), out
 
 
 @pytest.mark.skipif(not HAVE_NETCONVERT,
                     reason="netconvert not installed (pip install duckosm[sumo])")
 def test_netccfg_default_and_override(tmp_path):
-    out = to_sumo(_db(), str(tmp_path / "a"), net_name="d")       # default config
+    out = to_sumo(_db(), str(tmp_path / "a"), net_name="d", run_netconvert=True)       # default config
     cfg = open(out["netccfg"]).read()
     assert "<configuration>" in cfg                               # standard SUMO config format
     assert '<geometry.remove value="false"/>' in cfg
@@ -110,7 +111,7 @@ def test_netccfg_default_and_override(tmp_path):
     x1 = float(re.search(r'convBoundary="[\d.]+,[\d.]+,([\d.]+)', net).group(1))
     assert 1000 < x1 < 1200                                       # 0.02° of longitude ≈ 1.1 km
     out2 = to_sumo(_db(), str(tmp_path / "b"), net_name="d",
-                   config={"geometry.remove": "true"})           # dict override merged onto default
+                   config={"geometry.remove": "true"}, run_netconvert=True)           # dict override merged onto default
     assert '<geometry.remove value="true"/>' in open(out2["netccfg"]).read()
 
 
@@ -124,7 +125,7 @@ def test_a_path_is_one_lane_of_path_width(tmp_path):
     out = to_sumo(_db("walking"), str(tmp_path), mode="walking", run_netconvert=False)
     assert "numLanes=" not in (tmp_path / "network.edg.xml").read_text()
     if HAVE_NETCONVERT:
-        to_sumo(_db("walking"), str(tmp_path), mode="walking")
+        to_sumo(_db("walking"), str(tmp_path), mode="walking", run_netconvert=True)
         assert '<default.lanewidth value="2.0"/>' in (tmp_path / "network.netccfg").read_text()
 
 
@@ -168,7 +169,7 @@ def test_joined_junction_keeps_the_turns_through_it(tmp_path):
                     f"ST_GeomFromText('LINESTRING({x1} {y1}, {x2} {y2})'))")
     con.execute("CREATE TABLE edge_graph(from_edge BIGINT, to_edge BIGINT, cost DOUBLE)")
     con.execute("INSERT INTO edge_graph VALUES (11, 12, 1), (11, 15, 1), (12, 13, 1), (12, 14, 1)")
-    out = to_sumo(con, str(tmp_path), net_name="j", config={"junctions.join": "true"})
+    out = to_sumo(con, str(tmp_path), net_name="j", config={"junctions.join": "true"}, run_netconvert=True)
     net = (tmp_path / "j.net.xml").read_text()
     assert "cluster_2_3" in net              # A and B are one junction
     to = set(re.findall(r'<connection from="11" to="(\d+)"', net))
