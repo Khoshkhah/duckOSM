@@ -13,7 +13,7 @@ ch = Chapter(9, "09_analysis", "Street network analysis",
              learn="the two views of the statistics; junctions; street bearings and their entropy; connected "
                    "components; the nearest node and edge of a point; a smaller area; random points; heights and "
                    "grades; OSMnx on a duckOSM network; city blocks with momepy",
-             time="about 2 minutes", extras="analysis,viz", more_install="\n    %pip install -q osmnx momepy",
+             time="about 2 minutes", extras="analysis,viz", more_install="\n    %pip install -q osmnx momepy mapclassify",
              next_=("10_gis", "10. OSM data for GIS", "OSM features, OSM XML and administrative areas"))
 
 ch.md(f"""## What street network analysis measures
@@ -388,18 +388,113 @@ ch.code("""blocks["ha"] = blocks.area / 10_000                                # 
 classes = ["< 0.1 ha", "0.1-0.5 ha", "0.5-1 ha", "1-5 ha", "> 5 ha"]
 blocks["size"] = pd.cut(blocks.ha, [0, 0.1, 0.5, 1, 5, 1000], labels=classes)
 blocks["size"].value_counts().sort_index()                         # the blocks in each class""")
-ch.code("""fig, ax = plt.subplots(figsize=(12, 13), dpi=200)          # a large picture with many pixels: zoom in to see each block
-streets.plot(ax=ax, color="lightgray", linewidth=0.4)              # the streets first, in light gray
-blocks.plot(ax=ax, column="size", cmap="viridis", legend=True,
-            legend_kwds={"title": "block area", "loc": "lower right"})    # the blocks by size
-buildings.plot(ax=ax, color="black", alpha=0.25)                   # the buildings on top
-ax.set_axis_off()""")
 ch.md("""Most blocks are small: 149 blocks have 0.1 to 0.5 ha, and 57 have less than 0.1 ha. Only 4 blocks have more
 than 5 ha. They are on the coast and on the slopes, where few streets cut the land, for example at the Larvotto beach
-in the northeast. The white areas in the middle are the two ports.
+in the northeast.
 
 The blocks change with the streets that you give to momepy. With the driving streets only, many steps and footways
 do not cut the land, and the blocks become larger.""")
+ch.md("""### The map of momepy's blocks
+
+This map shows the blocks exactly as momepy gives them. Each block reaches the center line of its streets, so two
+blocks on the two sides of a street touch at that line.
+
+The first cell sorts the roads into three kinds, for the maps: main roads, streets, and footways and steps.""")
+ch.code("""main = ["motorway", "trunk", "primary", "secondary", "tertiary"]
+paths = ["footway", "steps", "pedestrian", "path", "cycleway", "corridor"]
+kind = pd.Series("street", index=streets.index)                                 # each road is a street, but:
+kind[streets.highway.str.replace("_link", "").isin(main)] = "main road"         # primary_link counts as primary
+kind[streets.highway.isin(paths)] = "footway, steps"
+kind.value_counts()                                                             # the roads of each kind""")
+ch.md("""Monaco has 4,184 footways and steps, 1,210 streets and 721 main roads. Most lines are footways and steps:
+Monaco has many of them between its streets, on the slopes.
+
+The second cell makes a function, `block_map`, that draws blocks. The two maps below use it. Each block is a
+half-transparent polygon with a border inside it, on top of the buildings. The border is a band of 1 m inside the
+polygon, so it does not make the block larger. Two blocks that touch never have the same color: `mapclassify.greedy`
+gives each block one of six colors in this way. The map is an SVG, a vector picture: click it and zoom in to one
+block, and it stays sharp. The plain gray areas in the middle are the two ports.
+
+| Layer, from the bottom to the top | Style |
+|---|---|
+| The street space (only on the second map) | white |
+| The footways and the steps | brown dashed lines |
+| The buildings | gray |
+| The blocks | half-transparent, with a border of 1 m inside the polygon, in the same color |""")
+ch.code("""import io
+
+import geopandas as gpd
+import mapclassify
+from IPython.display import SVG
+from matplotlib.colors import ListedColormap
+from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
+
+six = ListedColormap(["#1b9e77", "#d95f02", "#7570b3", "#e7298a", "#66a61e", "#e6ab02"])    # the six block colors
+
+
+def block_map(blks, space=None):
+    \"\"\"The map of the blocks blks, with the street space space (a polygon) if you give it, as an SVG.\"\"\"
+    color = mapclassify.greedy(blks, min_colors=6)                               # 0 to 5: blocks that touch differ
+    fig, ax = plt.subplots(figsize=(12, 13))                                     # a large map
+    ax.set_facecolor("#e8e8e8")                                                  # the background in light gray
+    legend = []
+    if space is not None:
+        gpd.GeoSeries([space], crs=blks.crs).plot(ax=ax, color="white")         # the street space
+        legend.append(Patch(facecolor="white", edgecolor="#bbbbbb", label="street space"))
+    streets[kind == "footway, steps"].plot(ax=ax, color="#8b4513", linewidth=0.25, linestyle=(0, (4, 3)))    # footways
+    buildings.plot(ax=ax, color="#9e9e9e", edgecolor="#6e6e6e", linewidth=0.2)  # the buildings
+    blks.plot(ax=ax, color=[six(c) for c in color], alpha=0.45)                 # each block: a half-transparent polygon
+    border = blks.difference(blks.buffer(-1))                                    # a band of 1 m inside each block
+    border.plot(ax=ax, color=[six(c) for c in color])                            # its border
+    legend += [Patch(facecolor=(0.11, 0.62, 0.47, 0.45), edgecolor="#1b9e77", linewidth=1.5, label="block (six colors)"),
+               Patch(facecolor="#9e9e9e", edgecolor="#6e6e6e", label="building"),
+               Line2D([], [], color="#8b4513", linewidth=0.5, linestyle=(0, (4, 3)), label="footway, steps")]
+    ax.legend(handles=legend, title="Blocks of Monaco", loc="lower right", facecolor="#e8e8e8")
+    ax.set_xticks([])
+    ax.set_yticks([])
+    svg = io.StringIO()
+    fig.savefig(svg, format="svg", bbox_inches="tight")                          # SVG: a vector picture
+    plt.close(fig)
+    return SVG(svg.getvalue())
+
+
+block_map(blocks)                                                                # momepy's blocks, unchanged""")
+ch.md("""Each polygon is one block of momepy. Where a street separates two blocks, the two borders touch at the center
+line of the street.""")
+
+ch.md("""### The street space
+
+On the first map the streets have no space of their own: a real street has a width. The next cell gives each street
+a width from its kind, and removes the street space from the blocks:
+
+| Kind | `highway` | Width |
+|---|---|---|
+| main road | `motorway`, `trunk`, `primary`, `secondary`, `tertiary` (and their `_link`) | 12 m |
+| street | the other roads for cars | 8 m |
+| footway, steps | `footway`, `steps`, `pedestrian`, `path`, `cycleway`, `corridor` | 2 m |
+
+OSM gives the width of few streets, so these are typical widths, not measured widths.
+
+Some roads go into a block and stop there: a garden path, steps or a driveway. momepy does not cut the block on such
+a road, so the road is a part of the block. The cell keeps these roads in the block and makes the street space only
+from the roads between the blocks. So each block stays one polygon.
+
+The result is not momepy's blocks any more: each block is smaller by the street space around it.""")
+ch.code("""half = kind.map({"main road": 6.0, "street": 4.0, "footway, steps": 1.0})       # half of the width, in metres
+inside = streets.sjoin(blocks[["geometry"]], predicate="within").index.unique()  # the roads that stop inside one block
+between = streets.drop(inside)                                                  # the roads between the blocks
+space = between.buffer(half.drop(inside)).union_all()                           # the street space: each road with its width
+shown = blocks.copy()
+shown["geometry"] = blocks.difference(space)                                    # the blocks without the street space
+shown = shown[~shown.is_empty]
+len(inside), round(space.intersection(land.union_all()).area / 1e6, 2), round(shown.area.sum() / 1e6, 2)    # roads inside, km²""")
+ch.md("""1,203 roads stop inside a block, so they stay in their block. The street space of the other roads covers
+0.42 km² of the land of Monaco. The blocks without the street space cover 1.53 km².""")
+ch.code("""block_map(shown, space)                                                          # the blocks less the street space""")
+ch.md("""The street space is white between the blocks. Where a footway runs along the edge of a building, for example on
+the piers of the port, its strip of 2 m cuts the block but not the building. So there the building shows outside its
+block.""")
 
 
 ch.md("""## Try it yourself

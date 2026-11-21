@@ -1,22 +1,74 @@
-<!-- Zoom in the lightbox: the mouse wheel or two fingers zoom the picture, a drag moves it, a double click resets it. -->
+<!-- Zoom of the output pictures. A click on a picture opens it in a popup (lightbox). There: a click zooms in where you click, a second click shows the whole picture again. The mouse
+     wheel or two fingers zoom, a drag moves the picture, and the buttons +, - and Fit do the same. -->
 <script>window.__amd = window.define; window.define = undefined;</script>  <!-- require.js on the page: load Panzoom as a global -->
 <script src="panzoom.min.js"></script>  <!-- @panzoom/panzoom 4.5.1, MIT license -->
 <script>window.define = window.__amd;</script>
+<style>
+  .rs-zoombar { position: fixed; left: 50%; top: 12px; transform: translateX(-50%); z-index: 999999; display: flex;
+    gap: 6px; align-items: center; padding: 6px 10px; border-radius: 8px; background: rgba(0, 0, 0, 0.7); color: #fff;
+    font: 14px/1.2 system-ui, sans-serif; }
+  .rs-zoombar button { min-width: 36px; height: 32px; border: 1px solid #888; border-radius: 6px; background: #222;
+    color: #fff; font-size: 16px; cursor: pointer; }
+  .rs-zoombar span { margin-left: 6px; opacity: 0.85; }
+  .gclose, .gnext, .gprev { z-index: 999999 !important; }
+  .gslide-image img { cursor: zoom-in; }
+  .cell-output-display a.lightbox img { cursor: zoom-in; max-height: 85vh; width: auto; max-width: 100%; }    /* the whole picture fits the screen */
+  .gslide-image img.rs-zoomed { cursor: grab; }
+  @media (max-width: 600px) { .rs-zoombar span { display: none; } }
+  .rs-pagehint { font-size: 0.8em; color: #777; margin-top: 2px; }
+</style>
 <script>
 window.addEventListener("load", () => {
-  if (typeof lightboxQuarto === "undefined" || typeof Panzoom === "undefined") return;
-  lightboxQuarto.settings.draggable = false;          // a drag moves the picture, not to the next picture
-  lightboxQuarto.settings.touchNavigation = false;    // the same for a finger on a phone
-  lightboxQuarto.settings.zoomable = false;           // Panzoom zooms, not GLightbox
+  if (typeof Panzoom === "undefined") return;
+  // In the page: a hint under each output picture. The zoom is in the popup.
+  document.querySelectorAll(".cell-output-display a.lightbox").forEach((link) => {
+    const hint = document.createElement("div");
+    hint.className = "rs-pagehint";
+    hint.textContent = "Click the picture to open it and zoom.";
+    link.after(hint);
+  });
+  if (typeof lightboxQuarto === "undefined") return;
+  const g = lightboxQuarto.settings;
+  g.draggable = false;          // a drag moves the picture, not to the next picture
+  g.touchNavigation = false;    // the same for a finger on a phone
+  g.zoomable = false;           // Panzoom zooms, not GLightbox
+  let bar = null, current = null;
+  function makeBar() {
+    bar = document.createElement("div");
+    bar.className = "rs-zoombar";
+    bar.innerHTML = '<button data-z="in" title="Zoom in">+</button><button data-z="out" title="Zoom out">&minus;</button>' +
+      '<button data-z="fit" title="The whole picture">Fit</button><span>Click, scroll or pinch to zoom. Drag to move.</span>';
+    bar.addEventListener("click", (e) => {
+      const z = e.target.dataset.z;
+      if (!current || !z) return;
+      if (z === "in") current.zoomIn(); else if (z === "out") current.zoomOut(); else current.reset();
+    });
+    document.body.appendChild(bar);
+  }
+  lightboxQuarto.on("open", () => { if (!bar) makeBar(); bar.style.display = "flex"; });
+  lightboxQuarto.on("close", () => { if (bar) bar.style.display = "none"; current = null; });
+  lightboxQuarto.on("slide_changed", ({ current: c }) => {
+    const img = c.slideNode.querySelector(".gslide-image img");
+    current = img && img._pz ? img._pz : current;
+  });
   lightboxQuarto.on("slide_after_load", ({ slideNode }) => {
     const img = slideNode.querySelector(".gslide-image img");
-    if (!img || img.dataset.zoom) return;
-    img.dataset.zoom = "1";
-    const pz = Panzoom(img, { maxScale: 8, minScale: 1, contain: "outside", cursor: "zoom-in" });
+    if (!img || img._pz) return;
+    const vector = /\.svg($|\?)/.test(img.src);         // an SVG stays sharp: more zoom
+    const pz = Panzoom(img, { maxScale: vector ? 20 : 8, minScale: 1, contain: "outside" });
+    img._pz = pz; current = pz;
     img.parentElement.style.touchAction = "none";
     img.parentElement.style.overflow = "visible";      // the zoomed picture can fill the whole screen
     img.parentElement.addEventListener("wheel", (e) => pz.zoomWithWheel(e));
-    img.addEventListener("dblclick", () => pz.reset());
+    img.addEventListener("panzoomchange", (e) => img.classList.toggle("rs-zoomed", e.detail.scale > 1.01));
+    img.classList.remove("zoomable");                  // not the click zoom of GLightbox
+    let down = null;
+    img.addEventListener("pointerdown", (e) => { down = [e.clientX, e.clientY]; });
+    img.parentElement.addEventListener("click", (e) => {    // first, before GLightbox sees the click
+      e.stopPropagation();
+      if (e.target !== img || !down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 5) return;    // a drag
+      if (pz.getScale() > 1.01) pz.reset(); else pz.zoomToPoint(3, e);    // zoom in there, or the whole picture again
+    }, true);
   });
 });
 </script>
