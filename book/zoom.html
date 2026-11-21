@@ -4,7 +4,7 @@
 <script src="panzoom.min.js"></script>  <!-- @panzoom/panzoom 4.5.1, MIT license -->
 <script>window.define = window.__amd;</script>
 <style>
-  .rs-zoombar { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 999999; display: flex;
+  .rs-zoombar { position: fixed; left: 50%; top: 12px; transform: translateX(-50%); z-index: 999999; display: flex;
     gap: 6px; align-items: center; padding: 6px 10px; border-radius: 8px; background: rgba(0, 0, 0, 0.7); color: #fff;
     font: 14px/1.2 system-ui, sans-serif; }
   .rs-zoombar button { min-width: 36px; height: 32px; border: 1px solid #888; border-radius: 6px; background: #222;
@@ -50,12 +50,14 @@ window.addEventListener("load", () => {
     img.parentElement.style.overflow = "visible";      // the zoomed picture can fill the whole screen
     img.parentElement.addEventListener("wheel", (e) => pz.zoomWithWheel(e));
     img.addEventListener("panzoomchange", (e) => img.classList.toggle("rs-zoomed", e.detail.scale > 1.01));
+    img.classList.remove("zoomable");                  // not the click zoom of GLightbox
     let down = null;
     img.addEventListener("pointerdown", (e) => { down = [e.clientX, e.clientY]; });
-    img.addEventListener("click", (e) => {             // a click, not a drag: zoom in there, or show the whole picture
-      if (!down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 5) return;
-      if (pz.getScale() > 1.01) pz.reset(); else pz.zoomToPoint(3, e);
-    });
+    img.parentElement.addEventListener("click", (e) => {    // first, before GLightbox sees the click
+      e.stopPropagation();
+      if (e.target !== img || !down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 5) return;    // a drag
+      if (pz.getScale() > 1.01) pz.reset(); else pz.zoomToPoint(3, e);    // zoom in there, or the whole picture again
+    }, true);
   });
 });
 </script>

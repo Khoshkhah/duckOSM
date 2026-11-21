@@ -13,7 +13,7 @@ ch = Chapter(9, "09_analysis", "Street network analysis",
              learn="the two views of the statistics; junctions; street bearings and their entropy; connected "
                    "components; the nearest node and edge of a point; a smaller area; random points; heights and "
                    "grades; OSMnx on a duckOSM network; city blocks with momepy",
-             time="about 2 minutes", extras="analysis,viz", more_install="\n    %pip install -q osmnx momepy",
+             time="about 2 minutes", extras="analysis,viz", more_install="\n    %pip install -q osmnx momepy mapclassify",
              next_=("10_gis", "10. OSM data for GIS", "OSM features, OSM XML and administrative areas"))
 
 ch.md(f"""## What street network analysis measures
@@ -388,18 +388,62 @@ ch.code("""blocks["ha"] = blocks.area / 10_000                                # 
 classes = ["< 0.1 ha", "0.1-0.5 ha", "0.5-1 ha", "1-5 ha", "> 5 ha"]
 blocks["size"] = pd.cut(blocks.ha, [0, 0.1, 0.5, 1, 5, 1000], labels=classes)
 blocks["size"].value_counts().sort_index()                         # the blocks in each class""")
-ch.code("""fig, ax = plt.subplots(figsize=(12, 13), dpi=200)          # a large picture with many pixels: zoom in to see each block
-streets.plot(ax=ax, color="lightgray", linewidth=0.4)              # the streets first, in light gray
-blocks.plot(ax=ax, column="size", cmap="viridis", legend=True,
-            legend_kwds={"title": "block area", "loc": "lower right"})    # the blocks by size
-buildings.plot(ax=ax, color="black", alpha=0.25)                   # the buildings on top
-ax.set_axis_off()""")
 ch.md("""Most blocks are small: 149 blocks have 0.1 to 0.5 ha, and 57 have less than 0.1 ha. Only 4 blocks have more
 than 5 ha. They are on the coast and on the slopes, where few streets cut the land, for example at the Larvotto beach
-in the northeast. The white areas in the middle are the two ports.
+in the northeast.
 
 The blocks change with the streets that you give to momepy. With the driving streets only, many steps and footways
 do not cut the land, and the blocks become larger.""")
+ch.md("""### The map of the blocks
+
+On the map, each block has its own color, so that you can see where one block stops and the next one starts. Two
+blocks that touch never have the same color: `mapclassify.greedy` gives each block one of six colors in this way. The
+size of the blocks is in the table above, not on the map.
+
+The map has four layers, from the bottom to the top:
+
+| Layer | Style |
+|---|---|
+| The blocks | six colors, two blocks that touch never have the same color; a black border |
+| The buildings | dark gray |
+| The roads | white: wide for a main road (`primary`, `secondary`, ...), narrow for a street |
+| The footways and the steps | brown dashed lines |
+
+The first cell gives each block its color, and each road its kind and its style. The second cell draws the map.""")
+ch.code("""import mapclassify
+
+blocks["color"] = mapclassify.greedy(blocks, min_colors=6)                       # 0 to 5: blocks that touch differ
+main = ["motorway", "trunk", "primary", "secondary", "tertiary"]
+paths = ["footway", "steps", "pedestrian", "path", "cycleway", "corridor"]
+kind = pd.Series("street", index=streets.index)                                 # each road is a street, but:
+kind[streets.highway.str.replace("_link", "").isin(main)] = "main road"         # primary_link counts as primary
+kind[streets.highway.isin(paths)] = "footway, steps"
+roads = {"footway, steps": dict(color="#8b4513", linewidth=0.5, linestyle="--"),
+         "street": dict(color="white", linewidth=1.0),
+         "main road": dict(color="white", linewidth=2.2)}
+kind.value_counts()                                                             # the roads of each kind""")
+ch.md("""The map has 4,184 footways and steps, 1,210 streets and 721 main roads. Most lines are footways and steps:
+Monaco has many of them between its streets, on the slopes.""")
+ch.code("""from matplotlib.colors import ListedColormap
+from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
+
+six = ListedColormap(["#66c2a5", "#fc8d62", "#8da0cb", "#e78ac3", "#a6d854", "#ffd92f"])    # the six block colors
+fig, ax = plt.subplots(figsize=(12, 13), dpi=200)          # a large picture with many pixels: zoom in to see each block
+ax.set_facecolor("#d9d9d9")                                # the background in light gray
+blocks.plot(ax=ax, column="color", cmap=six)                                    # each block in its color
+blocks.boundary.plot(ax=ax, color="black", linewidth=0.8)                       # the border of each block
+buildings.plot(ax=ax, color="#6e6e6e", edgecolor="#3c3c3c", linewidth=0.2)      # the buildings
+for k, style in roads.items():
+    streets[kind == k].plot(ax=ax, **style)                                     # the roads on top
+legend = [Patch(facecolor="#66c2a5", edgecolor="black", label="block (one color for each block)"),
+          Patch(facecolor="#6e6e6e", edgecolor="#3c3c3c", label="building")]
+legend += [Line2D([], [], label=k, **style) for k, style in roads.items()]
+ax.legend(handles=legend, title="Blocks of Monaco", loc="lower right", facecolor="#d9d9d9")
+ax.set_xticks([])
+ax.set_yticks([])
+plt.show()""")
+
 
 
 ch.md("""## Try it yourself
