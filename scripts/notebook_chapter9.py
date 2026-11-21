@@ -343,7 +343,8 @@ momepy makes the blocks in three steps:
 1. **Enclosures:** it cuts the land along the streets. Each enclosure is an area with streets around it.
 2. **Cells:** it divides each enclosure into one cell for each building (a tessellation). A cell is the land that is
    nearer to its building than to other buildings.
-3. **Blocks:** it joins the cells of the buildings that are between the same streets.
+3. **Blocks:** it joins the cells of the buildings that are between the same streets. A cell with no building goes
+   into no block.
 
 ### The streets
 
@@ -366,20 +367,60 @@ ch.code("""buildings = duckosm.gis.features(net, tags={"building": True}).to_crs
 buildings = buildings[buildings.geom_type.isin(["Polygon", "MultiPolygon"])]       # only the areas
 buildings = buildings.explode(index_parts=False).reset_index(drop=True)[["geometry"]]   # one polygon for each row
 water = duckosm.gis.features(net, tags={"natural": ["water"], "leisure": ["marina"]}).to_crs(crs)   # lakes and ports
-land = net.boundary.to_crs(crs).difference(water.union_all())                      # the city without its water
-len(buildings), round(land.area.sum() / 1e6, 2)                                    # buildings, land in km²""")
+area = net.boundary.to_crs(crs).union_all()                                        # the area, one polygon
+land = area.difference(water.union_all())                                          # the city without its water
+len(buildings), round(land.area / 1e6, 2)                                          # buildings, land in km²""")
+ch.md("""### Land with no building
+
+momepy puts a cell into a block only when the cell has a building. A park, a beach or a quay at the sea has no
+building, so its land goes into no block, and the roads on that land are outside all blocks. To keep this land, the
+next cell gives momepy two more kinds of area as if they were buildings:
+
+| Area | Why |
+|---|---|
+| The OSM land areas: parks, gardens, sports grounds, grass, forest, beaches, parking | their land then goes into a block |
+| The sea, the ports and the land outside the area, as one polygon around the land | the land along the coast and along the edge of the area then goes into a block |
+
+After momepy, the sea, the ports and the land outside the area are cut out of the result again. This changes only
+what momepy gets as input, not what momepy does.""")
+ch.code("""import geopandas as gpd
+import shapely
+
+tags = {"leisure": ["park", "garden", "pitch", "playground", "sports_centre", "track", "stadium"],
+        "landuse": ["grass", "forest", "recreation_ground", "cemetery", "meadow", "village_green", "flowerbed"],
+        "natural": ["wood", "beach", "scrub", "grassland", "bare_rock", "heath"],
+        "amenity": ["parking"]}
+open_land = duckosm.gis.features(net, tags=tags).to_crs(crs)                       # parks, gardens, beaches, ...
+open_land = open_land.geometry.intersection(land).difference(buildings.union_all())    # on the land, not under a building
+frame = shapely.box(*area.buffer(300).bounds)                                      # a rectangle around the area
+sea = frame.difference(land)                                                       # the sea, the ports, the land outside
+extra = gpd.GeoSeries(pd.concat([open_land, gpd.GeoSeries([sea], crs=crs)]), crs=crs).explode(index_parts=False)
+extra = extra[extra.geom_type.eq("Polygon") & (extra.area > 20)]                   # areas of more than 20 m²
+things = gpd.GeoDataFrame(geometry=pd.concat([buildings.geometry, extra]), crs=crs).reset_index(drop=True)
+len(buildings), len(extra), len(things)                                            # buildings, extra areas, all""")
+ch.md("""momepy gets 1,504 areas: the 1,258 buildings and 246 extra areas (the OSM land areas, and the pieces of the
+polygon of the sea, the ports and the land outside the area).""")
 ch.md("""### The three steps
 
-`momepy.enclosures` cuts the land along the streets. A port is a hole in the land, and momepy also gives the hole as
-an enclosure, so the second line removes the enclosures that are not on the land. `momepy.generate_blocks` gives two
-results: the blocks, and the block of each building.""")
-ch.code("""enc = momepy.enclosures(streets, limit=land)                       # step 1: the areas between the streets
-enc = enc[enc.representative_point().within(land.union_all())]     # remove the ports (holes in the land)
-cells = momepy.enclosed_tessellation(buildings, enc)               # step 2: one cell for each building
-blocks, block_of = momepy.generate_blocks(cells, streets, buildings)    # step 3: the cells joined into blocks
+momepy works on the frame (the rectangle around the area), with the buildings and the extra areas. Then the fourth
+line cuts the sea, the ports and the land outside the area out of the blocks. `momepy.generate_blocks` gives two
+results: the blocks, and the block of each building. This chapter uses only the blocks.""")
+ch.code("""enc = momepy.enclosures(streets, limit=gpd.GeoSeries([frame], crs=crs))     # step 1: the areas between the streets
+cells = momepy.enclosed_tessellation(things, enc)                          # step 2: one cell for each building or area
+blocks, _ = momepy.generate_blocks(cells, streets, things)                 # step 3: the cells joined into blocks
+blocks = gpd.GeoDataFrame(geometry=blocks.intersection(land), crs=crs).explode(index_parts=False)   # only the land
+blocks = blocks[blocks.area > 1].reset_index(drop=True)
 len(enc), len(cells), len(blocks)""")
-ch.md("""The land has 2.08 km² and 1,710 enclosures. The 1,258 buildings give 2,711 cells. There are more cells than
-buildings, because an enclosure with no building is also a cell. momepy joins the cells into 292 blocks.""")
+ch.md("""momepy cuts the frame into 1,635 enclosures and 2,870 cells, and joins the cells into blocks. After the cut,
+404 blocks are on the land.
+
+The next cell measures the share of the road length on the land that is in no block and on no block border.""")
+ch.code("""on_land = streets.intersection(land).length.sum()                          # the road length on the land
+in_blocks = streets.intersection(blocks.buffer(0.5).union_all()).length.sum()   # the road length in or on a block
+round(1 - in_blocks / on_land, 2)                                          # the share on land outside all blocks""")
+ch.md("""15 % of the road length on the land is still outside all blocks. These roads run on land with no building and
+no OSM land area: small pieces of land with roads all around them, such as traffic islands, corners at junctions and
+the middle strip of a divided road. These pieces are street land, not blocks, so they stay empty on the maps.""")
 ch.md("""### The size of the blocks
 
 The cell gives each block its area in hectares (1 ha = 10,000 m², about a football field and a half) and puts it in a
@@ -388,15 +429,14 @@ ch.code("""blocks["ha"] = blocks.area / 10_000                                # 
 classes = ["< 0.1 ha", "0.1-0.5 ha", "0.5-1 ha", "1-5 ha", "> 5 ha"]
 blocks["size"] = pd.cut(blocks.ha, [0, 0.1, 0.5, 1, 5, 1000], labels=classes)
 blocks["size"].value_counts().sort_index()                         # the blocks in each class""")
-ch.md("""Most blocks are small: 149 blocks have 0.1 to 0.5 ha, and 57 have less than 0.1 ha. Only 4 blocks have more
-than 5 ha. They are on the coast and on the slopes, where few streets cut the land, for example at the Larvotto beach
-in the northeast.
+ch.md("""Most blocks are small: 169 blocks have less than 0.1 ha, and 152 have 0.1 to 0.5 ha. Only 3 blocks have more
+than 5 ha. They are on the coast and on the slopes, where few streets cut the land.
 
 The blocks change with the streets that you give to momepy. With the driving streets only, many steps and footways
 do not cut the land, and the blocks become larger.""")
 ch.md("""### The map of momepy's blocks
 
-This map shows the blocks exactly as momepy gives them. Each block reaches the center line of its streets, so two
+This map shows the blocks as momepy gives them, with only the water cut out. Each block reaches the center line of its streets, so two
 blocks on the two sides of a street touch at that line.
 
 The first cell sorts the roads into three kinds, for the maps: main roads, streets, and footways and steps.""")
@@ -488,9 +528,9 @@ space = between.buffer(half.drop(inside)).union_all()                           
 shown = blocks.copy()
 shown["geometry"] = blocks.difference(space)                                    # the blocks without the street space
 shown = shown[~shown.is_empty]
-len(inside), round(space.intersection(land.union_all()).area / 1e6, 2), round(shown.area.sum() / 1e6, 2)    # roads inside, km²""")
-ch.md("""1,203 roads stop inside a block, so they stay in their block. The street space of the other roads covers
-0.42 km² of the land of Monaco. The blocks without the street space cover 1.53 km².""")
+len(inside), round(space.intersection(land).area / 1e6, 2), round(shown.area.sum() / 1e6, 2)    # roads inside, km²""")
+ch.md("""1,871 roads stop inside a block, so they stay in their block. The street space of the other roads covers
+0.36 km² of the land of Monaco. The blocks without the street space cover 1.66 km².""")
 ch.code("""block_map(shown, space)                                                          # the blocks less the street space""")
 ch.md("""The street space is white between the blocks. Where a footway runs along the edge of a building, for example on
 the piers of the port, its strip of 2 m cuts the block but not the building. So there the building shows outside its
