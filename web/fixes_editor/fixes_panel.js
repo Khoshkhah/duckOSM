@@ -1899,7 +1899,7 @@ export async function initFixesPanel(ctx) {
     paintBar();
     if (current === "turns" && !$("fix-turnsec").hidden) outgoing({ keep: false });
     const s = (x) => (x === 1 ? "" : "s");
-    ctx.onChange(n ? `${n} change${s(n)}: ${F.objects(doc).length} object${s(F.objects(doc).length)}, ${turns} turn rule${s(turns)}, ${faces} wall${s(faces)}, ${newWays} new road${s(newWays)}.` : "No fixes.", n);
+    ctx.onChange?.(n ? `${n} change${s(n)}: ${F.objects(doc).length} object${s(F.objects(doc).length)}, ${turns} turn rule${s(turns)}, ${faces} wall${s(faces)}, ${newWays} new road${s(newWays)}.` : "No fixes.", n);
     autoWrite();
     if (!$("fix-changes").hidden) renderChanges();
     drawEdits();

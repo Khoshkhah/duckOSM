@@ -40,7 +40,7 @@ const panel = await initFixesPanel({
 	roadRows,      // optional: (osmId) gives the map's rows of an OSM way, for roadstyle's highlight sets; the default is an index of window.RS_SIDE.props; false: no highlight sets
 	roadKeys,      // optional: the names of the columns, when a row of window.RS_SIDE.props is an array (the default reads `osm_id` of an object)
 	areaKey,       // () gives the name of the area: the browser keeps the changes of each area
-	onChange,      // (summary, n): the number of changes is new
+	onChange,      // optional: (summary, n): the number of changes is new
 	onBuild,       // (): the user clicks "Build again"; the host page builds with panel.text()
 	buildOff,      // optional: () gives why the host cannot build now ("" when it can); Build again is then off, with this reason under it
 	changesNote,   // optional: more HTML for the help text of the Changes tab
