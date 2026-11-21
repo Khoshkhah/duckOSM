@@ -285,17 +285,34 @@ route = ox.routing.shortest_path(G, orig, dest, weight="travel_time")        # O
 fig, ax = ox.plot.plot_graph_route(G, route, route_color="#d1242f", node_size=0, bgcolor="white",
                                    edge_color="#999999", figsize=(7, 7))    # OSMnx's picture""")
 
-ch.md("""### The osmnx view equals OSMnx
+ch.md("""The graph of the largest part has 1,600 nodes and 2,622 edges, the same as `big`. OSMnx found a route on it with
+its own `shortest_path` and drew it.
 
-The `osmnx` view of `stats` gives the numbers of `ox.basic_stats` on the simplified OSMnx graph. To simplify the
-graph with OSMnx, set `G.graph["simplified"] = False` first: `to_osmnx` marks the graph as simplified, because each
-edge has its line. The tests of duckOSM check each key.""")
-ch.code("""H = an.to_osmnx(drive)                                     # the whole driving network
-H.graph["simplified"] = False                              # let OSMnx simplify it
-ours = an.stats(drive)["osmnx"]                            # the osmnx view of duckOSM
-theirs = ox.basic_stats(ox.simplify_graph(H))              # OSMnx itself
-{k: (ours[k], theirs[k]) for k in ("n", "m", "intersection_count", "street_segment_count")}""")
-ch.md("""The graph of the largest part has 1,600 nodes and 2,622 edges, the same as `big`. OSMnx found a route on it and drew it. For the whole network, the `osmnx` view of duckOSM and `ox.basic_stats` of OSMnx give the same numbers: 843 nodes, 1,484 edges, 636 intersections and 1,070 street segments.""")
+### Check: the `osmnx` view gives the numbers of OSMnx
+
+Section "Statistics: `stats`" says that the `osmnx` view of `stats` gives the numbers of OSMnx. This check proves it:
+it computes the same numbers in two ways, on the same driving network of Monaco, and compares them.
+
+| Way | What it does |
+|---|---|
+| duckOSM | `an.stats(drive)["osmnx"]`: the `osmnx` view of duckOSM's own statistics |
+| OSMnx | `to_osmnx` gives the network to OSMnx, OSMnx simplifies it (it removes the nodes where only two roads meet), and `ox.basic_stats` counts it |
+
+One detail: `to_osmnx` marks the graph as simplified, because each edge already has its full line. OSMnx does not
+simplify a graph with that mark. So the cell sets `H.graph["simplified"] = False` first, and then OSMnx simplifies it
+as it does with its own graphs.""")
+ch.code("""import pandas as pd
+
+H = an.to_osmnx(drive)                                     # the whole driving network, as an OSMnx graph
+H.graph["simplified"] = False                              # allow OSMnx to simplify it
+theirs = ox.basic_stats(ox.simplify_graph(H))              # the numbers of OSMnx
+ours = an.stats(drive)["osmnx"]                            # the numbers of duckOSM's osmnx view
+keys = ["n", "m", "intersection_count", "street_segment_count"]
+pd.DataFrame({"duckOSM": [ours[k] for k in keys], "OSMnx": [theirs[k] for k in keys]}, index=keys)    # side by side""")
+ch.md("""The two columns are the same: 843 nodes (`n`), 1,484 edges (`m`), 636 intersections and 1,070 street segments.
+So you can use `an.stats` and compare its `osmnx` view with any number that OSMnx gives for another city. The tests
+of duckOSM run this check for each key.""")
+
 
 ch.md("""## Try it yourself
 
