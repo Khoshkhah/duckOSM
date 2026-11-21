@@ -547,54 +547,10 @@ removed edges are the eight edges of the fixed way. All the other edges of the n
 
 ch.md("""### Every output takes the fix
 
-The fix is in the database, so each export of the database takes it. The cells below write five outputs of the fixed
-network and read the speed of one edge of the fixed way back from each file. Each format stores the speed in its own
-unit: SUMO and MATSim use m/s, so the cell converts it to km/h. Chapter 6 shows each export in full.
-
-| Output | The call | Where the speed is |
-|---|---|---|
-| the database | (the build) | `maxspeed_kmh` of `driving.edges` |
-| GeoPackage | `fixed.to_gis` | `maxspeed_kmh` of the layer `edges_driving` |
-| SUMO | `fixed.to_sumo` | the attribute `speed` (m/s) of the `<edge>` |
-| MATSim | `fixed.to_matsim` | the attribute `freespeed` (m/s) of the `<link>` |
-| GMNS | `fixed.to_gmns` | `free_speed` (km/h) of the table `link` |
-| QuackOSM table | `duckosm.gis.quack(..., fixes=)` | the tag `maxspeed` of the way |
-
-In each file, the id of the edge (or of the link) is the `edge_id`. So the cell finds the same edge in each output.""")
-ch.code("""import duckdb                                                    # to read the outputs back
-
-edge = way_edges["edges"][0]                                     # one edge of the fixed way
-speeds = {"database (km/h)": float(fixed.edges(where=f"edge_id = {edge}").maxspeed_kmh[0])}    # its speed in each output
-fixed.to_gis("out/monaco.gpkg")                                  # a GeoPackage
-gpkg = duckdb.connect()                                          # DuckDB reads it back
-gpkg.load_extension("spatial")                                   # with the extension spatial
-speeds["GeoPackage (km/h)"] = gpkg.execute(
-    "SELECT maxspeed_kmh FROM st_read('out/monaco.gpkg', layer='edges_driving') WHERE edge_id = ?", [edge]).fetchone()[0]""")
-ch.md("""SUMO and MATSim write XML. `run_netconvert=False` writes only the plain XML files of SUMO, so this cell does not
-need the SUMO programs.""")
-ch.code("""import gzip
-import xml.etree.ElementTree as ET                               # to read the XML files back
-
-sumo = fixed.to_sumo("out/sumo", run_netconvert=False)            # the SUMO files; speed in m/s
-speeds["SUMO (km/h)"] = round(float(ET.parse(sumo["edg"]).find(f".//edge[@id='{edge}']").get("speed")) * 3.6, 1)
-fixed.to_matsim("out/matsim.xml.gz")                             # the MATSim network; free speed in m/s
-speeds["MATSim (km/h)"] = round(float(ET.parse(gzip.open("out/matsim.xml.gz")).find(f".//link[@id='{edge}']").get("freespeed")) * 3.6, 1)""")
-ch.md("""GMNS is a set of tables. `duckosm.gis.quack` is different from the other calls: it reads the OSM file, not the
-network, so it takes the fixes file with its own `fixes=`.""")
-ch.code("""fixed.to_gmns("out/gmns.duckdb")                                 # the GMNS network: link_id is the edge_id
-speeds["GMNS (km/h)"] = duckdb.connect("out/gmns.duckdb", read_only=True).execute(
-    "SELECT free_speed FROM gmns_driving.link WHERE link_id = ?", [edge]).fetchone()[0]
-quack = duckosm.gis.quack(area, out="out", name="monaco", fixes=fixes, formats=["geoparquet"])    # the QuackOSM table
-speeds["QuackOSM table (tag)"] = gpkg.execute(
-    f"SELECT tags['maxspeed'] FROM '{quack[0]}' WHERE feature_id = 'way/{way}'").fetchone()[0]
-speeds                                                           # the speed of the edge in each output""")
-ch.md("""**What the output shows.** Each output gives 10 km/h for the edge. The QuackOSM table has the OSM tag, so it
-shows the text `'10'`. The GMNS export takes the longest time (more than 25 s here). It also makes the tables of the
-lanes and of the movements at each junction.
-
-> **Tip:** `fixes=` also works in the first build: `duckosm.network(..., fixes="osm_fixes.yaml")`,
-> `duckosm.get(..., fixes=...)` and `area.build(fixes=...)` take a path or a `Fixes`. Use `rebuild` when you have a
-> network and want to compare it with the fixed one.""")
+The fix is in the network, so each export of the fixed network takes it: SUMO, MATSim, GMNS, OpenDRIVE and the GIS
+files. The QuackOSM table reads the OSM file, and it takes the same fixes file with its own `fixes=`. Chapter 6 shows
+these exports, and its last section reads the speed of Boulevard Louis II back from each output: 10 km/h in all of
+them.""")
 
 
 ch.exercises([
@@ -604,9 +560,9 @@ ch.exercises([
 oneway = net.rebuild(fixes=fixes, out="data/monaco_oneway.duckdb")
 d = net.diff(oneway)
 (d.change == "removed").sum()                                 # the edges of the other direction"""),
-    ("Close Avenue Princesse Grace (`w2`) to cars only, and find the new time of the route.",
-     """closed2 = duckosm.fixes.Fixes("closed2.yaml").exclude(way=w2, modes="driving")
-net.rebuild(fixes=closed2, out="data/monaco_closed2.duckdb").route(a, b).time_s"""),
+    ("Close Boulevard Albert 1er (`w3`) to cars only, and find the new time of the route.",
+     """closed3 = duckosm.fixes.Fixes("closed3.yaml").exclude(way=w3, modes="driving")
+net.rebuild(fixes=closed3, out="data/monaco_closed3.duckdb").route(a, b).time_s     # about 252 s"""),
     ("Delete the rule of the fixed way, so that the way is as in OSM again, and look at the file.",
      """fixes.drop(way=way)
 print(open("osm_fixes.yaml").read())                           # overrides: []"""),

@@ -220,8 +220,53 @@ from pathlib import Path
 subprocess.run([sys.executable, "-m", "duckosm", "quack", str(area.pbf), "--pmtiles", "-o", "out", "--name", "monaco"],
                check=True)                                             # the command duckosm quack --pmtiles
 Path("out/monaco.pmtiles").stat().st_size, Path("out/monaco.pmtiles").read_bytes()[:7]    # the size; a PMTiles file starts with "PMTiles\"""")
-ch.md("""The command made 59 tiles of 9,659 features in 0.1 s. The file is 0.2 MB
+ch.md("""The command made 59 tiles of 9,659 features. The file is 0.2 MB
 (219,713 bytes), and its first seven bytes are `PMTiles`.""")
+
+ch.md("""## The fix of chapter 5 in every output
+
+Chapter 5 fixes the OSM data in a fixes file: road works lower the speed limit of Boulevard Louis II (the OSM way
+4230891) to 10 km/h. Each export of a fixed network takes the fix. The cells below build the network with that fixes
+file, write five outputs and read the speed of one edge of Boulevard Louis II back from each file.
+
+| Output | Where the speed is |
+|---|---|
+| the database | `maxspeed_kmh` of `driving.edges` |
+| GeoPackage | `maxspeed_kmh` of the layer `edges_driving` |
+| SUMO | the attribute `speed` (m/s) of the `<edge>` |
+| MATSim | the attribute `freespeed` (m/s) of the `<link>` |
+| GMNS | `free_speed` (km/h) of the table `link` |
+| QuackOSM table | the tag `maxspeed` of the way |
+
+In each file, the id of the edge (or of the link) is the `edge_id`. So the cells find the same edge in each output.""")
+ch.code('''Path("osm_fixes.yaml").write_text("""overrides:
+- osm_id: 4230891
+  tags:
+    maxspeed: '10'
+  note: road works
+""")                                                                                 # the fixes file of chapter 5
+fixed = area.build(modes=["driving"], output="data/monaco_fixed.duckdb", fixes="osm_fixes.yaml")    # the network with the fix
+edge = int(fixed.edges(where="osm_id = 4230891").edge_id[0])                        # one edge of Boulevard Louis II
+speeds = {"database (km/h)": float(fixed.edges(where=f"edge_id = {edge}").maxspeed_kmh[0])}     # its speed in each output''')
+ch.code("""import gzip
+import xml.etree.ElementTree as ET                                                  # to read the XML files back
+
+fixed.to_gis("out/fixed.gpkg")                                                      # a GeoPackage
+speeds["GeoPackage (km/h)"] = con.execute(
+    "SELECT maxspeed_kmh FROM st_read('out/fixed.gpkg', layer='edges_driving') WHERE edge_id = ?", [edge]).fetchone()[0]
+sumo = fixed.to_sumo("out/fixed_sumo", run_netconvert=False)                        # the plain SUMO files; speed in m/s
+speeds["SUMO (km/h)"] = round(float(ET.parse(sumo["edg"]).find(f".//edge[@id='{edge}']").get("speed")) * 3.6, 1)
+fixed.to_matsim("out/fixed_matsim.xml.gz")                                          # the MATSim network; free speed in m/s
+speeds["MATSim (km/h)"] = round(float(ET.parse(gzip.open("out/fixed_matsim.xml.gz")).find(f".//link[@id='{edge}']").get("freespeed")) * 3.6, 1)
+fixed.to_gmns("out/fixed_gmns.duckdb")                                              # the GMNS network
+speeds["GMNS (km/h)"] = duckdb.connect("out/fixed_gmns.duckdb", read_only=True).execute(
+    "SELECT free_speed FROM gmns_driving.link WHERE link_id = ?", [edge]).fetchone()[0]
+quack = duckosm.gis.quack(area, out="out", name="fixed", fixes="osm_fixes.yaml", formats=["geoparquet"])    # the OSM data with the fixes
+speeds["QuackOSM table (tag)"] = con.execute(
+    f"SELECT tags['maxspeed'] FROM '{quack[0]}' WHERE feature_id = 'way/4230891'").fetchone()[0]
+speeds                                                                              # the speed of the edge in each output""")
+ch.md("""**What the output shows.** Each output gives 10 km/h for the edge. The QuackOSM table has the OSM tag, so it
+shows the text `'10'`. One fixes file corrects all six outputs.""")
 
 ch.md("""## The files of the chapter
 
