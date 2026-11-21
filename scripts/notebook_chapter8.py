@@ -11,8 +11,9 @@ from notebook_book import IMAGES, Chapter  # noqa: E402
 ch = Chapter(8, "08_routing_advanced", "Advanced routing",
              "The Route object, many routes, the k best routes, travel time matrices, isochrones and accessibility",
              learn="the graph that all routing calls search; the members of a `Route`; the fastest or the shortest "
-                   "route; the k best routes; many routes in parallel; a travel time matrix; isochrones; accessibility; your own cost of each edge and of each change of mode",
-             time="about 2 minutes", extras="widget,viz,graph",
+                   "route; the k best routes; many routes in parallel; a travel time matrix; isochrones; accessibility; your own cost of each edge and of each change of mode; a delivery round with ortools; "
+                   "cafés near every junction with pandana",
+             time="about 2 minutes", extras="widget,viz,graph", more_install="\n    %pip install -q ortools pandana",
              next_=("09_analysis", "9. Street network analysis", "the numbers of OSMnx, junctions, components and points"))
 
 ch.md(f"""## One graph for all routing calls
@@ -310,6 +311,103 @@ The map colors each walking edge by the minutes to its nearest target. An edge w
 stays gray.""")
 ch.code("""net.map("walking", color_by=acc["nearest_s"] / 60, cmap="viridis")    # the minutes to the nearest target""")
 ch.md("""The dark edges are near a target, and the yellow edges are about 9 minutes away.""")
+
+ch.md("""## Use the results in other tools
+
+duckOSM gives the input that other routing tools need: travel times, nodes and edges. This section shows two
+tools that planners use:
+
+| Tool | What it does | What duckOSM gives it |
+|---|---|---|
+| [OR-Tools](https://developers.google.com/optimization) | plans the order of visits, for example a delivery round | the travel time matrix (`matrix`) |
+| [pandana](https://udst.github.io/pandana/) | counts places near every node of a network, for the whole city in one call | the walking nodes and edges |
+
+### A delivery round with OR-Tools
+
+A van starts at a depot in Fontvieille, visits 10 pharmacies of Monaco and comes back. In which order is the round
+shortest? This is the travelling salesman problem. The steps:
+
+1. Find the pharmacies with `duckosm.gis.features` (chapter 10), and the nearest driving edge of each one.
+2. Make the travel time matrix between the depot and the pharmacies with `matrix`.
+3. Give the matrix to OR-Tools. It gives the order of the visits.
+4. Draw the round with `route`, one route for each pair of stops.
+
+The first cell does steps 1 and 2. The stops are edge ids, so each cell of the matrix equals the time of `route`
+(section "A cell equals the route").""")
+ch.code("""from duckosm import analysis as an
+
+pharmacies = duckosm.gis.features(net, tags={"amenity": "pharmacy"})[:10]      # 10 pharmacies (points)
+xs = [7.4155] + list(pharmacies.geometry.x)                                     # the depot in Fontvieille, then them
+ys = [43.7285] + list(pharmacies.geometry.y)
+names = ["depot"] + [f"pharmacy {i}" for i in range(1, 11)]
+stops = dict(zip(names, map(int, an.nearest_edges(net.driving, xs, ys))))       # name -> the nearest driving edge
+times = net.driving.matrix(stops)                                               # 11 x 11 travel times in seconds
+times.iloc[:4, :4].round()""")
+ch.md("""The rows and the columns have the names of the stops. From the depot to pharmacy 1 is 193 s by car.
+
+The second cell gives the matrix to OR-Tools. OR-Tools needs whole numbers and a function that gives the cost
+between two stops. It returns the stops in the best order that it finds.""")
+ch.code("""from ortools.constraint_solver import pywrapcp
+
+cost = times.round().astype(int).to_numpy()                                    # whole seconds
+manager = pywrapcp.RoutingIndexManager(len(names), 1, 0)                        # 11 stops, 1 van, start at stop 0
+model = pywrapcp.RoutingModel(manager)
+seconds = model.RegisterTransitCallback(lambda i, j: int(cost[manager.IndexToNode(i), manager.IndexToNode(j)]))
+model.SetArcCostEvaluatorOfAllVehicles(seconds)                                 # the cost of each leg: its time
+solution = model.SolveWithParameters(pywrapcp.DefaultRoutingSearchParameters())
+
+i, order = model.Start(0), []
+while not model.IsEnd(i):                                                       # read the stops in their order
+    order.append(names[manager.IndexToNode(i)])
+    i = solution.Value(model.NextVar(i))
+order.append("depot")                                                           # the van comes back
+order""")
+ch.code("""def round_time(stop_order):
+    \"\"\"The time of a round through the stops in this order, from the matrix, in seconds.\"\"\"
+    return sum(times.loc[a, b] for a, b in zip(stop_order, stop_order[1:]))
+
+
+round(round_time(order)), round(round_time(names + ["depot"]))                  # the best order, the order of the list""")
+ch.md("""The best order takes 912 s of driving (15 min). The order of the list (pharmacy 1, 2, 3 ... 10) takes 1,398 s.
+OR-Tools saves 486 s, about 35 %.""")
+ch.code("""legs = [net.driving.route(stops[a], stops[b]) for a, b in zip(order, order[1:])]    # one route for each leg
+edges = pd.concat([leg.edges.edge_id for leg in legs])                           # all the edges of the round
+print(round(sum(leg.time_s for leg in legs)), "s,", round(sum(leg.length_m for leg in legs)), "m")
+net.driving.plot(highlight=edges)                                               # the round in orange""")
+ch.md("""The 11 routes take 912 s together, the same as the matrix, and the van drives 10,766 m. The orange round goes
+from the depot in Fontvieille, in the southwest, through the pharmacies in the center and the northeast, and back.""")
+
+ch.md("""### Cafés near every junction with pandana
+
+`accessibility` answers "which targets can I reach" for the start places that you give. pandana answers a question
+for every node of the network at once. Here the question is: how many cafés are within 500 m of walking from each
+junction of Monaco? The steps:
+
+1. Give pandana the walking nodes (their coordinates) and the walking edges (`source`, `target` and `length_m`).
+2. Find the cafés with `duckosm.gis.features`, and put each one on its nearest node.
+3. Ask pandana for the number of cafés within 500 m of each node.
+4. Draw the nodes in the color of their number.
+
+pandana prints the progress of its own preparation (the lines about "contraction hierarchies").""")
+ch.code("""import pandana
+
+nodes = net.walking.nodes().set_index("node_id")                                # 1. the walking junctions
+walk = net.walking.edges()                                                       # and the walking edges
+graph = pandana.Network(nodes.geometry.x, nodes.geometry.y, walk.source, walk.target, walk[["length_m"]],
+                        twoway=False)                                           # each edge has one direction
+cafes = duckosm.gis.features(net, tags={"amenity": "cafe"}).geometry.representative_point()    # 2. the cafés
+graph.set(graph.get_node_ids(cafes.x, cafes.y), name="cafes")                   # each café on its nearest node
+near = graph.aggregate(500, type="count", name="cafes")                         # 3. cafés within 500 m of each node
+len(cafes), near.describe()[["count", "50%", "max"]]""")
+ch.md("""OSM has 27 cafés in Monaco. From the middle junction, 3 cafés are within 500 m of walking. The best junction has
+14.""")
+ch.code("""fig, ax = plt.subplots(figsize=(8, 9))
+net.walking.edges().plot(ax=ax, color="lightgray", linewidth=0.4)               # the walking network in light gray
+points = ax.scatter(nodes.geometry.x, nodes.geometry.y, c=near.reindex(nodes.index), cmap="viridis", s=4)    # 4.
+fig.colorbar(points, ax=ax, shrink=0.6, label="cafés within 500 m of walking")
+ax.set_axis_off()""")
+ch.md("""The most cafés are near the port and in the center of Monte Carlo (yellow and green). At the edges of Monaco,
+few cafés or none are within 500 m (dark blue).""")
 
 ch.md("""## The graph of all calls: `routed_graph`
 
