@@ -450,3 +450,5 @@ main pre.text { background: #edf0f4 !important; border: 1px solid var(--bk-line)
 body.quarto-dark main pre.text { background: #2d333b !important; border-left-color: #768390; }
 main pre.text::before { content: "OUTPUT"; display: block; font-family: $font-family-sans-serif; font-size: .64rem;
   font-weight: 700; letter-spacing: .08em; color: var(--bk-faint); padding-bottom: .2rem; }
+// a long code block in the text (for example the full example of a fixes file): a small window with a scroll bar
+main div.sourceCode:not(.cell-code) > pre { max-height: 22rem; overflow-y: auto !important; scrollbar-width: thin; }
