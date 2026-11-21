@@ -51,5 +51,5 @@ acc = walk.accessibility(homes, shops, minutes=[5, 10])                      # a
 net.map("walking", color_by=acc["n_10min"], cmap="viridis")                  # color each street by its count
 ```
 
-The notebook [11. Advanced routing](../notebooks/11_routing_advanced.md) runs each call on Monaco, with a map or a chart
+The notebook [8. Advanced routing](../notebooks/08_routing_advanced.md) runs each call on Monaco, with a map or a chart
 for each one.

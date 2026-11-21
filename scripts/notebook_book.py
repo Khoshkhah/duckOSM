@@ -20,7 +20,7 @@ import nbformat
 
 REPO = "Khoshkhah/duckOSM"
 IMAGES = f"https://raw.githubusercontent.com/{REPO}/main/docs/notebooks/images"
-CHAPTERS = 14
+CHAPTERS = 15
 # the kinds of box: the start of the paragraph in a chapter script, and the title in the notebook
 BOXES = {"output": ("**What the output shows.**", "What the output shows"), "tip": ("> **Tip:**", "Tip"),
          "warning": ("> **Warning:**", "Warning"), "key": ("> **Key idea:**", "Key idea")}
