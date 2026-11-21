@@ -54,25 +54,28 @@ ch.md("""The driving network of Monaco has 2840 edges and 1768 nodes, 96.2 km of
 ch.md("""## The SUMO network: `to_sumo`
 
 `net.driving.to_sumo(out_dir)` (the same as `duckosm.sim.to_sumo(net.driving, out_dir)`) writes the network of one
-mode in SUMO's **plain XML** files, then runs SUMO's `netconvert` on them to make the `.net.xml` that SUMO reads.
+mode in SUMO's **plain XML** files and the netconvert config (chapter 6). The simulation needs the `.net.xml`, so this
+chapter gives `run_netconvert=True`: duckOSM then runs SUMO's `netconvert` on the config.
 
 | File | What it has |
 |---|---|
 | `network.nod.xml` | the nodes: one SUMO junction for each duckOSM node |
 | `network.edg.xml` | the edges: the id (the `edge_id`), the lanes, the speed, the shape |
 | `network.con.xml` | the connections: the turns that are allowed at each junction, from `driving.edge_graph`, so the turn restrictions apply |
-| `network.netccfg` | the options of `netconvert` |
+| `network.add.xml` | the bus stops, for SUMO (`--additional-files`) |
+| `network.netccfg` | the netconvert config: the input files and the options of `netconvert` |
 | `network.net.xml` | the network that SUMO reads, made by `netconvert` |
+| `network.tll.xml` | the signal programs that `netconvert` made; edit them and run `netconvert -c network.netccfg` again |
 
 The call gives a dict with the path of each file and the counts.
 
 | Argument | Default | What it does |
 |---|---|---|
 | `net_name` | `"network"` | the first part of each file name |
-| `run_netconvert` | `True` | `False`: only the plain XML files, with no SUMO program |
+| `run_netconvert` | `False` | `True`: also run `netconvert`, for the `.net.xml` and the `.tll.xml` |
 | `connections` | `True` | `False`: no `.con.xml`, so netconvert chooses the turns itself |
-| `config` | none | your own netconvert options (a `.netccfg` file) |""")
-ch.code("""files = net.driving.to_sumo("out/sumo")                     # the plain XML files and network.net.xml
+| `config` | none | a dict of options that change the default config, or your own `.netccfg` file |""")
+ch.code("""files = net.driving.to_sumo("out/sumo", run_netconvert=True)    # the plain XML files, netconvert and network.net.xml
 {k: str(v) for k, v in files.items()}                       # the files and the counts""")
 ch.md("""The SUMO
 network has 1768 nodes and 2840 edges, the same numbers as the driving network, and 5082 connections. `net` is the
@@ -83,7 +86,7 @@ ch.md("""### The netconvert options
 duckOSM gives `netconvert` a small set of options, `duckosm.sim.DEFAULT_NETCFG`. They keep each duckOSM edge as one
 SUMO edge with the same id.""")
 ch.code("""duckosm.sim.DEFAULT_NETCFG                                  # the options that to_sumo gives netconvert""")
-ch.md("""The five options:
+ch.md("""The six options:
 
 | Option | Value | Why |
 |---|---|---|
@@ -91,7 +94,8 @@ ch.md("""The five options:
 | `geometry.remove` | `false` | netconvert must not join two edges into one, so each SUMO edge is one `edge_id` |
 | `junctions.join` | `false` | netconvert must not join near nodes into one junction |
 | `no-turnarounds.except-deadend` | `true` | no U-turns, except at a dead end |
-| `numerical-ids` | `false` | the ids stay as duckOSM writes them |""")
+| `numerical-ids` | `false` | the ids stay as duckOSM writes them |
+| `tls.default-type` | `actuated` | OSM has no signal timings: the program of each traffic light follows the traffic |""")
 
 ch.md("""### Your own options: `config=`
 
@@ -100,7 +104,7 @@ file with the defaults and one change, `geometry.remove = true`, to show why the
 ch.code("""cfg = {**duckosm.sim.DEFAULT_NETCFG, "geometry.remove": "true"}           # the defaults, with one change
 with open("merge.netccfg", "w") as f:                                      # a netconvert config file
     f.write("<configuration>\\n" + "".join(f'  <{k} value="{v}"/>\\n' for k, v in cfg.items()) + "</configuration>\\n")
-merged = net.driving.to_sumo("out/sumo_merged", config="merge.netccfg")    # netconvert with your options
+merged = net.driving.to_sumo("out/sumo_merged", config="merge.netccfg", run_netconvert=True)    # netconvert with your options
 len(duckosm.sim.edge_map(merged)), files["n_edges"]                     # the edges with their edge_id in SUMO, of all""")
 ch.md("""With `geometry.remove = true`, only 1615 of the 2840 edges keep their `edge_id` as a
 SUMO edge. netconvert joined the other 1225 edges into their neighbors.
@@ -109,14 +113,14 @@ SUMO edge. netconvert joined the other 1225 edges into their neighbors.
 > into one SUMO edge, and keeps only the id of the first edge. The other edges then have no SUMO edge, and their
 > results are lost.""")
 
-ch.md("""### Only the plain XML files
+ch.md("""### Without netconvert
 
-`run_netconvert=False` writes the plain XML files and does not run `netconvert`. Use it when SUMO is on another
-machine, or when you run `netconvert` yourself with more options.""")
-ch.code("""plain = net.driving.to_sumo("out/sumo_plain", run_netconvert=False)       # no netconvert, no .net.xml
+With the default `run_netconvert=False`, `to_sumo` writes the plain XML files and the config, and does not run
+`netconvert`. Use it when SUMO is on another machine, or when you change the config first (chapter 6).""")
+ch.code("""plain = net.driving.to_sumo("out/sumo_plain")                             # no netconvert, no .net.xml
 sorted(k for k in plain if not k.startswith("n_"))                          # the files""")
-ch.md("""The dict has the three plain XML files (`nod`, `edg`, `con`) and no `net`. Run
-`netconvert --node-files ... --edge-files ... --connection-files ...` on them to make the network.""")
+ch.md("""The dict has the plain XML files (`nod`, `edg`, `con`), the bus stops (`add`) and the config (`netccfg`), and
+no `net`. Run `netconvert -c out/sumo_plain/network.netccfg` to make the network.""")
 
 ch.md("""## Read the network with sumolib: `sumo_net`
 
@@ -127,7 +131,7 @@ ch.code("""sn = duckosm.sim.sumo_net(files)             # the .net.xml read with
 {"SUMO edges": len(sn.getEdges(withInternal=False)), "junctions": len(sn.getNodes()),
  "traffic lights": len(sn.getTrafficLights()), "duckOSM edges": int(net.driving.summary().edges[0])}    # the numbers""")
 ch.md("""Sumolib reads 2840 SUMO edges and 1768 junctions: one SUMO edge for each duckOSM edge,
-and one junction for each node. Monaco has no traffic lights in this SUMO network.""")
+and one junction for each node. The traffic lights come from the OSM tag `highway=traffic_signals` (chapter 6).""")
 ch.code("""e = sn.getEdges(withInternal=False)[0]                                     # one SUMO edge
 {"id": e.getID(), "lanes": e.getLaneNumber(), "speed m/s": e.getSpeed(), "length m": round(e.getLength(), 1),
  "from": e.getFromNode().getID(), "to": e.getToNode().getID()}             # what SUMO knows of it""")
@@ -245,7 +249,7 @@ GMNS tables of Monaco.""")
 
 ch.exercises([
     ("Make the SUMO network with no `.con.xml` (`connections=False`), and count the files.",
-     """f = net.driving.to_sumo("out/sumo_nocon", connections=False)
+     """f = net.driving.to_sumo("out/sumo_nocon", connections=False, run_netconvert=True)
 sorted(k for k in f if not k.startswith("n_"))"""),
     ("Find the five edges with the highest mean speed in the SUMO run. The edgeData column `speed` is in m/s.",
      """speed = counts.merge(edges, on="id").groupby("edge_id").speed.mean()
