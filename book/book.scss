@@ -1,6 +1,7 @@
 // The theme of the notebook book: the duckOSM colors (docs/assets/extra.css), a light and a dark theme. The rules
 // were added one by one in the review with Kaveh; a later rule wins over an earlier one.
 /*-- scss:defaults --*/
+$grid-sidebar-width: 300px;   // a wider sidebar: most chapter titles stay on one line
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
 
 $font-family-sans-serif: "Inter", "Segoe UI", Helvetica, Arial, sans-serif;
@@ -400,3 +401,5 @@ body.quarto-dark div.sourceCode code { color: #9cdcfe !important; }
 // a long chapter title wraps under its title, not under its number (a hanging indent as wide as the number badge)
 .sidebar-navigation .sidebar-link .menu-text { display: block; padding-left: 2.05rem; text-indent: -2.05rem; }
 .sidebar-navigation .sidebar-link .menu-text .chapter-number { text-indent: 0; }
+// the chapter links: a little smaller and closer lines, so that a title fits on one line or wraps neatly
+.sidebar-navigation .sidebar-item-container .sidebar-link { font-size: .88rem; line-height: 1.3; padding: .4rem .6rem; }
