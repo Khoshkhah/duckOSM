@@ -105,7 +105,7 @@ pub fn run(args: &[String]) -> Result<()> {
     let area = duckosm_build::get::check_boundary(&text)?;
     // 2. and 3. the extract, from the cache or downloaded
     let cache = cli.cache.clone().unwrap_or_else(duckosm_build::get::cache_dir);
-    let (region, _) = duckosm_build::get::region_file(&area, &cache, cli.index.as_deref(), cli.refresh)?;
+    let (region, extract) = duckosm_build::get::region_file(&area, &cache, cli.index.as_deref(), cli.refresh)?;
     // 4. the cut, with the fixes
     let pbf = cli.out.join(format!("{name}.osm.pbf"));
     let n = duckosm_build::get::cut_with_fixes(&region, &text, &pbf, cli.fixes.as_deref())?;
@@ -119,6 +119,13 @@ pub fn run(args: &[String]) -> Result<()> {
         n.ways,
         n.relations
     );
+    // the facts of the extract for main.osm_source of the build (duckosm_build::write_osm_source): the time of the data is in the header of the cut
+    let downloaded = std::fs::metadata(&region).and_then(|m| m.modified()).ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_micros() as i64);
+    let (_, seq) = duckosm_core::cutstream::data_time(&region).unwrap_or((None, None));
+    let side = serde_json::json!({"extract": extract.id, "extract_url": extract.url, "downloaded_at": downloaded, "replication_sequence": seq});
+    let side_file = duckosm_build::osm_source_file(&pbf);
+    std::fs::write(&side_file, side.to_string()).map_err(|e| format!("{}: {e}", side_file.display()))?;
     println!("wrote {} and {} in {:.1} s", pbf.display(), boundary.display(), t.elapsed().as_secs_f64());
     println!("next: duckosm build --pbf {} --boundary {}", pbf.display(), boundary.display());
     Ok(())

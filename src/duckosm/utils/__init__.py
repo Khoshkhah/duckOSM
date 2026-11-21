@@ -55,7 +55,7 @@ def stamp_build(con, table="main.visualization_metadata", config=None):
 
 
 def write_records(con, config):
-    """The record tables of the build (``main.fixes``), made by the same Rust code as the Rust build, so that the two engines
+    """The record tables of the build (``main.fixes``, ``main.osm_source``), made by the same Rust code as the Rust build, so that the two engines
     have the same records (tests/test_build_rust_equal.py)."""
     import tempfile
     from pathlib import Path
@@ -63,7 +63,8 @@ def write_records(con, config):
     from duckosm import _rust
 
     with tempfile.TemporaryDirectory() as d:
-        _rust.build_records(d, config.osm_overrides or None)
+        pbf = config.effective_pbf_path if config.source_type == "pbf" else ""
+        _rust.build_records(d, config.osm_overrides or None, pbf or None)
         for f in sorted(Path(d).glob("*_main.parquet")):
             path = str(f).replace("'", "''")
             con.execute(f"CREATE OR REPLACE TABLE main.{f.name.removesuffix('_main.parquet')} AS SELECT * FROM read_parquet('{path}')")

@@ -23,6 +23,8 @@ export const TABLE_NOTES = {
   global_junctions: "The nodes where all networks cut their roads, so an edge has the same id in each network.",
   boundary: "The area: the boundary and its properties.",
   visualization_metadata: "One row: the center and zoom of the area for a map, its time zone, and the build time.",
+  fixes: "One row: the fixes file that the build used: its whole text (yaml), its path and its SHA-256.",
+  osm_source: "One row: the version of the OSM data: its time (osm_timestamp), the Geofabrik extract, and the SHA-256 of the OSM file.",
   transfers: "The changes of mode (walk to car or bike, and back) at the nodes that the networks share.",
   routes: "The bus lines (OSM route relations): their number, name and operator.",
   route_edges: "The driving edges that each bus line travels, in order.",

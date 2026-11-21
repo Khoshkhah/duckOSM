@@ -41,7 +41,7 @@ const TABLES = {
   // GMNS
   link: "kind:link", lane: "kind:lane", geometry: "none:the shape of a link, drawn with the link", node: "kind:node", curb_seg: "pending:3",
   // no shape
-  visualization_metadata: "none:one row about the whole area", edge_levels_meta: "none:one row about the drawing order", level_edits: "none:the pairs of the level editor",
+  visualization_metadata: "none:one row about the whole area", fixes: "none:one row, the fixes file of the build", osm_source: "none:one row about the OSM data", edge_levels_meta: "none:one row about the drawing order", level_edits: "none:the pairs of the level editor",
   config: "none:settings", use_definition: "none:a list of uses", use_group: "none:a list of uses", meso_link: "pending:3", meso_node: "pending:3", micro_link: "pending:3", micro_node: "pending:3",
   elevation_metadata: "none:one row about the height model", admin_boundaries: "pending:2", level_heads: "pending:3", level_caps: "pending:3", level_unmatched: "pending:3",
 };

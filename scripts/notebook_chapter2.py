@@ -52,7 +52,8 @@ ch.md("""## The file and its modes
 
 A `Network` is also the path of its file. `net.path` is a `pathlib.Path`, and each function that takes a file name
 takes `net` too. `net.modes` lists the schemas that have a road table. `net.boundary` is the polygon of the area as a
-GeoDataFrame.""")
+GeoDataFrame. `net.osm_version` gives the version of the OSM data of the file: the time of the data, the Geofabrik
+extract and the SHA-256 of the OSM file (the table `main.osm_source`).""")
 ch.code("""print(net.path.name)       # the name of the file
 print(net.modes)           # the modes in the file
 net.boundary               # the polygon of the area, with its name, OSM id and area in km2""")
