@@ -416,3 +416,8 @@ body.quarto-dark div.sourceCode code { color: #9cdcfe !important; }
 #quarto-sidebar, #quarto-sidebar .sidebar-menu-container { scrollbar-width: thin; scrollbar-color: var(--bk-line) transparent; }
 #quarto-sidebar ::-webkit-scrollbar, #quarto-sidebar::-webkit-scrollbar { width: 6px; }
 #quarto-sidebar ::-webkit-scrollbar-thumb, #quarto-sidebar::-webkit-scrollbar-thumb { background: var(--bk-line); border-radius: 3px; }
+// a wide screen (or a browser zoomed out): the sidebar, the text and the table of contents stay together in the
+// middle, not at the left with an empty area at the right
+@media (min-width: 1700px) {
+  #quarto-content.page-columns { max-width: 1700px; margin-left: auto; margin-right: auto; }
+}
