@@ -132,8 +132,10 @@ each table as a CSV file, the form of the standard.
 ch.code("""gmns = net.driving.to_gmns("out/gmns.duckdb", to_csv="out/gmns")         # the GMNS tables in a DuckDB file and as CSV
 gmns["modes"]                                                     # the rows of each table""")
 ch.md("""**What the output shows.** The GMNS network of driving has 1,772 nodes, 2,858 links, 3,318 lanes and 3,755
-movements. It has 18 links more than `driving.edges`: for example the other direction of a one-way road that a bus
-route uses. The export also makes the lanes and the movements.
+movements. It has 18 links and 4 nodes more than `driving.edges` (2,840 edges, 1,768 nodes). The 18 links are the
+bus-only edges of `driving.private_edges`: a bus lane against a one-way street, or a road for buses only. A car route
+does not use them, but they are lanes on the road, so GMNS keeps them, with `allowed_uses` `bus` or `bus,bike`. The 4
+nodes are their ends that are not in the driving network.
 
 The check: `duckosm.planning.check_gmns` runs the rules of the standard on the tables. Examples: each link starts at
 its `from_node`, each lane number is correct, each movement turns where its inbound link ends. It gives one row for
