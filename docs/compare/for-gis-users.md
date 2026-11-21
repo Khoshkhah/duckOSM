@@ -3,7 +3,7 @@
 This page is for users of OSMnx's features, QuackOSM, osmium and ogr2ogr. Each table gives the call of your tool and
 the duckOSM call that does the same work. The module is `duckosm.gis`
 ([reference](../reference/sdk/gis.md)). The notebook
-[6. OSM data for GIS](../notebooks/10_gis.md) runs each call on Monaco.
+[10. OSM data for GIS](../notebooks/10_gis.md) runs each call on Monaco.
 
 ```bash
 pip install "duckosm[gis]"      # geopandas

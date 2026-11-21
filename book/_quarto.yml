@@ -22,6 +22,22 @@ book:
     - part: "The core"
       chapters:
         - 01_area_to_network.ipynb
+        - 02_inspect.ipynb
+        - 03_maps.ipynb
+        - 04_join_by_edge_id.ipynb
+        - 05_osm_fixes.ipynb
+        - 06_exports.ipynb
+    - part: "The modules"
+      chapters:
+        - 07_routing.ipynb
+        - 08_routing_advanced.ipynb
+        - 09_analysis.ipynb
+        - 10_gis.ipynb
+        - 11_mobility.ipynb
+        - 12_sim.ipynb
+        - 13_planning.ipynb
+        - 14_hdmap.ipynb
+        - 15_ml.ipynb
 
 language:
   search-text-placeholder: "Search the book"

@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="250" viewBox="0 0 900 250" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <rect x="1" y="1" width="898" height="248" rx="12" fill="#ffffff" stroke="#d0d7de"/>
+  <text x="30" y="34" font-size="16" font-weight="700" fill="#1f2328">The duckosm view: every row of nodes and edges</text>
+  <text x="480" y="34" font-size="16" font-weight="700" fill="#1f2328">The osmnx view: 2-road nodes removed</text>
+  <!-- left -->
+  <g stroke="#1f2328" stroke-width="4">
+    <line x1="50" y1="140" x2="400" y2="140"/>
+    <line x1="400" y1="140" x2="400" y2="60"/>
+    <line x1="400" y1="140" x2="400" y2="220"/>
+  </g>
+  <g fill="#ffffff" stroke="#1f2328" stroke-width="2.5">
+    <circle cx="50" cy="140" r="9"/><circle cx="400" cy="140" r="9"/>
+    <circle cx="400" cy="60" r="9"/><circle cx="400" cy="220" r="9"/>
+  </g>
+  <g fill="#2ea043" stroke="#1a7f37" stroke-width="2">
+    <circle cx="165" cy="140" r="8"/><circle cx="285" cy="140" r="8"/>
+  </g>
+  <text x="120" y="122" font-size="13" fill="#1a7f37">the tags change</text>
+  <text x="240" y="170" font-size="13" fill="#1a7f37">a footway joins</text>
+  <text x="50" y="208" font-size="14" fill="#57606a">6 nodes, 5 streets</text>
+  <!-- right -->
+  <g stroke="#1f2328" stroke-width="4">
+    <line x1="500" y1="140" x2="850" y2="140"/>
+    <line x1="850" y1="140" x2="850" y2="60"/>
+    <line x1="850" y1="140" x2="850" y2="220"/>
+  </g>
+  <g fill="#ffffff" stroke="#1f2328" stroke-width="2.5">
+    <circle cx="500" cy="140" r="9"/><circle cx="850" cy="140" r="9"/>
+    <circle cx="850" cy="60" r="9"/><circle cx="850" cy="220" r="9"/>
+  </g>
+  <text x="600" y="122" font-size="13" fill="#1f6feb">one edge, one street</text>
+  <text x="500" y="208" font-size="14" fill="#57606a">4 nodes, 3 streets</text>
+</svg>

@@ -2,7 +2,7 @@
 
 This page is for users of PyTorch Geometric, DGL and city2graph who make road graphs from OSM with their own code. The
 module is `duckosm.ml` ([reference](../reference/sdk/ml.md)). The notebook
-[10. Graph machine learning](../notebooks/15_ml.md) trains a small graph neural network on Monaco.
+[15. Graph machine learning](../notebooks/15_ml.md) trains a small graph neural network on Monaco.
 
 ```bash
 pip install "duckosm[ml]"      # torch and torch_geometric

@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="300" viewBox="0 0 900 300" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1f2328"/></marker>
+    <marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1f6feb"/></marker>
+    <marker id="r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#d1242f"/></marker>
+  </defs>
+  <rect x="1" y="1" width="898" height="298" rx="12" fill="#ffffff" stroke="#d0d7de"/>
+  <text x="30" y="34" font-size="16" font-weight="700" fill="#1f2328">The road network: four edges at a junction</text>
+  <text x="480" y="34" font-size="16" font-weight="700" fill="#1f2328">The edge graph: an edge is a node, a turn is an arc</text>
+  <!-- left: the roads -->
+  <line x1="40" y1="160" x2="200" y2="160" stroke="#1f2328" stroke-width="4" marker-end="url(#a)"/>
+  <line x1="220" y1="140" x2="220" y2="60" stroke="#1f2328" stroke-width="4" marker-end="url(#a)"/>
+  <line x1="240" y1="160" x2="400" y2="160" stroke="#1f2328" stroke-width="4" marker-end="url(#a)"/>
+  <line x1="220" y1="180" x2="220" y2="260" stroke="#1f2328" stroke-width="4" marker-end="url(#a)"/>
+  <circle cx="220" cy="160" r="9" fill="#ffffff" stroke="#1f2328" stroke-width="2"/>
+  <text x="100" y="150" font-size="15" font-weight="600" fill="#1f2328">edge A</text>
+  <text x="232" y="92" font-size="15" font-weight="600" fill="#1f2328">edge B</text>
+  <text x="300" y="150" font-size="15" font-weight="600" fill="#1f2328">edge C</text>
+  <text x="232" y="240" font-size="15" font-weight="600" fill="#1f2328">edge D</text>
+  <text x="40" y="288" font-size="13" fill="#d1242f">a turn restriction: no right turn from A to D</text>
+  <!-- right: the edge graph -->
+  <g font-size="15" font-weight="700" text-anchor="middle">
+    <circle cx="540" cy="160" r="26" fill="#f6f8fa" stroke="#1f2328" stroke-width="2"/><text x="540" y="165" fill="#1f2328">A</text>
+    <circle cx="760" cy="80" r="26" fill="#f6f8fa" stroke="#1f2328" stroke-width="2"/><text x="760" y="85" fill="#1f2328">B</text>
+    <circle cx="820" cy="160" r="26" fill="#f6f8fa" stroke="#1f2328" stroke-width="2"/><text x="820" y="165" fill="#1f2328">C</text>
+    <circle cx="760" cy="240" r="26" fill="#f6f8fa" stroke="#1f2328" stroke-width="2"/><text x="760" y="245" fill="#1f2328">D</text>
+  </g>
+  <line x1="566" y1="150" x2="732" y2="88" stroke="#1f6feb" stroke-width="3" marker-end="url(#b)"/>
+  <line x1="566" y1="160" x2="792" y2="160" stroke="#1f6feb" stroke-width="3" marker-end="url(#b)"/>
+  <line x1="566" y1="170" x2="732" y2="232" stroke="#d1242f" stroke-width="2" stroke-dasharray="6 5"/>
+  <text x="640" y="216" font-size="20" font-weight="700" fill="#d1242f">✕</text>
+  <text x="600" y="110" font-size="13" fill="#1f6feb">arc A→B, costs A</text>
+  <text x="620" y="152" font-size="13" fill="#1f6feb">arc A→C, costs A</text>
+  <text x="480" y="288" font-size="13" fill="#57606a">A forbidden turn has no arc. Each arc costs the time (or the length) of its from-edge.</text>
+</svg>

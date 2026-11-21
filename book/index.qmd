@@ -11,8 +11,8 @@ when you build the area again, so your own data can join to it.
 
 | Part | Chapters |
 |---|---|
-| The core | 1. Get and build an area · 2. Look inside the file · 3. Draw the network · 4. Exports · 5. Join your data by `edge_id` |
-| The modules | analysis, GIS, routing, simulation, planning, mobility, HD maps, graph machine learning, OSM fixes |
+| The core | 1. Get and build an area · 2. Look inside the file · 3. Draw maps · 4. Join your data by `edge_id` · 5. Fix the OSM data once · 6. Exports |
+| The modules | 7. Routing · 8. Advanced routing · 9. Street network analysis · 10. OSM data for GIS · 11. Mobility data · 12. Traffic simulation · 13. Transport planning · 14. HD maps · 15. Graph machine learning |
 
 Each chapter starts with what you learn and how long it takes, and ends with exercises, the words of the chapter
 and a summary. The boxes in the text have one job each:
