@@ -358,7 +358,11 @@ To add one record:
 3. Change the fields, then click **Add to changes**. The page writes the record into the file at once.
 4. In the **Changes** tab, click **Build again** to build the network again with the file.
 
-<img src="https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/docs/images/edit-changes.png" alt="The Changes tab: the change of Boulevard Charles III, lanes 1 to 3, and the button Build again" width="100%">
+In the **Turn** tab, you pick a road, and the page shows the roads at its junction: the picked road (**From**) is
+blue, the roads that leave the junction are green, and the roads that only arrive are violet. You then choose the
+turn that a driver cannot make, or must make.
+
+<img src="https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/docs/images/edit-turn.png" alt="The Turn tab: the picked road is blue, the roads that leave the junction are green and the road that only arrives is violet" width="100%">
 
 The editor runs while Python runs. The guide [Fix the OSM data](../guides/edit-osm-data.md) shows each tab and
 button of the page.
