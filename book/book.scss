@@ -456,3 +456,5 @@ main div.sourceCode:not(.cell-code) > pre { max-height: 22rem; overflow-y: auto 
 #quarto-margin-sidebar, #TOC { scrollbar-width: thin; scrollbar-color: var(--bk-line) transparent; }
 #quarto-margin-sidebar::-webkit-scrollbar, #TOC::-webkit-scrollbar { width: 6px; }
 #quarto-margin-sidebar::-webkit-scrollbar-thumb, #TOC::-webkit-scrollbar-thumb { background: var(--bk-line); border-radius: 3px; }
+// the sidebar: some space under the last chapter, so it does not touch the bottom of the window
+#quarto-sidebar .sidebar-menu-container { padding-bottom: 2.5rem; }
