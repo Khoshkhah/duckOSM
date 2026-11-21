@@ -1,0 +1,45 @@
+project:
+  type: book
+  output-dir: _book
+
+book:
+  title: "duckOSM"
+  subtitle: "Road networks from OpenStreetMap: a hands-on manual"
+  author: "Kaveh Khoshkhah"
+  repo-url: https://github.com/Khoshkhah/duckOSM
+  repo-subdir: docs/notebooks
+  search: true
+  page-navigation: true
+  sidebar:
+    style: docked
+    collapse-level: 1
+  chapters:
+    - index.qmd
+    - 01_area_to_network.ipynb
+
+execute:
+  enabled: false        # the notebooks keep the outputs of their last run
+
+crossref:
+  fig-prefix: Figure
+
+format:
+  html:
+    theme:
+      light: [cosmo, book.scss]
+      dark: [darkly, book.scss]
+    number-sections: true
+    number-depth: 3
+    toc: true
+    toc-depth: 3
+    toc-location: right
+    toc-title: "In this chapter"
+    code-copy: true
+    highlight-style:
+      light: github
+      dark: github-dark
+    code-overflow: scroll
+    fig-cap-location: bottom
+    callout-appearance: default
+    smooth-scroll: true
+    link-external-newwindow: true

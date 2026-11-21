@@ -181,6 +181,7 @@ nav:
           - OpenDRIVE: exports/opendrive.md
   - Notebooks:
       - Overview: notebooks/index.md
+      - The notebook book: https://khoshkhah.github.io/duckOSM/book/
       - 1. From an area to a network: notebooks/01_area_to_network.md
       - 2. Fix the OSM data once: notebooks/02_osm_fixes.md
       - 3. Routing: notebooks/03_routing.md
