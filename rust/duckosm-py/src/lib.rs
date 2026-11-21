@@ -222,14 +222,19 @@ fn serve_page(py: Python<'_>, db: PathBuf, fixes: PathBuf, port: u16, backend: P
 }
 
 /// The record tables of a build, as the Rust build writes them, into the folder `out` (Parquet files `<table>_main.parquet`): `fixes_main`
-/// (`main.fixes`) when `fixes` is a fixes file. The Python engine (DuckOSM.run) loads them, so that both engines have the same records.
+/// (`main.fixes`) when `fixes` is a fixes file, and `osm_source_main` (`main.osm_source`) of the `.osm.pbf` file `pbf`. The Python engine
+/// (DuckOSM.run) loads them, so that both engines have the same records.
 #[pyfunction]
-#[pyo3(signature = (out, fixes=None))]
-fn build_records(out: PathBuf, fixes: Option<PathBuf>) -> PyResult<()> {
+#[pyo3(signature = (out, fixes=None, pbf=None))]
+fn build_records(out: PathBuf, fixes: Option<PathBuf>, pbf: Option<PathBuf>) -> PyResult<()> {
     let p = duckosm_build::Params { osm_fixes: fixes, ..Default::default() };
     let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_micros() as i64);
     let file = |name: &str| std::fs::File::create(out.join(name)).map(std::io::BufWriter::new).map_err(|e| e.to_string());
-    duckosm_build::write_fixes_record(&p, at, file).map_err(PyRuntimeError::new_err)
+    duckosm_build::write_fixes_record(&p, at, file).map_err(PyRuntimeError::new_err)?;
+    match pbf {
+        Some(pbf) => duckosm_build::write_osm_source(&pbf, file).map_err(PyRuntimeError::new_err),
+        None => Ok(()),
+    }
 }
 
 /// The pixels of the DEM file `dem` over the box `bbox` (west, south, east, north) plus 3 pixels on each side, written to the Parquet file `out`: the table

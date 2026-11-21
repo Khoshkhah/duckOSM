@@ -490,8 +490,9 @@ print("metres: ", round(before.length_m), "before,", round(after.length_m), "aft
 ch.md("""The route now takes 252 s, not 229 s. It does not use Boulevard Louis II now: it
 takes other streets around it. The new route is longer (3,302 m, not 2,939 m), but at 10 km/h the old way is slower.
 
-The new network remembers its fixes file. `fixed.fixes` gives the `Fixes` of the build. `net.fixes` is `None`,
-because `net` has no fixes file.""")
+The new network keeps the rules of its fixes file inside the database, in the table `main.fixes`. `fixed.fixes`
+gives these rules as a `Fixes`. It shows `load=None` and `saved=None`, because the rules come from the database, not
+from a file. `net.fixes` is `None`, because `net` was built with no fixes.""")
 ch.code("""fixed.fixes, net.fixes        # the fixes file of each network""")
 
 

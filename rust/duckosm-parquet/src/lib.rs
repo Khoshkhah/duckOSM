@@ -1067,6 +1067,48 @@ pub fn write_fixes_to<W: Write + Send>(out: W, r: &FixesRecord) -> Result<(), St
     })
 }
 
+/// The row of `main.osm_source`: the version of the OSM data of the build.
+pub struct OsmSource {
+    /// The time of the OSM data, microseconds since 1970 (UTC).
+    pub osm_timestamp: Option<i64>,
+    pub replication_sequence: Option<i64>,
+    /// The Geofabrik extract that `duckosm get` chose, and its address.
+    pub extract: Option<String>,
+    pub extract_url: Option<String>,
+    /// When the extract came into the cache, microseconds since 1970 (UTC).
+    pub downloaded_at: Option<i64>,
+    /// The SHA-256 of the `.osm.pbf` file that the build read, in hexadecimal.
+    pub pbf_sha256: String,
+}
+
+/// Write `main.osm_source` (one row).
+pub fn write_osm_source_to<W: Write + Send>(out: W, r: &OsmSource) -> Result<(), String> {
+    let fields = vec![
+        field("osm_timestamp", DataType::Timestamp(TimeUnit::Microsecond, None)),
+        field("replication_sequence", DataType::Int64),
+        field("extract", DataType::Utf8),
+        field("extract_url", DataType::Utf8),
+        field("downloaded_at", DataType::Timestamp(TimeUnit::Microsecond, None)),
+        field("pbf_sha256", DataType::Utf8),
+    ];
+    write_rows(out, fields, std::slice::from_ref(r), |c| {
+        let (mut t, mut d, mut s) = (TimestampMicrosecondBuilder::new(), TimestampMicrosecondBuilder::new(), Int64Builder::new());
+        for r in c {
+            t.append_option(r.osm_timestamp);
+            d.append_option(r.downloaded_at);
+            s.append_option(r.replication_sequence);
+        }
+        vec![
+            Arc::new(t.finish()),
+            Arc::new(s.finish()),
+            texts(c.iter().map(|r| r.extract.as_deref())),
+            texts(c.iter().map(|r| r.extract_url.as_deref())),
+            Arc::new(d.finish()),
+            texts(c.iter().map(|r| Some(r.pbf_sha256.as_str()))),
+        ]
+    })
+}
+
 /// Write rows as a plain Parquet file, one row group for each `ROW_GROUP` rows: `batch` makes the columns of a part,
 /// each with its name and whether it can hold NULL. The writer keeps the schema of the first part, so the flag must
 /// not come from the data of a part.

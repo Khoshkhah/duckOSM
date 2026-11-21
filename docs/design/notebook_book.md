@@ -9,8 +9,11 @@ chapter notebook by hand: change its script, run the script, then run the notebo
 
 ```bash
 python scripts/notebook_chapter1.py docs/notebooks/01_area_to_network.ipynb
-cd docs/notebooks && DUCKOSM_MAP_SHOW=plot jupyter nbconvert --to notebook --execute --inplace 01_area_to_network.ipynb
+cd docs/notebooks && IPYTHONDIR=../../book/ipython DUCKOSM_MAP_SHOW=plot jupyter nbconvert --to notebook --execute --inplace 01_area_to_network.ipynb
 ```
+
+`IPYTHONDIR=book/ipython` gives the matplotlib pictures two times the pixels at the same size (retina). In the book,
+a click on a picture opens it full screen (`lightbox: auto` in `book/_quarto.yml`), and the reader can zoom in.
 
 ## What Colab draws
 

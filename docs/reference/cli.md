@@ -436,7 +436,8 @@ duckosm features-check [OPTIONS] DB
 
 ### `sumo`
 
-Writes a SUMO network; the SUMO edge id is the `edge_id`. Page: [SUMO](../exports/sumo.md).
+Writes the SUMO plain XML (with the traffic lights and stop signs), the bus stops (`.add.xml`) and the netconvert config
+(`.netccfg`); the SUMO edge id is the `edge_id`. Then run `netconvert -c <name>.netccfg`, or give `--netconvert`. Page: [SUMO](../exports/sumo.md).
 
 ```text
 duckosm sumo [OPTIONS] DB
@@ -449,7 +450,7 @@ duckosm sumo [OPTIONS] DB
 | `--name TEXT` | file name base | the db file name |
 | `--connections` / `--no-connections` | write the allowed turns from `edge_graph`; off lets `netconvert` guess them | on |
 | `-c`, `--config PATH` | a `netconvert` config (`.netccfg`) instead of the built-in one | |
-| `--netconvert` / `--no-netconvert` | build the `.net.xml` with `netconvert`; off writes only the plain XML files | on |
+| `--netconvert` / `--no-netconvert` | run `netconvert`: also the `.net.xml` and the signal programs (`.tll.xml`); off writes the plain XML files and the `.netccfg` | off |
 | `--join-junctions` | join close junctions (netconvert's `junctions.join`): a crossroads mapped as two or three nodes becomes one junction ([how](../exports/sumo.md)); not with `-c` | off |
 
 ### `matsim`

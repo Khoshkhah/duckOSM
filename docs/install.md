@@ -59,7 +59,7 @@ Optional. Add them in brackets, for example `pip install "duckosm[sumo]"`.
 
 | Extra | Adds | For |
 |---|---|---|
-| `sumo` | SUMO (`eclipse-sumo`, with `netconvert`) | `duckosm sumo` builds the `.net.xml` |
+| `sumo` | SUMO (`eclipse-sumo`, with `netconvert`) | `duckosm sumo --netconvert` and `netconvert -c` build the `.net.xml` |
 | `networkx` | networkx | `to_networkx()`, `to_networkx_nodes()`, `write_graph()`. `routing` is its old name, for one more release |
 | `rustworkx` | rustworkx | `to_rustworkx()` |
 | `levels` | roadstyle | the old Python level functions; not needed by `duckosm levels` (Rust) |

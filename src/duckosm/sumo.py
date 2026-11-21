@@ -10,8 +10,10 @@ line graph (`<mode>.edge_graph`, with illegal turns / OSM turn restrictions alre
   * `.edg.xml` — edges, ``id`` = ``edge_id`` (1:1), with lanes / speed / true length / shape, and
   * `.con.xml` — the legal ``from_edge -> to_edge`` successors taken from ``edge_graph`` —
 
-plus a standard **netconvert config** (`.netccfg`), then runs ``netconvert -c <net>.netccfg`` to
-assemble the `.net.xml`. Because netconvert keeps the ids and the explicit connections:
+plus the bus stops for SUMO (`.add.xml`) and a standard **netconvert config** (`.netccfg`). The `.nod.xml` has the traffic lights
+and stop signs of OSM, so that netconvert never needs the OSM file (which has no fixes and no ``edge_id``). The user changes the
+`.netccfg` and runs ``netconvert -c <net>.netccfg``; with ``run_netconvert=True`` this function runs it, writes the `.net.xml`,
+and the signal programs that netconvert built (`.tll.xml`). Because netconvert keeps the ids and the explicit connections:
 
   * every SUMO edge id equals the duckOSM ``edge_id`` (per-edge data maps on by identity), and
   * the only movements allowed at each junction are the legal successors in ``edge_graph`` — i.e.
@@ -25,7 +27,7 @@ tags, our road types: every vehicle class, the plain XML's priorities) and its l
     import duckdb
     from duckosm.sumo import to_sumo
     con = duckdb.connect("data/db/sodermalm.duckdb", read_only=True)
-    out = to_sumo(con, "sumo/")            # sumo/network.{nod,edg,con}.xml + .netccfg + .net.xml
+    out = to_sumo(con, "sumo/")            # sumo/network.{nod,edg,con,add}.xml + .netccfg (run_netconvert=True: + .net.xml, .tll.xml)
 
 The netconvert options come from a built-in default (``DEFAULT_NETCFG``); pass ``config=`` to
 override them — a dict of ``{netconvert-option: value}`` merged onto the default, or a path to your
@@ -101,7 +103,92 @@ DEFAULT_NETCFG = {
     "junctions.join": "false",               # do NOT merge nearby nodes
     "no-turnarounds.except-deadend": "true",  # honour the explicit topology (no invented U-turns)
     "numerical-ids": "false",                # keep our ids verbatim
+    "tls.default-type": "actuated",          # OSM has no signal timings: a program that follows the traffic (SUMO's advice for OSM)
 }
+
+
+# the SUMO node type of the OSM signs, strongest first (netconvert's OSM import reads the same tags). A sign that OSM puts on a node
+# of a way near the junction (not on it), as OSM's rule for stop signs tells, goes to the nearest network node of the same way
+# within 25 m (netconvert's tls.guess-signals.dist). give_way has no SUMO type: a priority junction already makes the minor road wait.
+# Traffic lights within 20 m of each other (netconvert's tls.join-dist) get one program: the node attribute tl, the smallest node id
+# of the group. duckOSM does this, not netconvert's tls.join, so that the program ids are known before netconvert runs and a .tll.xml
+# can name them. ponytail: traffic_signals:direction is not read (the sign goes to the nearest node, ahead or behind); a chain of
+# lights longer than 20 m end to end can get two programs.
+_NODE_TYPES = {3: "traffic_light", 2: "allway_stop", 1: "priority_stop"}
+NODE_TYPES_SQL = """WITH s AS (SELECT osm_id, lon, lat, CASE WHEN tags['highway'] = 'traffic_signals' THEN 3 WHEN tags['stop'] = 'all' THEN 2 ELSE 1 END AS t
+    FROM raw.nodes WHERE tags['highway'] IN ('traffic_signals', 'stop')),
+n AS (SELECT node_id, ST_X(geom) AS x, ST_Y(geom) AS y FROM {mode}.nodes WHERE geom IS NOT NULL),
+c AS (SELECT DISTINCT s.osm_id, s.t, n.node_id, 111320 * sqrt(pow(n.y - s.lat, 2) + pow((n.x - s.lon) * cos(radians(s.lat)), 2)) AS d
+    FROM s JOIN {mode}.way_nodes a ON a.node_id = s.osm_id JOIN {mode}.way_nodes b ON b.way_id = a.way_id JOIN n ON n.node_id = b.node_id),
+k AS (SELECT * FROM c QUALIFY row_number() OVER (PARTITION BY osm_id ORDER BY d, node_id) = 1),
+t AS (SELECT k.node_id, max(k.t) AS t, any_value(n.x) AS x, any_value(n.y) AS y FROM k JOIN n USING (node_id) WHERE k.d <= 25 GROUP BY k.node_id),
+g AS (SELECT a.node_id, min(b.node_id) AS tl, count(*) AS m FROM t a JOIN t b ON a.t = 3 AND b.t = 3
+    AND 111320 * sqrt(pow(b.y - a.y, 2) + pow((b.x - a.x) * cos(radians(a.y)), 2)) <= 20 GROUP BY a.node_id)
+SELECT t.node_id, t.t, CASE WHEN g.m > 1 THEN g.tl END FROM t LEFT JOIN g USING (node_id) ORDER BY t.node_id"""
+
+# the bus stops of SUMO (.add.xml): each OSM platform (highway=bus_stop, public_transport=platform), and each bus stop_position with no
+# platform within 30 m, on the nearest edge of a bus route within 30 m, preferably the edge that has the stop on its right
+# (ponytail: right-hand traffic only), on the right-most lane open to buses, 15 m long (netconvert's osm.stop-output.length.bus)
+BUS_STOPS_SQL = """WITH p AS (SELECT osm_id, lon, lat, tags['name'] AS name, tags['public_transport'] = 'stop_position' AS pos FROM raw.nodes
+    WHERE tags['highway'] = 'bus_stop' OR tags['public_transport'] = 'platform' OR (tags['public_transport'] = 'stop_position' AND tags['bus'] = 'yes')),
+s AS (SELECT * FROM p WHERE NOT pos OR NOT EXISTS (SELECT 1 FROM p q WHERE NOT q.pos
+    AND 111320 * sqrt(pow(q.lat - p.lat, 2) + pow((q.lon - p.lon) * cos(radians(p.lat)), 2)) <= 30)),
+e AS (SELECT edge_id, geometry, length_m FROM {mode}.edges WHERE edge_id IN (SELECT edge_id FROM bus.route_edges)),
+c AS (SELECT s.osm_id, s.name, e.edge_id, e.length_m, s.lon, s.lat, e.geometry, ST_LineLocatePoint(e.geometry, ST_Point(s.lon, s.lat)) AS f
+    FROM s JOIN e ON ST_DWithin(e.geometry, ST_Point(s.lon, s.lat), 0.0005)),
+d AS (SELECT *, ST_LineInterpolatePoint(geometry, f) AS q, ST_LineInterpolatePoint(geometry, greatest(f - 0.01, 0)) AS a,
+    ST_LineInterpolatePoint(geometry, least(f + 0.01, 1)) AS b FROM c),
+k AS (SELECT osm_id, name, edge_id, f * length_m AS pos_m, length_m,
+    111320 * sqrt(pow(ST_Y(q) - lat, 2) + pow((ST_X(q) - lon) * cos(radians(lat)), 2)) AS dist,
+    (ST_X(b) - ST_X(a)) * (lat - ST_Y(a)) - (ST_Y(b) - ST_Y(a)) * (lon - ST_X(a)) AS side FROM d),
+best AS (SELECT * FROM k WHERE dist <= 30 QUALIFY row_number() OVER (PARTITION BY osm_id ORDER BY side < 0 AND dist > 0.5 DESC, dist, edge_id) = 1)
+SELECT b.osm_id, b.name, b.edge_id,
+    (SELECT count(*) FROM {lanes} l WHERE l.edge_id = b.edge_id AND l.lane_num > (SELECT max(m.lane_num) FROM {lanes} m
+        WHERE m.edge_id = b.edge_id AND m.use <> 'bike'))::BIGINT AS lane,
+    round(greatest(b.pos_m - 7.5, 0), 2)::DOUBLE, round(least(b.pos_m + 7.5, b.length_m), 2)::DOUBLE,
+    (SELECT string_agg(DISTINCT r.ref, ' ' ORDER BY r.ref) FROM bus.route_edges r WHERE r.edge_id = b.edge_id) AS lines
+FROM best b ORDER BY b.osm_id"""
+
+
+def _node_types(con, mode):
+    """{node id (text): (SUMO node type, tl id or None)} of the traffic lights and stop signs of OSM (driving only)."""
+    if mode != "driving" or not (_table_exists(con, "raw.nodes") and _table_exists(con, f"{mode}.way_nodes")):
+        return {}
+    return {str(n): (_NODE_TYPES[t], tl) for n, t, tl in con.execute(NODE_TYPES_SQL.format(mode=mode)).fetchall()}
+
+
+def _write_bus_stops(con, mode, path):
+    """The bus stops as SUMO's <busStop> in an additional file ``path``; the number written (none: no file)."""
+    if mode != "driving" or not (_table_exists(con, "raw.nodes") and _table_exists(con, "bus.route_edges")):
+        return 0
+    lanes = (f"{mode}.lane_profile" if _table_exists(con, f"{mode}.lane_profile")
+             else "(SELECT NULL::BIGINT AS edge_id, NULL::INTEGER AS lane_num, NULL::VARCHAR AS use WHERE false)")
+    rows = con.execute(BUS_STOPS_SQL.format(mode=mode, lanes=lanes)).fetchall()
+    if rows:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write('<?xml version="1.0" encoding="UTF-8"?>\n<additional>\n')
+            for osm_id, name, eid, lane, a, b, lines in rows:
+                f.write(f'  <busStop id="bus_stop_{osm_id}" lane="{eid}_{lane}" startPos="{a:.2f}" endPos="{b:.2f}" friendlyPos="true"'
+                        + (f" name={quoteattr(name)}" if name else "") + (f" lines={quoteattr(lines)}" if lines else "") + "/>\n")
+            f.write("</additional>\n")
+    return len(rows)
+
+
+def _write_tll(net, path):
+    """The signal programs that netconvert built (the <tlLogic> elements of the .net.xml) as a .tll.xml; the number (none: no file)."""
+    out, n, inside = [], 0, False
+    with open(net, encoding="utf-8") as f:
+        for line in f:
+            if line.lstrip().startswith("<tlLogic "):
+                inside, n = True, n + 1
+            if inside:
+                out.append(line)
+            if line.lstrip().startswith("</tlLogic>"):
+                inside = False
+    if n:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write('<?xml version="1.0" encoding="UTF-8"?>\n<tlLogics>\n' + "".join(out) + "</tlLogics>\n")
+    return n
 
 
 def _find_netconvert(explicit=None):
@@ -157,7 +244,7 @@ def _table_exists(con, qualified):
         return False
 
 
-def _write_netccfg(cfg_path, nod, edg, con_xml, net, opts):
+def _write_netccfg(cfg_path, nod, edg, con_xml, net, opts, tll=None):
     """Write a standard SUMO netconvert config (`.netccfg`) wiring the inputs/output + options.
 
     Paths are written relative to the config's own folder: that is how SUMO resolves them (a path
@@ -169,6 +256,8 @@ def _write_netccfg(cfg_path, nod, edg, con_xml, net, opts):
              f'  <node-files value="{rel(nod)}"/>', f'  <edge-files value="{rel(edg)}"/>']
     if con_xml:
         lines.append(f'  <connection-files value="{rel(con_xml)}"/>')
+    if tll:
+        lines.append(f'  <tllogic-files value="{rel(tll)}"/>')
     lines.append(f'  <output-file value="{rel(net)}"/>')
     for key, val in opts.items():
         lines.append(f'  <{key} value="{val}"/>')
@@ -376,7 +465,7 @@ def _split_lone_lanes(got, profile):
 
 
 def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network",
-            run_netconvert: bool = True, netconvert_bin: str = None,
+            run_netconvert: bool = False, netconvert_bin: str = None,
             connections: bool = True, config=None, bus_edges: bool = False, edge_attrs: dict = None, lanes: dict = None):
     """Export the duckOSM network to SUMO, preserving ``edge_id`` and the turn restrictions.
 
@@ -386,9 +475,10 @@ def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network",
     out_dir : directory for the output files (created if needed).
     mode : the mode schema to read (default ``"driving"``).
     net_name : basename for the outputs (``<net_name>.nod.xml`` / ``.edg.xml`` / ``.con.xml`` /
-        ``.netccfg`` / ``.net.xml``).
-    run_netconvert : if True (default) assemble the ``.net.xml`` with netconvert; if False only the
-        plain-XML (+ the ``.netccfg``) are written.
+        ``.add.xml`` / ``.netccfg``; with netconvert also ``.net.xml`` and ``.tll.xml``).
+    run_netconvert : if False (default), write the plain XML and the ``.netccfg``: the user changes the ``.netccfg`` and runs
+        ``netconvert -c <net_name>.netccfg``. If True, also run netconvert: the ``.net.xml``, and the ``.tll.xml`` with the
+        signal programs that netconvert built (the ``.netccfg`` then lists it, so that a user can edit the programs).
     netconvert_bin : explicit path to netconvert (else auto-located).
     connections : if True (default) emit ``.con.xml`` from ``<mode>.edge_graph`` so junction
         movements are restricted to the legal successors (turn restrictions honoured); falls back to
@@ -405,8 +495,9 @@ def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network",
     bus_edges : driving only: also the bus-only edges (``private_edges`` with ``access = 'bus'``: a contraflow bus lane, a bus-only
         road) and the buses' turns of ``edge_graph`` (its ``bus`` rows), so their lanes get connections too (GMNS, docs/design/gmns_lane_profile.md).
 
-    Returns ``{"nod","edg","con"(if written),"netccfg"(if built),"net"(if built),"n_nodes",
-    "n_edges","n_connections"}``. Every (non-internal) SUMO edge id equals the duckOSM ``edge_id``.
+    Returns ``{"nod","edg","con"(if written),"add"(bus stops, if any),"netccfg","net"(with netconvert),"tll"(with netconvert,
+    if there are signals),"n_nodes","n_edges","n_connections","n_traffic_lights","n_stop_signs","n_bus_stops"}``.
+    The ``.nod.xml`` has the traffic lights and stop signs of OSM; the ``.add.xml`` (for ``sumo --additional-files``) the bus stops. Every (non-internal) SUMO edge id equals the duckOSM ``edge_id``.
     """
     try:
         con.execute("INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;")
@@ -417,6 +508,13 @@ def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network",
     edg_path = os.path.join(out_dir, f"{net_name}.edg.xml")
     con_path = os.path.join(out_dir, f"{net_name}.con.xml")
     net_path = os.path.join(out_dir, f"{net_name}.net.xml")
+    types = _node_types(con, mode)
+
+    def ntype(nid):     # (type, tl) of a node; a joined junction takes the strongest sign of its nodes
+        if str(nid).startswith("cluster_"):
+            ts = [types[n] for n in str(nid)[8:].split("_") if n in types]
+            return min(ts, key=lambda x: list(_NODE_TYPES.values()).index(x[0])) if ts else (None, None)
+        return types.get(str(nid), (None, None))
 
     # ---- read the network: nodes (geographic; netconvert projects them), edges, legal successors ----
     nodes = con.execute(
@@ -481,7 +579,9 @@ def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network",
         with open(nod_path, "w", encoding="utf-8") as f:
             f.write('<?xml version="1.0" encoding="UTF-8"?>\n<nodes>\n')
             for nid, lon, lat in nodes:
-                f.write(f'  <node id="{nid}" x="{lon:.7f}" y="{lat:.7f}"/>\n')
+                t, tl = ntype(nid)
+                f.write(f'  <node id="{nid}" x="{lon:.7f}" y="{lat:.7f}"' + (f' type="{t}"' if t else "")
+                        + (f' tl="{tl}"' if tl else "") + '/>\n')
             f.write('</nodes>\n')
         n_edges = self_loops = 0
         with open(edg_path, "w", encoding="utf-8") as f:
@@ -558,19 +658,25 @@ def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network",
     n_edges, self_loops = write(nodes, rows, cs, stuck)
     logger.info(f"SUMO plain-XML[{mode}]: {len(nodes):,} nodes, {n_edges:,} edges "
                 f"(skipped {self_loops} self-loop edge(s))")
-    out = {"nod": nod_path, "edg": edg_path, "n_nodes": len(nodes), "n_edges": n_edges}
+    out = {"nod": nod_path, "edg": edg_path, "n_nodes": len(nodes), "n_edges": n_edges,
+           "n_traffic_lights": sum(ntype(n)[0] == "traffic_light" for n, _, _ in nodes),
+           "n_stop_signs": sum(ntype(n)[0] in ("priority_stop", "allway_stop") for n, _, _ in nodes)}
     if use_conns:
         out["con"], out["n_connections"], out["n_arrowed"] = con_path, len(cs), len(lane_cs)
         logger.info(f"SUMO connections[{mode}]: {len(cs):,} legal successors -> {con_path}")
+    add_path = os.path.join(out_dir, f"{net_name}.add.xml")
+    out["n_bus_stops"] = _write_bus_stops(con, mode, add_path)
+    if out["n_bus_stops"]:
+        out["add"] = add_path
+    logger.info(f"SUMO[{mode}]: {out['n_traffic_lights']} traffic lights, {out['n_stop_signs']} stop signs, {out['n_bus_stops']} bus stops")
+    if use_conns and not run_netconvert and any(a is not None or d for _, _, a, d in cs):
+        logger.warning(f"SUMO connections[{mode}]: some turns are open or closed to some vehicles only; netconvert takes that only "
+                       f"lane by lane, which to_sumo writes when it runs netconvert itself (run_netconvert=True)")
 
-    if not run_netconvert:
-        return out
-
-    # ---- assemble via a standard SUMO netconvert config (.netccfg) ----
-    binary = _find_netconvert(netconvert_bin)
+    # ---- the standard SUMO netconvert config (.netccfg) ----
     con_arg = con_path if use_conns else None
     if isinstance(config, str):                          # caller supplied their own .netccfg
-        cmd = [binary, "-c", config, "--node-files", nod_path, "--edge-files", edg_path,
+        cmd = ["-c", config, "--node-files", nod_path, "--edge-files", edg_path,
                "--output-file", net_path]
         if con_arg:
             cmd += ["--connection-files", con_arg]
@@ -585,8 +691,12 @@ def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network",
             opts.update(config)
         cfg_path = os.path.join(out_dir, f"{net_name}.netccfg")
         _write_netccfg(cfg_path, nod_path, edg_path, con_arg, net_path, opts)
-        cmd = [binary, "-c", cfg_path]
+        cmd = ["-c", cfg_path]
         out["netccfg"] = cfg_path
+    if not run_netconvert:
+        return out
+    cmd = [_find_netconvert(netconvert_bin), *cmd]
+
     def run(cmd):
         logger.info("running: " + " ".join([os.path.basename(cmd[0]), *cmd[1:]]))   # not the full path: it has the home folder
         res = subprocess.run(cmd, capture_output=True, text=True)
@@ -624,4 +734,10 @@ def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network",
         logger.info(f"SUMO: {len(perms)} connection(s) open or closed to some vehicles only")
     out["net"] = net_path
     logger.info(f"wrote SUMO net -> {net_path}")
+    tll_path = os.path.join(out_dir, f"{net_name}.tll.xml")
+    if _write_tll(net_path, tll_path):
+        out["tll"] = tll_path
+        if not isinstance(config, str):              # the next `netconvert -c` keeps the programs that a user edits in it
+            _write_netccfg(cfg_path, nod_path, edg_path, con_arg, net_path, {**opts, "junctions.join": "false"}
+                           if out.get("n_joined") else opts, tll=tll_path)
     return out

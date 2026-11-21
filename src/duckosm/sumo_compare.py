@@ -60,7 +60,7 @@ def lane_diff(db, osm_file, work_dir, netconvert_bin=None):
         raise RuntimeError(f"netconvert --osm-files failed (exit {res.returncode}):\n{res.stderr[-2000:]}")
     con = duckdb.connect(str(db), read_only=True)
     try:
-        ours = to_sumo(con, work_dir, net_name="duckosm", netconvert_bin=binary)["net"]
+        ours = to_sumo(con, work_dir, net_name="duckosm", netconvert_bin=binary, run_netconvert=True)["net"]
         ref = dict(con.execute("SELECT edge_id::VARCHAR, edge_ref FROM driving.edges").fetchall())
         tags = {str(k): v for k, v in con.execute("SELECT osm_id, tags FROM raw.ways").fetchall()}
         src = collections.defaultdict(set)

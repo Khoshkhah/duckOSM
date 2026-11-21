@@ -84,7 +84,7 @@ con.sql(f"SELECT to_edge FROM driving.edge_graph WHERE from_edge = {a}").show()
 
 ```bash
 duckosm way monaco.duckdb 4230100 --json      # one OSM way: raw tags + its edges in every mode
-duckosm sumo monaco.duckdb                    # -> sumo/monaco.net.xml (edge ids = edge_id)
+duckosm sumo monaco.duckdb --netconvert       # -> sumo/monaco.net.xml (edge ids = edge_id); without --netconvert: plain XML + .netccfg
 duckosm matsim monaco.duckdb                  # -> monaco_network.xml.gz
 duckosm gmns monaco.duckdb                    # -> monaco_gmns.duckdb (lanes, movements)
 duckosm export-gis monaco.duckdb              # -> monaco.gpkg

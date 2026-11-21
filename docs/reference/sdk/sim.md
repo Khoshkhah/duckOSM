@@ -4,7 +4,7 @@ Traffic simulation. The id of each SUMO edge and MATSim link is the duckOSM `edg
 
 | Call | Returns | Today |
 |---|---|---|
-| `to_sumo(net, out_dir, mode=None, net_name="network", run_netconvert=True, connections=True, config=None)` | the SUMO files of one mode (`.nod.xml`, `.edg.xml`, `.con.xml`; with SUMO's `netconvert` also `.net.xml`), as a dict of paths | yes |
+| `to_sumo(net, out_dir, mode=None, net_name="network", run_netconvert=False, connections=True, config=None)` | the SUMO files of one mode, as a dict of paths: `.nod.xml` (with the traffic lights and stop signs), `.edg.xml`, `.con.xml`, `.add.xml` (the bus stops) and `.netccfg` (the netconvert config; run `netconvert -c` on it). With `run_netconvert=True`, also `.net.xml` and `.tll.xml` (the signal programs). The dict also has `n_traffic_lights`, `n_stop_signs` and `n_bus_stops`. [SUMO](../../exports/sumo.md) | yes |
 | `to_matsim(net, out_path, mode=None, crs=None, gzip=True)` | the MATSim `network.xml`; `mode` can be a list | yes |
 | `to_matsim_lanes(gmns_db, out_dir=".", mode="driving", signals=True, cycle_s=90)` | MATSim lanes and signals, from a GMNS database | yes |
 | `sumo_net(path)` | the SUMO network (a `.net.xml`, or the dict of `to_sumo`) read with sumolib, with the internal edges: a `sumolib.net.Net` | yes |

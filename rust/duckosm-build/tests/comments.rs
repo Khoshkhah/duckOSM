@@ -25,6 +25,15 @@ fn the_columns_have_the_descriptions_of_the_schema_page() {
     let con = duckdb::Connection::open(db).unwrap();
     let fixes: i64 = con.query_row("SELECT count(*) FROM duckdb_tables() WHERE schema_name = 'main' AND table_name = 'fixes'", [], |r| r.get(0)).unwrap();
     assert_eq!(fixes, 0, "a build with no fixes file has no main.fixes");
+    // main.osm_source: the time of the header of the PBF file and its SHA-256; no extract (an own OSM file)
+    let (ts, sha, extract): (i64, String, Option<String>) = con
+        .query_row("SELECT epoch(osm_timestamp)::BIGINT, pbf_sha256, extract FROM main.osm_source", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .unwrap();
+    let pbf = data.join("monaco.osm.pbf");
+    assert_eq!(Some(ts), duckosm_core::cutstream::data_time(&pbf).unwrap().0, "the time of the header");
+    use sha2::Digest;
+    let want: String = sha2::Sha256::digest(std::fs::read(&pbf).unwrap()).iter().map(|b| format!("{b:02x}")).collect();
+    assert!(sha == want && extract.is_none(), "{sha} {extract:?}");
     let mut stmt = con
         .prepare("SELECT column_name, comment FROM duckdb_columns() WHERE schema_name = 'driving' AND table_name = 'edges'")
         .unwrap();

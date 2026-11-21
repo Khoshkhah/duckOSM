@@ -68,4 +68,5 @@ format:
     fig-cap-location: bottom
     callout-appearance: default
     smooth-scroll: true
+    lightbox: auto         # click a picture: it opens full screen, and you can zoom in
     link-external-newwindow: true

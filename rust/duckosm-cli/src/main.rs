@@ -773,6 +773,7 @@ fn tiles(args: &[String]) -> Result<(), String> {
             eprintln!("tiles: {name}: {rows} rows");
         }
     }
+    duckosm_build::write_osm_source(&region, |name| std::fs::File::create(union_dir.join(name)).map(std::io::BufWriter::new).map_err(|e| e.to_string()))?;
     eprintln!("tiles: union and the steps after it: {:.1} s", t2.elapsed().as_secs_f64());
     #[cfg(feature = "duckdb")]
     if p.duckdb {

@@ -10,8 +10,10 @@ from duckosm.sumo import DEFAULT_NETCFG  # noqa: F401
 
 
 def to_sumo(net, out_dir, mode=None, **kwargs):
-    """The SUMO network of one mode in ``out_dir`` (``.nod.xml``, ``.edg.xml``, ``.con.xml``; with SUMO's ``netconvert``
-    also ``.net.xml``). Options as :func:`duckosm.to_sumo` (``run_netconvert``, ``net_name`` ...). Returns the paths.
+    """The SUMO network of one mode in ``out_dir``: ``.nod.xml`` (with the traffic lights and stop signs), ``.edg.xml``,
+    ``.con.xml``, ``.add.xml`` (the bus stops) and the netconvert config ``.netccfg``. Run ``netconvert -c <net_name>.netccfg``,
+    or give ``run_netconvert=True``: then also ``.net.xml`` and ``.tll.xml`` (the signal programs). Options as
+    :func:`duckosm.to_sumo` (``run_netconvert``, ``net_name``, ``config`` ...). Returns the paths.
 
     >>> duckosm.sim.to_sumo(net.driving, "out/sumo")"""
     from duckosm import _api
@@ -43,11 +45,13 @@ def sumo_net(path):
     """The SUMO network ``path`` (a ``.net.xml``, or the dict of :func:`to_sumo`) read with sumolib
     (``sumolib.net.readNet``), with the internal edges.
 
-    >>> sn = duckosm.sim.sumo_net(net.driving.to_sumo("out/sumo"))"""
-    from duckosm.errors import require
+    >>> sn = duckosm.sim.sumo_net(net.driving.to_sumo("out/sumo", run_netconvert=True))"""
+    from duckosm.errors import DuckOSMError, require
     require("sumolib", "duckosm.sim.sumo_net")
     import sumolib
     if isinstance(path, dict):
+        if "net" not in path:
+            raise DuckOSMError("this SUMO export has no .net.xml: give run_netconvert=True, or run netconvert -c on its .netccfg")
         path = path["net"]
     return sumolib.net.readNet(str(path), withInternal=True)
 

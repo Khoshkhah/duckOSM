@@ -72,47 +72,100 @@ Each export below gives its own count, and the count must agree with these numbe
 ch.md("""## SUMO
 
 [SUMO](https://eclipse.dev/sumo/) (Simulation of Urban MObility) simulates each vehicle on each lane, second by
-second. Its network file is `.net.xml`. SUMO's program `netconvert` makes it from three **plain XML** files: the
-nodes (`.nod.xml`), the edges (`.edg.xml`) and the connections between lanes (`.con.xml`).
+second. Its network file is `.net.xml`. SUMO's program `netconvert` makes it from **plain XML** files: the nodes
+(`.nod.xml`), the edges (`.edg.xml`) and the connections between lanes (`.con.xml`).
 
-`to_sumo` makes the SUMO network in two steps:
-
-1. It writes the three plain files and a **netconvert config** (`.netccfg`). The config is the input of `netconvert`:
-   it names the three plain files, the output file and the options of the conversion.
-2. It runs `netconvert -c network.netccfg`. `netconvert` reads the config and the files that it names, and writes
-   `.net.xml`.
+`to_sumo` writes the plain files and a **netconvert config** (`.netccfg`), the input of `netconvert`. You can change
+the config, and then you run `netconvert`. The plain files have all that `netconvert` takes from an OSM file for the
+network: the lanes, their widths and vehicle classes, the speeds, the road classes, the names, the shapes, the legal
+turns, the traffic lights and the stop signs. Thus you do not give `netconvert` the OSM file, which has no fixes and no
+`edge_id`.
 
 ```text
 network.nod.xml ─┐
 network.edg.xml ─┼─ named in network.netccfg ──> netconvert -c network.netccfg ──> network.net.xml
 network.con.xml ─┘
+network.add.xml ─── the bus stops, for SUMO itself (sumo --additional-files)
 ```
-
-The extra `sim` installs `netconvert` (the Python package `eclipse-sumo`).
 
 | Argument | Default | Does |
 |---|---|---|
 | `net_name` | `"network"` | the start of each file name |
-| `run_netconvert` | `True` | `False`: only the plain XML, with no SUMO program |
+| `run_netconvert` | `False` | `True`: duckOSM also runs `netconvert`, and writes the `.net.xml` and the signal programs (`.tll.xml`) |
 | `connections` | `True` | writes the connections of the lanes at each junction (from the turn graph and the turn lanes) |
-| `config` | none | your own netconvert config (a `.netccfg` path, or a dict of options), in place of the default options |""")
-ch.code("""sumo = net.driving.to_sumo("out/sumo")    # the plain XML files, and the .net.xml of netconvert
+| `config` | none | a dict of options that change the default config, or the path of your own `.netccfg` |""")
+ch.code("""sumo = net.driving.to_sumo("out/sumo")    # the plain XML files, the bus stops and the netconvert config
 sumo                              # the paths and the numbers""")
-ch.md("""**What the output shows.** The line `running: netconvert -c out/sumo/network.netccfg` is step 2. The dict has the
-paths of the three plain files, of the netconvert config (`.netccfg`, the input of netconvert) and of SUMO's network
-(`.net.xml`, its output). The plain files have 1,768 nodes, 2,840 edges and 5,082
-connections: the same nodes and edges as the network, and one connection for each arc of the turn graph that a car
-can use (chapter 7).""")
-ch.md("""The check: SUMO's own network file must have each edge of duckOSM. `duckosm.sim.edge_map` reads the `.net.xml`
-and gives the `edge_id` of each SUMO edge (netconvert can split an edge into parts, for example `123#1`; the map
-gives the `edge_id` of each part).""")
-ch.code("""ids = duckosm.sim.edge_map(sumo)                 # the SUMO id and the edge_id of each SUMO edge
+ch.md("""**What the output shows.** The dict has the paths of the three plain files, of the bus stops (`add`) and of the
+netconvert config (`netccfg`). There is no `.net.xml`: `netconvert` did not run. The plain files have 1,768 nodes,
+2,840 edges and 5,082 connections: the same nodes and edges as the network, and one connection for each arc of the
+turn graph that a car can use (chapter 7). The nodes have 18 traffic lights and 12 stop signs, and the
+additional file has 106 bus stops.""")
+ch.md("""The check: each SUMO edge must be a duckOSM edge. `duckosm.sim.edge_map` reads the `.edg.xml` and gives the
+`edge_id` of each SUMO edge.""")
+ch.code("""ids = duckosm.sim.edge_map(sumo["edg"])          # the SUMO id and the edge_id of each SUMO edge
 len(ids), ids.edge_id.nunique()                  # the rows, and the different edge ids in them""")
-ch.md("""SUMO's network has 2,840 edges, and they are 2,840 different edge ids: netconvert
-kept each duckOSM edge, with its `edge_id` as its SUMO id.
+ch.md("""The `.edg.xml` has 2,840 edges, and they are 2,840 different edge ids: each duckOSM edge is one SUMO
+edge, with its `edge_id` as its SUMO id.""")
 
-> **Warning:** without the extra `sim` (or a SUMO install), `to_sumo` stops with "netconvert not found". Install
-> `duckosm[sim]`, or use `run_netconvert=False` and run `netconvert` on the plain files later.""")
+ch.md("""### Traffic lights and stop signs
+
+OSM often puts a traffic light or a stop sign on a node of the way before the junction, not on the junction. duckOSM
+moves the sign to the nearest junction of the same way, if it is 25 m or nearer, as `netconvert` does with its option
+`tls.guess-signals`. The traffic lights within 20 m of each other get one program: the node attribute `tl`.
+
+| OSM tag | SUMO node type |
+|---|---|
+| `highway=traffic_signals` | `traffic_light` |
+| `highway=stop` | `priority_stop`: the vehicles of the minor road stop |
+| `highway=stop` with `stop=all` | `allway_stop`: all vehicles stop |
+| `highway=give_way` | no change: a SUMO priority junction makes the minor road wait |""")
+ch.code("""import xml.etree.ElementTree as ET                     # to read the XML back
+from collections import Counter
+Counter(n.get("type") for n in ET.parse(sumo["nod"]).getroot() if n.get("type"))    # the nodes with a sign, by type""")
+ch.md("""**What the output shows.** 18 junctions have a traffic light, 11 have a stop sign for the minor road, and 1 is
+an all-way stop.""")
+
+ch.md("""### The netconvert config
+
+`network.netccfg` is a short XML file. Each line is one option of `netconvert`.""")
+ch.code("""print(open(sumo["netccfg"]).read())               # the input of netconvert""")
+ch.md("""| Line | Change it? |
+|---|---|
+| `node-files`, `edge-files`, `connection-files` | no: the files of duckOSM |
+| `output-file` | yes: the name of the `.net.xml` |
+| `proj.utm` | yes: `true` gives metres in the UTM zone of the area |
+| `geometry.remove` = `false` | **no**: with `true`, `netconvert` joins the edges between two junctions, and a SUMO edge is no longer one `edge_id` |
+| `junctions.join` = `false` | **no**: with `true`, the short edges inside a joined junction go, and the turns through them are lost. If you need it, use `to_sumo(..., config={"junctions.join": "true"}, run_netconvert=True)`: duckOSM then keeps the turns |
+| `numerical-ids` = `false` | **no**: with `true`, `netconvert` gives new ids |
+| `no-turnarounds.except-deadend` | yes: `true` gives no U-turns, except at a dead end |
+| `tls.default-type` = `actuated` | yes: OSM has no signal timings, so the default program follows the traffic. `static` gives fixed times |
+
+The three lines in bold keep the `edge_id` as the SUMO id. You can change the config in two ways:
+
+1. Edit the file as text, then run `netconvert -c` on it.
+2. Give `config={...}` to `to_sumo`: duckOSM writes the options into the file. For example
+   `net.driving.to_sumo("out/sumo", config={"tls.default-type": "static"})`.""")
+
+ch.md("""### The extra files
+
+- `network.add.xml`: the bus stops, for SUMO itself (`sumo --additional-files network.add.xml`), not for `netconvert`.
+  Each OSM bus stop is a `<busStop>` on the right-most lane that buses can use, on the nearest edge of a bus route.
+  The lane id is `<edge_id>_<index>`, index 0 on the right. `lines` has the bus routes on that edge.
+- `network.tll.xml`: the signal programs. OSM seldom has signal timings, and a program must have one signal for each
+  lane connection of its junction, in the order of `netconvert`. Thus only `run_netconvert=True` writes this file: it
+  copies the programs that `netconvert` built, and adds the file to the config. Edit the phases in it, and run
+  `netconvert -c` again: `netconvert` then uses your programs.""")
+ch.code("""print("".join(open(sumo["add"]).readlines()[:4]))  # the first bus stops""")
+
+ch.md("""### The next step: netconvert
+
+Run `netconvert` on the config. It writes `out/sumo/network.net.xml`, the file that SUMO reads. The extra `sim`
+installs `netconvert` (the Python package `eclipse-sumo`). Chapter 12 does this step and runs a simulation.
+
+```bash
+netconvert -c out/sumo/network.netccfg
+```""")
 
 ch.md("""## GMNS
 
@@ -297,7 +350,7 @@ list (`[edge]`) in its place.""")
 ch.code("""fixed.driving.to_gis("out/fixed.gpkg")                                 # a GeoPackage
 query = "SELECT maxspeed_kmh FROM st_read('out/fixed.gpkg', layer='edges_driving') WHERE edge_id = ?"
 speeds["GeoPackage (km/h)"] = con.execute(query, [edge]).fetchone()[0]""")
-ch.code("""fixed_sumo = fixed.driving.to_sumo("out/fixed_sumo", run_netconvert=False)    # the plain SUMO files
+ch.code("""fixed_sumo = fixed.driving.to_sumo("out/fixed_sumo")    # the plain SUMO files
 xml_edge = ET.parse(fixed_sumo["edg"]).find(f".//edge[@id='{edge}']")            # the <edge> with the edge_id as its id
 speeds["SUMO (km/h)"] = round(float(xml_edge.get("speed")) * 3.6, 1)""")
 ch.code("""fixed.driving.to_matsim("out/fixed_matsim.xml.gz")                          # the MATSim network
@@ -323,8 +376,8 @@ ch.code("""files = ["out/sumo/network.edg.xml", "out/gmns.duckdb", "out/matsim_n
 for f in files:
     print(f"{Path(f).stat().st_size / 1e6:6.2f} MB  {f}")       # the size in MB, and the file""")
 ch.md("""The largest file is the GMNS database (approximately 9 MB): it has the lanes, the movements and a line for each lane. The
-OpenDRIVE file (2.39 MB) has the reference line and the lanes of each road. The MATSim network is the smallest file
-(0.11 MB), because it is compressed with gzip.""")
+OpenDRIVE file (2.10 MB) has the reference line and the lanes of each road. The MATSim network is the smallest file
+(0.10 MB), because it is compressed with gzip.""")
 
 ch.exercises([
     ("Export the walking network of Monaco to MATSim, and compare its number of links with the number of walking edges.",
@@ -334,15 +387,16 @@ ch.exercises([
      """import geopandas as gpd
 net.driving.to_gis("out/utm", fmt="geoparquet", srs="EPSG:32632")
 gpd.read_parquet("out/utm/edges_driving.parquet").crs"""),
-    ("Write only the plain XML of SUMO, with no netconvert, into the folder `out/plain`, and count the `<edge>` "
-     "elements of the `.edg.xml`.",
-     """plain = net.driving.to_sumo("out/plain", run_netconvert=False)
-len(ET.parse(plain["edg"]).findall("edge"))"""),
+    ("Write the SUMO files with fixed signal times (`tls.default-type` = `static`) into the folder `out/static`, and "
+     "read the line from the netconvert config.",
+     """static = net.driving.to_sumo("out/static", config={"tls.default-type": "static"})
+[line for line in open(static["netccfg"]) if "tls.default-type" in line]"""),
 ])
 
 ch.glossary([
     ("export", "a call that writes the network in the format of another tool"),
     ("plain XML", "the three input files of SUMO's `netconvert`: nodes, edges, connections"),
+    ("netconvert config", "the `.netccfg` file: the input files and the options of `netconvert`"),
     ("`netconvert`", "the program of SUMO that makes the `.net.xml` network"),
     ("link", "the word of MATSim and GMNS for an edge"),
     ("movement", "a turn from one link to another at a junction, in GMNS"),
@@ -352,7 +406,8 @@ ch.glossary([
 ])
 
 ch.summary([
-    ("`net.to_sumo(out_dir, run_netconvert=True)`", "the SUMO plain XML and the `.net.xml`"),
+    ("`net.driving.to_sumo(out_dir)`", "the SUMO plain XML, the bus stops and the netconvert config"),
+    ("`netconvert -c out_dir/network.netccfg`", "the SUMO network `.net.xml` (the command)"),
     ("`duckosm.sim.edge_map(files)`", "the `edge_id` of each SUMO edge or MATSim link"),
     ("`net.to_gmns(out_path, to_csv=None)`", "the GMNS tables in DuckDB, and as CSV"),
     ("`duckosm.planning.check_gmns(path)`", "the checks of the GMNS tables"),

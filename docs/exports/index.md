@@ -55,7 +55,7 @@ The network in the formats of simulation tools, from macro (links) to micro (lan
 |---|---|---|
 | DTALite, Path4GMNS | [GMNS](gmns.md) tables: macro | `duckosm gmns` |
 | MATSim, BEAM, eqasim | [MATSim](matsim.md) `network.xml`, lanes and signals | `duckosm matsim`, `matsim-lanes` |
-| SUMO | [SUMO](sumo.md) `.net.xml` | `duckosm sumo` |
+| SUMO | [SUMO](sumo.md) plain XML and `.netccfg` (netconvert makes the `.net.xml`) | `duckosm sumo` |
 | DTALite, Path4GMNS | [GMNS meso and micro](gmns-meso-micro.md) | `duckosm gmns --meso --micro` |
 | Rail planning: OpenTrack, RailSys | [railML 2.4](railml.md) | `duckosm railml` |
 

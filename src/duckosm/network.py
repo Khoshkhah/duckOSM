@@ -10,6 +10,7 @@ and matplotlib are imported in the methods. The maps come from roadstyle (``road
 from __future__ import annotations
 
 import os
+import tempfile
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -401,6 +402,28 @@ class Network(os.PathLike):
         return out
 
     @property
+    def osm_version(self) -> dict | None:
+        """The version of the OSM data that the network was built from (the table ``main.osm_source``): ``osm_timestamp``
+        (the time of the data), ``replication_sequence``, ``extract`` and ``extract_url`` (the Geofabrik extract of
+        ``duckosm get``; None for your own OSM file), ``downloaded_at`` and ``pbf_sha256``. None for a file from an older build.
+
+        >>> net.osm_version["osm_timestamp"]"""
+        if "main.osm_source" not in self.tables():
+            return None
+        rows = self.sql("SELECT * FROM main.osm_source LIMIT 1")
+        if not len(rows):
+            return None
+        import pandas as pd
+        return {k: (None if v is None or (not isinstance(v, str) and pd.isna(v)) else v.to_pydatetime() if hasattr(v, "to_pydatetime")
+                    else int(v) if k == "replication_sequence" else v) for k, v in rows.iloc[0].to_dict().items()}
+
+    def has_osm_source(self) -> bool:
+        """True when the file has the version of its OSM data (``main.osm_source``).
+
+        >>> net.has_osm_source()"""
+        return self.osm_version is not None
+
+    @property
     def boundary(self):
         """The boundary of the area as a GeoDataFrame (None when the file has none)."""
         if "main.boundary" not in self.tables():
@@ -424,8 +447,13 @@ class Network(os.PathLike):
         meta = self._meta()
         fixes = f"<code>{escape(str(meta['fixes']))}</code>" if meta.get("fixes") else "none"
         saved = "yes" if self.saved else 'no, it is in the work folder: <code>net.save("name.duckdb")</code> keeps it'
+        osm = self.osm_version
+        data = "unknown (a file from an older build)" if osm is None else (
+            (str(osm["osm_timestamp"])[:10] if osm["osm_timestamp"] is not None else "no date")
+            + (f" (Geofabrik {escape(osm['extract'])})" if osm["extract"] else " (your own OSM file)"))
         rows = "".join(f"<tr><td>{k}</td><td>{v}</td></tr>" for k, v in (
-            ("file", f"<code>{escape(shown(self.path))}</code> ({_size(self.path)})"), ("fixes", fixes), ("saved", saved)))
+            ("file", f"<code>{escape(shown(self.path))}</code> ({_size(self.path)})"), ("OSM data", data), ("fixes", fixes),
+            ("saved", saved)))
         return (f"<div><b>Network {escape(self.path.name.split('.')[0])}</b><table>{rows}</table>"
                 f"{self.summary().to_html(index=False)}</div>")
 
@@ -934,12 +962,16 @@ class Network(os.PathLike):
                 shutil.copy2(src, dst.with_name(new + ext))
         return Network(dst)
 
-    def add_multimodal(self, transfer_s: float = 60, pair_costs: dict | None = None, progress: Any = None) -> "Network":
+    def add_multimodal(self, transfer_s: float = 60, pair_costs: dict | None = None, node_costs=None,
+                       only_listed_nodes: bool = False, progress: Any = None) -> "Network":
         """Add the multimodal graph to this file, with no new build: the schema ``mm`` with ``mm.edges`` (the edges of
         all modes) and ``mm.transfers`` (the changes of mode at the shared junctions). It reads the modes that are in
         the file, so it needs walking and one more mode. A file that has ``mm`` gets it again. ``transfer_s``: the
         seconds of a change of mode; ``pair_costs``: another cost for one direction, ``{"walking->driving": 120}``.
-        Returns the network, so that a route across modes can follow (:meth:`route_multimodal_points`).
+        ``node_costs``: the cost of a change at some junctions, a DataFrame (or a CSV or Parquet file) with ``node_id``
+        and ``cost_s``, and optionally ``from_mode`` and ``to_mode`` (empty: each change), or a dict ``{node_id:
+        cost_s}``. A row with modes wins over a row without. ``only_listed_nodes``: the changes only at those junctions
+        (for example, park only at car parks). Returns the network, so that a route across modes can follow (:meth:`route_multimodal_points`).
 
         >>> net.add_multimodal().route_multimodal_points((7.4155, 43.7285), (7.4335, 43.7468))"""
         from duckosm import _rust
@@ -951,7 +983,20 @@ class Network(os.PathLike):
         args = ["duckosm", "multimodal", str(self.path), "--transfer-cost", str(transfer_s)]
         for pair, seconds in (pair_costs or {}).items():
             args += ["--pair-cost", f"{pair}={seconds}"]
-        code = timed(progress, "multimodal graph", lambda: _rust.cli(args))
+        with tempfile.TemporaryDirectory() as tmp:
+            if node_costs is not None:
+                if isinstance(node_costs, (str, os.PathLike)):
+                    path = os.fspath(node_costs)
+                else:
+                    import pandas as pd
+                    df = (pd.DataFrame({"node_id": list(node_costs), "cost_s": list(node_costs.values())})
+                          if isinstance(node_costs, dict) else pd.DataFrame(node_costs))
+                    path = os.path.join(tmp, "node_costs.csv")
+                    df.to_csv(path, index=False)
+                args += ["--node-costs", path] + (["--only-listed-nodes"] if only_listed_nodes else [])
+            elif only_listed_nodes:
+                raise DuckOSMError("only_listed_nodes=True needs node_costs: the junctions where a change is allowed")
+            code = timed(progress, "multimodal graph", lambda: _rust.cli(args))
         if code:
             raise DuckOSMError(f"duckosm multimodal stopped with exit code {code}")
         return self

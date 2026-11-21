@@ -138,16 +138,18 @@ enum Cmd {
         #[arg(short, long = "out", default_value = ".")]
         out_dir: PathBuf,
     },
-    /// Export a built network to a SUMO net, with the duckOSM edge_id as the SUMO edge id. Writes <out-dir>/<name>.{nod,edg,con}.xml,
-    /// a .netccfg and the .net.xml (not with --no-netconvert). The connections come from edge_graph, so the turn restrictions
-    /// stay. netconvert comes with SUMO (`pip install duckosm[sumo]` or a system package).
+    /// Export a built network to SUMO, with the duckOSM edge_id as the SUMO edge id. Writes <out-dir>/<name>.{nod,edg,con}.xml
+    /// (with the traffic lights and stop signs of OSM), <name>.add.xml (the bus stops) and the netconvert config <name>.netccfg.
+    /// Change the .netccfg and run `netconvert -c <name>.netccfg`, or give --netconvert: then also the .net.xml and the signal
+    /// programs <name>.tll.xml. The connections come from edge_graph, so the turn restrictions stay. netconvert comes with SUMO
+    /// (`pip install duckosm[sumo]` or a system package).
     Sumo {
         /// The duckOSM database.
         db: PathBuf,
         /// The mode schema to export.
         #[arg(short, long, default_value = "driving")]
         mode: String,
-        /// The output folder of <name>.{nod,edg,net}.xml.
+        /// The output folder of <name>.{nod,edg,con,add}.xml and <name>.netccfg.
         #[arg(long, default_value = "sumo")]
         out_dir: PathBuf,
         /// The base name of the files (default: the file name of the db).
@@ -162,10 +164,10 @@ enum Cmd {
         /// A netconvert config (.netccfg) to use in place of the built-in options.
         #[arg(short, long)]
         config: Option<PathBuf>,
-        /// Do not run netconvert: write only the plain XML.
+        /// Do not run netconvert (the default): write the plain XML and the .netccfg.
         #[arg(long)]
         no_netconvert: bool,
-        /// Run netconvert (the default). With --no-netconvert: the last one on the command line wins.
+        /// Run netconvert: also the .net.xml and the .tll.xml. With --no-netconvert: the last one on the command line wins.
         #[arg(long, overrides_with = "no_netconvert")]
         netconvert: bool,
         /// Join close junctions (netconvert's junctions.join): the nodes of a crossroads mapped as two or three nodes become one
@@ -343,7 +345,7 @@ pub fn run(args: &[String]) -> Result<()> {
             }
             println!("{msg} -> {}", out_dir.display());
         }
-        Cmd::Sumo { db, mode, out_dir, name, no_connections, config, no_netconvert, join_junctions, .. } => {
+        Cmd::Sumo { db, mode, out_dir, name, no_connections, config, netconvert, join_junctions, .. } => {
             check_db(&db)?;
             if let Some(c) = config.as_ref().filter(|c| !c.exists()) {
                 return Err(format!("{}: no such file", c.display()));
@@ -353,13 +355,17 @@ pub fn run(args: &[String]) -> Result<()> {
                 config: if join_junctions { vec![("junctions.join".into(), "true".into())] } else { Vec::new() },
                 ..Default::default()
             };
-            let s = crate::sumo::to_sumo_with(&db, &out_dir, &mode, &name, !no_connections, config.as_deref(), !no_netconvert, &o)?;
+            let s = crate::sumo::to_sumo_with(&db, &out_dir, &mode, &name, !no_connections, config.as_deref(), netconvert, &o)?;
             println!("wrote {} ({} edges) and {} ({} nodes)", s.edg.display(), s.n_edges, s.nod.display(), s.n_nodes);
             if let Some(c) = &s.con {
                 println!("wrote {} ({} connections)", c.display(), s.n_connections);
             }
-            if let Some(n) = &s.net {
-                println!("wrote {}", n.display());
+            if let Some(a) = &s.add {
+                println!("wrote {} ({} bus stops)", a.display(), s.n_bus_stops);
+            }
+            println!("{} traffic lights and {} stop signs in the nodes", s.n_traffic_lights, s.n_stop_signs);
+            for p in [&s.netccfg, &s.net, &s.tll].into_iter().flatten() {
+                println!("wrote {}", p.display());
             }
         }
         Cmd::GmnsViz { gmns_db, mode, out } => {

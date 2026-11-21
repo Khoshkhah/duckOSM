@@ -23,7 +23,7 @@ that you build is one schema, with the same table names. The other schemas hold 
 | Schema | What it holds | The main tables |
 |---|---|---|
 | `driving`, `walking`, `cycling` | the network of one mode | `edges` (the roads), `nodes` (the junctions), `edge_graph` (the turns from edge to edge), `ways` and `way_nodes` (the OSM ways of the mode), `private_edges` (roads that the mode cannot use) |
-| `main` | the facts of the area | `boundary` (the polygon), `global_junctions` (the nodes of all modes), `visualization_metadata` (the build time, the version, the config) |
+| `main` | the facts of the area | `boundary` (the polygon), `global_junctions` (the nodes of all modes), `osm_source` (the OSM file of the build), `visualization_metadata` (the build time, the version, the config) |
 | `raw` | the OSM data of the cut | `nodes`, `ways`, `relations` |
 | `features` | the base map | `buildings`, `water_polygons`, `land`, `ocean`, `pois` and more |
 | `visualization` | the drawing order | `edge_levels` (which road is drawn over which: bridges over tunnels) |
@@ -53,7 +53,8 @@ ch.md("""## The file and its modes
 
 A `Network` is also the path of its file. `net.path` is a `pathlib.Path`, and each function that takes a file name
 takes `net` too. `net.modes` lists the schemas that have a road table. `net.boundary` is the polygon of the area as a
-GeoDataFrame.""")
+GeoDataFrame. `net.osm_version` gives the version of the OSM data of the file: the time of the data, the Geofabrik
+extract and the SHA-256 of the OSM file (the table `main.osm_source`).""")
 ch.code("""print(net.path.name)       # the name of the file
 print(net.modes)           # the modes in the file
 net.boundary               # the polygon of the area, with its name, OSM id and area in km2""")
@@ -72,7 +73,7 @@ tables[:8]                 # the first eight""")
 ch.code("""import pandas as pd
 pd.set_option("display.max_colwidth", 120)    # show more of each description
 net.schema()                                  # one row for each table: rows, columns, description""")
-ch.md("""**What the output shows.** The file has 53 tables in eight schemas. The largest tables are the turns of walking
+ch.md("""**What the output shows.** The file has 54 tables in eight schemas. The largest tables are the turns of walking
 (`walking.edge_graph`, 35074 rows) and the OSM nodes (`raw.nodes`, 34461 rows). Some tables have 0 rows: Monaco has
 no turn permissions and no virtual nodes, but the table is there, so the same query works on each file.
 
@@ -84,8 +85,8 @@ ch.md("""### The tables of one schema
 `net.schema("driving")` gives only the tables of one schema. A wrong name gives an error that lists the schemas of
 the file.""")
 ch.code("""net.schema("main")         # the facts of the area""")
-ch.md("""**What the output shows.** `main` has three tables: the boundary (1 row), the junctions of all modes (4326 rows)
-and the metadata of the build (1 row). The description of `global_junctions` starts with "The nodes where every
+ch.md("""**What the output shows.** `main` has four tables: the boundary (1 row), the junctions of all modes (4326 rows),
+the OSM file of the build (1 row) and the metadata of the build (1 row). The description of `global_junctions` starts with "The nodes where every
 mode cuts its ways". The description of `boundary` tells which columns the table has for each type of build.""")
 
 ch.md("""## The columns: `net.columns()`

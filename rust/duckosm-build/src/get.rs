@@ -367,8 +367,8 @@ mod download {
     }
 
     /// The region file for `area`: the extract of [`choose`], downloaded when it is not in the cache folder (or with
-    /// `refresh`). Gives the file and the extract's name.
-    pub fn region_file(area: &Boundary, cache: &Path, index: Option<&str>, refresh: bool) -> Result<(PathBuf, String), String> {
+    /// `refresh`). Gives the file and the extract.
+    pub fn region_file(area: &Boundary, cache: &Path, index: Option<&str>, refresh: bool) -> Result<(PathBuf, Choice), String> {
         let x = choose(area, cache, index, refresh)?;
         eprintln!("  extract: {} ({}, {:.0} km²)", x.name, x.id, x.km2);
         if x.file.is_file() && !refresh {
@@ -377,7 +377,7 @@ mod download {
             let dated = download(&x.url, &x.file)?;
             eprintln!("  saved {} ({dated})", x.file.display());
         }
-        Ok((x.file, x.name))
+        Ok((x.file.clone(), x))
     }
 }
 

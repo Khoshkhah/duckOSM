@@ -105,7 +105,8 @@ The router adds it to the time of the route, so a change is only worth it when i
 
 The costs go into the column `cost_s` of `mm.transfers`: one row for each junction and each change. A high cost
 (300 s) gives routes that change mode less often. A cost of 0 lets a route change mode at almost every junction,
-which is not real.
+which is not real. To give a cost to the changes at each junction (for example, park only at car parks), see
+[8. Advanced routing, "Your own cost"](08_routing_advanced.md#your-own-cost).
 
 > **Tip:** a build can also make the multimodal graph at once: `duckosm.network(..., config={"multimodal":
 > {"enabled": True}})`. The same build from a config file: write the keys to `monaco.yaml` (`modes: [driving, walking, cycling]`,
