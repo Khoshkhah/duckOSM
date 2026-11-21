@@ -1009,7 +1009,9 @@ pub fn to_sumo_with(db: &Path, out_dir: &Path, mode: &str, net_name: &str, conne
         }
     }
     let run = |extra: &[String]| -> Result<()> {
-        eprintln!("running: {} {}", bin.display(), cmd.iter().chain(extra).cloned().collect::<Vec<_>>().join(" "));
+        // the name of the program only: its full path has the home folder of the user, and a notebook keeps this line in its outputs
+        let name = bin.file_name().map_or_else(|| bin.display().to_string(), |n| n.to_string_lossy().into_owned());
+        eprintln!("running: {name} {}", cmd.iter().chain(extra).cloned().collect::<Vec<_>>().join(" "));
         let mut c = std::process::Command::new(&bin);
         c.args(&cmd).args(extra);
         if let Some(h) = &home {

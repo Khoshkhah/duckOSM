@@ -330,7 +330,7 @@ pub fn to_opendrive(db: &Path, out: &Path, mode: &str, crs: Option<&str>, with_j
     let name = db.file_stem().and_then(|s| s.to_str()).unwrap_or("");
     let (table, geom) = if with_junctions { (format!("gmns_{mode}.link"), "geom") } else { (format!("{mode}.edges"), "geometry") };
     if with_junctions && !has_table(&con, &format!("gmns_{mode}"), "movement")? {
-        return Err(format!("--junctions needs a GMNS db (no 'gmns_{mode}.movement' in {}) — build with duckosm gmns", db.display()));
+        return Err(format!("--junctions needs a GMNS db (no 'gmns_{mode}.movement' in {}): make it with duckosm gmns and give its path, or in Python give the network to duckosm.hdmap.to_opendrive", db.display()));
     }
     if !with_junctions && !has_table(&con, mode, "edges")? {
         return Err(format!("no '{mode}.edges' in {} — is this a built duckOSM db with mode '{mode}'?", db.display()));

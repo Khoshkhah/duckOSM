@@ -262,6 +262,10 @@ pub fn comments(modes: &[&str]) -> Vec<Comment> {
     };
     for line in DATABASE_MD.lines() {
         let line = line.trim();
+        if line.starts_with("## ") || line.starts_with("### ") {
+            // the text of a section with no table: its comment is written here, not lost
+            flush(&mut out, &schemas, &tables, &mut text);
+        }
         if let Some(h) = line.strip_prefix("## ") {
             schemas = match code_names(h).first().map(String::as_str) {
                 Some("<mode>") => modes.iter().map(|m| m.to_string()).collect(),
@@ -299,6 +303,7 @@ pub fn comments(modes: &[&str]) -> Vec<Comment> {
             text.push(line);
         }
     }
+    flush(&mut out, &schemas, &tables, &mut text);
     out
 }
 

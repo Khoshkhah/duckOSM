@@ -39,3 +39,17 @@ fn the_columns_have_the_descriptions_of_the_schema_page() {
         .unwrap();
     assert!(table.is_some_and(|t| t.starts_with("One row per direction of a road")));
 }
+
+/// A file with the name of a schema (`mm.duckdb`, multimodal on) makes `mm.transfers` ambiguous in DuckDB: the build
+/// refuses it before it writes a file.
+#[test]
+fn a_database_with_the_name_of_a_schema_is_refused() {
+    let data = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/data");
+    let out = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("duckosm-mm-name");
+    let _ = std::fs::remove_dir_all(&out);
+    let p = Params { modes: vec![Mode::Driving, Mode::Walking], geoparquet: false, duckdb: true, name: "mm".into(), ..Params::default() };
+    let p = Params { after: duckosm_build::after::After { multimodal: true, ..p.after.clone() }, ..p };
+    let e = build(&data.join("monaco.osm.pbf"), &out, &p).unwrap_err();
+    assert!(e.contains("can't be called mm.duckdb"), "{e}");
+    assert!(!out.join("mm.duckdb").exists());
+}

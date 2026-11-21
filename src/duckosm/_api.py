@@ -52,11 +52,25 @@ def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network", run_
             netconvert_bin: str = None, connections: bool = True, config=None, bus_edges: bool = False,
             edge_attrs: dict = None, lanes: dict = None):
     """See :func:`duckosm.sumo.to_sumo`."""
+    from duckosm import sumo
     if bus_edges or edge_attrs or lanes or isinstance(config, dict) or netconvert_bin or _db(con) is None:
-        from duckosm import sumo
-        return sumo.to_sumo(con, out_dir, mode=mode, net_name=net_name, run_netconvert=run_netconvert,
-                            netconvert_bin=netconvert_bin, connections=connections, config=config,
-                            bus_edges=bus_edges, edge_attrs=edge_attrs, lanes=lanes)
+        def run(c):   # the paths as Path objects, as the Rust code gives them
+            return _paths(sumo.to_sumo(c, out_dir, mode=mode, net_name=net_name, run_netconvert=run_netconvert,
+                                netconvert_bin=netconvert_bin, connections=connections, config=config,
+                                bus_edges=bus_edges, edge_attrs=edge_attrs, lanes=lanes), ("nod", "edg", "con", "netccfg", "net"))
+        if not isinstance(con, (str, os.PathLike)):
+            return run(con)
+        import duckdb
+        c = duckdb.connect(os.fspath(con), read_only=True)   # the Python code reads a connection, not a path or a Network
+        try:
+            return run(c)
+        finally:
+            c.close()
+    if run_netconvert:
+        try:
+            sumo._find_netconvert()   # the eclipse-sumo wheel: it sets SUMO_HOME, where the Rust code looks first
+        except RuntimeError:
+            pass                      # not found: the Rust code gives the error
     r = json.loads(_rust().to_sumo(_db(con), str(out_dir), mode, net_name, connections,
                                    None if config is None else str(config), run_netconvert))
     return _paths(r, ("nod", "edg", "con", "netccfg", "net"))

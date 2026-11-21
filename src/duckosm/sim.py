@@ -56,7 +56,9 @@ def edge_map(path):
     """The id of each edge of a SUMO network (``.net.xml``, ``.edg.xml``) or of each link of a MATSim network
     (``network.xml``, ``.xml.gz``), and the duckOSM ``edge_id`` of it, as a DataFrame with the columns ``id`` (text, the
     id in the file) and ``edge_id`` (int64). duckOSM writes ``edge_id`` as the id. netconvert can change it: ``123#1``
-    (a part of edge 123) gives 123; ``123+456`` (edges joined) gives one row for each edge. Internal edges of SUMO
+    (a part of edge 123) gives 123; ``123+456`` (edges joined) gives one row for each edge. With ``geometry.remove=true`` (not the default of
+    ``to_sumo``), netconvert joins edges and keeps only the id of the first edge, without ``+``: the other edges of the join
+    are not in the table. Internal edges of SUMO
     (``:junction_0``) are not in the table. Join the results of a simulation on ``id``, then the network on ``edge_id``.
 
     >>> m = duckosm.sim.edge_map("out/sumo/network.net.xml")"""

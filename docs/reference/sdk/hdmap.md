@@ -4,14 +4,15 @@ Automated driving and HD maps. Lanelet2 and the lane graph read a GMNS database 
 
 | Call | Returns | Today |
 |---|---|---|
-| `to_opendrive(net, out_path, mode=None, crs=None, junctions=False)` | the ASAM OpenDRIVE file of one mode (experimental) | yes |
+| `to_opendrive(net, out_path, mode=None, crs=None, junctions=False)` | the ASAM OpenDRIVE file of one mode (experimental). `net`: a network, a mode view or a GMNS database. `junctions=True` reads the junctions from a GMNS database: with a network, the function writes the GMNS database of the mode to a temporary folder first | yes |
 | `to_lanelet2(gmns_db, out_path, mode="driving", snap_m=0.01)` | the Lanelet2 map (experimental) | yes |
 | `lane_graph(gmns_db, mode="driving")` (`build_lane_graph`) | the counts of the lane graph | yes |
 | `route_lanes(gmns_db, from_lane, to_lane, mode="driving")` | a route from lane to lane | yes |
-| `to_commonroad(gmns_db, path, mode="driving", country_id="ZAM", map_name=None)` | a CommonRoad scenario map (XML, commonroad-io): a lanelet for each lane (to the edge of the junction) and for each lane connector, with predecessors, successors and the lanes on each side; metres from the center of the area. Returns `{path, lanelets, lanes, connectors, ids}`; `ids`: `lanelet_id` → GMNS id and `edge_id` | yes |
+| `to_commonroad(gmns_db, path, mode="driving", country_id="ZAM", map_name=None)` | a CommonRoad scenario map (XML, commonroad-io): a lanelet for each lane (to the edge of the junction) and for each lane connector, with predecessors, successors and the lanes on each side; metres from the center of the area. Returns `{path, lanelets, lanes, connectors, dropped, ids}`; `dropped`: the lanes and connectors that are not in the file, because a border is not one line (231 of 7450 on Monaco); `ids`: `lanelet_id` → GMNS id and `edge_id`, only for the lanelets in the file | yes |
 
 ```python
 net.driving.to_opendrive("out/monaco.xodr")          # = duckosm.hdmap.to_opendrive(net.driving, ...)
+net.driving.to_opendrive("out/monaco_junctions.xodr", junctions=True)
 net.driving.to_gmns("out/gmns.duckdb")
 duckosm.hdmap.to_commonroad("out/gmns.duckdb", "out/monaco_commonroad.xml")
 ```
