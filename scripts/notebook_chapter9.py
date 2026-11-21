@@ -396,18 +396,19 @@ The blocks change with the streets that you give to momepy. With the driving str
 do not cut the land, and the blocks become larger.""")
 ch.md("""### The map of the blocks
 
-On the map, each block has its own color, so that you can see where one block stops and the next one starts. Two
-blocks that touch never have the same color: `mapclassify.greedy` gives each block one of six colors in this way. The
-size of the blocks is in the table above, not on the map.
+On the map, each block is a half-transparent polygon with a strong border, on top of the buildings and the roads. So
+you see where one block stops and the next one starts, and what is inside it. Two blocks that touch never have the
+same color: `mapclassify.greedy` gives each block one of six colors in this way. The size of the blocks is in the
+table above, not on the map. The plain gray areas in the middle are the two ports.
 
 The map has four layers, from the bottom to the top:
 
 | Layer | Style |
 |---|---|
-| The blocks | six colors, two blocks that touch never have the same color; a black border |
-| The buildings | dark gray |
+| The buildings | gray |
 | The roads | white: wide for a main road (`primary`, `secondary`, ...), narrow for a street |
 | The footways and the steps | brown dashed lines |
+| The blocks | half-transparent, with a border in the same color; two blocks that touch never have the same color |
 
 The first cell gives each block its color, and each road its kind and its style. The second cell draws the map.""")
 ch.code("""import mapclassify
@@ -428,22 +429,21 @@ ch.code("""from matplotlib.colors import ListedColormap
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 
-six = ListedColormap(["#66c2a5", "#fc8d62", "#8da0cb", "#e78ac3", "#a6d854", "#ffd92f"])    # the six block colors
+six = ListedColormap(["#1b9e77", "#d95f02", "#7570b3", "#e7298a", "#66a61e", "#e6ab02"])    # the six block colors
 fig, ax = plt.subplots(figsize=(12, 13), dpi=200)          # a large picture with many pixels: zoom in to see each block
-ax.set_facecolor("#d9d9d9")                                # the background in light gray
-blocks.plot(ax=ax, column="color", cmap=six)                                    # each block in its color
-blocks.boundary.plot(ax=ax, color="black", linewidth=0.8)                       # the border of each block
-buildings.plot(ax=ax, color="#6e6e6e", edgecolor="#3c3c3c", linewidth=0.2)      # the buildings
+ax.set_facecolor("#e8e8e8")                                # the background in light gray
+buildings.plot(ax=ax, color="#9e9e9e", edgecolor="#6e6e6e", linewidth=0.2)      # the buildings
 for k, style in roads.items():
-    streets[kind == k].plot(ax=ax, **style)                                     # the roads on top
-legend = [Patch(facecolor="#66c2a5", edgecolor="black", label="block (one color for each block)"),
-          Patch(facecolor="#6e6e6e", edgecolor="#3c3c3c", label="building")]
+    streets[kind == k].plot(ax=ax, **style)                                     # the roads
+blocks.plot(ax=ax, column="color", cmap=six, alpha=0.35)                        # each block: a half-transparent polygon
+blocks.boundary.plot(ax=ax, color=[six(c) for c in blocks.color], linewidth=1.3)    # and its border, in its color
+legend = [Patch(facecolor=(0.11, 0.62, 0.47, 0.35), edgecolor="#1b9e77", linewidth=1.3, label="block (six colors)"),
+          Patch(facecolor="#9e9e9e", edgecolor="#6e6e6e", label="building")]
 legend += [Line2D([], [], label=k, **style) for k, style in roads.items()]
-ax.legend(handles=legend, title="Blocks of Monaco", loc="lower right", facecolor="#d9d9d9")
+ax.legend(handles=legend, title="Blocks of Monaco", loc="lower right", facecolor="#e8e8e8")
 ax.set_xticks([])
 ax.set_yticks([])
 plt.show()""")
-
 
 
 ch.md("""## Try it yourself

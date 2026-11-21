@@ -1,5 +1,8 @@
-<!-- Zoom in the full-screen picture (lightbox): a click zooms in where you click, a second click shows the whole
-     picture again. The mouse wheel or two fingers zoom, a drag moves the picture, and the buttons +, - and Fit do the same. -->
+<!-- Zoom of the output pictures.
+     In the page: the buttons +, - and Fit on each picture, Ctrl + mouse wheel, two fingers; a drag moves the zoomed
+     picture; the button Full and a click on the picture (not zoomed) open it full screen.
+     Full screen (lightbox): a click zooms in where you click, a second click shows the whole picture again. The mouse
+     wheel or two fingers zoom, a drag moves the picture, and the buttons +, - and Fit do the same. -->
 <script>window.__amd = window.define; window.define = undefined;</script>  <!-- require.js on the page: load Panzoom as a global -->
 <script src="panzoom.min.js"></script>  <!-- @panzoom/panzoom 4.5.1, MIT license -->
 <script>window.define = window.__amd;</script>
@@ -14,10 +17,50 @@
   .gslide-image img { cursor: zoom-in; }
   .gslide-image img.rs-zoomed { cursor: grab; }
   @media (max-width: 600px) { .rs-zoombar span { display: none; } }
+  .rs-zoombox { position: relative; overflow: hidden; display: inline-block; max-width: 100%; }
+  .rs-zoombox a.lightbox, .rs-zoombox img { display: block; }
+  .rs-zoombox img { touch-action: pan-y; height: auto; max-width: 100%; }
+  .rs-zoombox.rs-zoomed img { touch-action: none; cursor: grab; }
+  .rs-pagebar { position: absolute; top: 6px; right: 6px; z-index: 5; display: flex; gap: 4px; opacity: 0.85; }
+  .rs-pagebar button { min-width: 32px; height: 30px; border: 1px solid #888; border-radius: 6px; background: #222;
+    color: #fff; font-size: 15px; cursor: pointer; }
+  .rs-pagehint { font-size: 0.8em; color: #777; margin-top: 2px; }
 </style>
 <script>
 window.addEventListener("load", () => {
-  if (typeof lightboxQuarto === "undefined" || typeof Panzoom === "undefined") return;
+  if (typeof Panzoom === "undefined") return;
+  // In the page: each output picture can zoom where it is.
+  document.querySelectorAll(".cell-output-display a.lightbox img").forEach((img) => {
+    const link = img.closest("a.lightbox");
+    const box = document.createElement("div");
+    box.className = "rs-zoombox";
+    link.parentNode.insertBefore(box, link);
+    box.appendChild(link);
+    const pz = Panzoom(img, { maxScale: 8, minScale: 1, contain: "outside", touchAction: "" });
+    const bar = document.createElement("div");
+    bar.className = "rs-pagebar";
+    bar.innerHTML = '<button data-z="in" title="Zoom in">+</button><button data-z="out" title="Zoom out">&minus;</button>' +
+      '<button data-z="fit" title="The whole picture">Fit</button><button data-z="full" title="Full screen">Full</button>';
+    box.appendChild(bar);
+    const hint = document.createElement("div");
+    hint.className = "rs-pagehint";
+    hint.textContent = "Zoom: + and -, Ctrl + mouse wheel, or two fingers. Drag to move. Click to open full screen.";
+    box.after(hint);
+    bar.addEventListener("click", (e) => {
+      const z = e.target.dataset.z;
+      if (z === "in") pz.zoomIn(); else if (z === "out") pz.zoomOut(); else if (z === "fit") pz.reset();
+      else if (z === "full") { pz.reset({ animate: false }); link.click(); }
+    });
+    box.addEventListener("wheel", (e) => { if (e.ctrlKey) pz.zoomWithWheel(e); });   // a plain wheel scrolls the page
+    img.addEventListener("panzoomchange", (e) => box.classList.toggle("rs-zoomed", e.detail.scale > 1.01));
+    let down = null;
+    img.addEventListener("pointerdown", (e) => { down = [e.clientX, e.clientY]; });
+    link.addEventListener("click", (e) => {            // a drag or a zoomed picture: no full screen
+      const moved = down && Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 5;
+      if (e.isTrusted && (moved || pz.getScale() > 1.01)) { e.preventDefault(); e.stopPropagation(); }
+    }, true);
+  });
+  if (typeof lightboxQuarto === "undefined") return;
   const g = lightboxQuarto.settings;
   g.draggable = false;          // a drag moves the picture, not to the next picture
   g.touchNavigation = false;    // the same for a finger on a phone
