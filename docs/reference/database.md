@@ -269,7 +269,7 @@ Every driving edge's lanes, and every bus-only edge's (`private_edges` with `acc
 
 ### `chains` {#chains}
 
-Driving only. One row for each chain: the edges joined at the nodes where the road only continues (for example a
+Driving only, with `options.chains` (on; `--no-chains` turns it off). One row for each chain: the edges joined at the nodes where the road only continues (for example a
 footway crossing). The edges keep every cut, because the multimodal routing needs them. An export can write one
 edge for each chain: `to_sumo(..., merge=True)`. Each driving edge is in one chain. Edge `a` joins the next edge `b`
 only where no other driving road meets the node, the two edges have the same values in the columns below and the

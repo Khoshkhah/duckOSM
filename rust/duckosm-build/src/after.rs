@@ -19,11 +19,13 @@ pub struct After {
     /// `only_listed_nodes` (the changes only at those junctions).
     pub node_costs: Option<std::path::PathBuf>,
     pub only_listed_nodes: bool,
+    /// duckOSM `options.chains`: write `driving.chains` (on by default).
+    pub chains: bool,
 }
 
 impl Default for After {
     fn default() -> Self {
-        After { validation: None, report: None, multimodal: true, boundary_cells: None, transfer_s: 60.0, transfer_costs: Vec::new(), node_costs: None, only_listed_nodes: false }
+        After { validation: None, report: None, multimodal: true, boundary_cells: None, transfer_s: 60.0, transfer_costs: Vec::new(), node_costs: None, only_listed_nodes: false, chains: true }
     }
 }
 
@@ -59,7 +61,7 @@ pub fn run(db: &std::path::Path, name: &str, modes: &[&str], a: &After) -> Resul
     if let Some((b, rs)) = &a.boundary_cells {
         crate::place::boundary_cells(db, b, rs)?;
     }
-    if modes.contains(&"driving") {
+    if a.chains && modes.contains(&"driving") {
         let n = sql::chains(db, "driving")?;
         eprintln!("  driving.chains: {n} chains");
     }

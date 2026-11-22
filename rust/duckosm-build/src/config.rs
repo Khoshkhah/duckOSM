@@ -48,7 +48,7 @@ const TOP: [&str; 16] = [
     "h3_cell",
     "elevation",
 ];
-const OPTIONS: [&str; 24] = [
+const OPTIONS: [&str; 25] = [
     "engine",
     "build_graph",
     "h3_indexing",
@@ -67,6 +67,7 @@ const OPTIONS: [&str; 24] = [
     "simplify_batches",
     "boundary_cells",
     "boundary_cell_resolutions",
+    "chains",
     "build_features",
     "levels",
     "bus_routes",
@@ -609,6 +610,7 @@ pub fn read(path: &Path, pbf_is_cut: bool, _strict: bool) -> Result<FromConfig, 
             },
             multimodal: multimodal_on,
             boundary_cells,
+            chains: options.bool("chains", true)?,
             transfer_s: multimodal.f64("transfer_s", 60.0)?,
             transfer_costs,
             node_costs: match multimodal.get("node_costs") {

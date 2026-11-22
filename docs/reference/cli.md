@@ -45,7 +45,7 @@ duckosm [OPTIONS] [PBF]
 | `--h3-resolution RES` | the H3 columns at this resolution, 0 to 15 | |
 | `--raw` | with `--boundary`: also write `raw.*` | off |
 | `--cut-pbf`, `--cut-osm` | with `--boundary`: also write the cut area as `cut.osm.pbf` or `cut.osm` | off |
-| `--no-graph`, `--no-restrictions`, `--no-speeds`, `--no-costs`, `--no-merge-segments`, `--no-functional-types`, `--no-bus-routes`, `--no-ways-tables` | turn off one step | |
+| `--no-graph`, `--no-restrictions`, `--no-speeds`, `--no-costs`, `--no-merge-segments`, `--no-functional-types`, `--no-bus-routes`, `--no-ways-tables`, `--no-chains` | turn off one step | |
 | `--no-connect-paths`, `--snap-m M` | the [connection of dangling paths](../concepts/cleanup.md), and its distance | on, 10 m |
 | `--timing` | print the time of each step | |
 

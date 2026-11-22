@@ -330,7 +330,7 @@ class DuckOSM:
             if self.con:
                 self.con.close()
         # driving.chains (the Rust step of the Rust build) once the database is closed: it opens the file itself
-        if "driving" in self.config.modes:
+        if self.config.options.chains and "driving" in self.config.modes:
             from duckosm._api import _rust
             self._note("Joining the driving edges into chains (driving.chains)")
             logger.info(f"  driving.chains: {_rust().chains(str(self.config.get_db_path()), 'driving')} chains")
