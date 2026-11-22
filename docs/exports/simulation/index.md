@@ -1,4 +1,4 @@
-# 3. Traffic simulation
+# 3. Simulation network
 
 The network in the formats of traffic simulation tools, from macro (links) to micro (lanes and cells).
 

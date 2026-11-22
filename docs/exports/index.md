@@ -8,8 +8,8 @@ The levels go from the raw OSM data to the most detailed network. Each level is 
 <a class="lv" href="#0-the-osm-file"><span class="n">0</span><b>The OSM file</b><span class="s">.osm.pbf, cut to your area</span><code>pbfcut</code></a>
 <a class="lv" href="#1-osm-data"><span class="n">1</span><b>OSM data</b><span class="s">no network</span><code>QuackOSM · GDAL</code></a>
 <a class="lv" href="#2-the-network"><span class="n">2</span><b>The network</b><span class="s">edges, edge_id, turns</span><code>GeoPackage · networkx</code></a>
-<a class="lv" href="#3-traffic-simulation"><span class="n">3</span><b>Traffic simulation</b><span class="s">links, nodes, turns</span><code>GMNS · MATSim · SUMO</code></a>
-<a class="lv" href="#4-lane-level-and-3d"><span class="n">4</span><b>Lane level and 3D</b><span class="s">each lane, its shape</span><code>Lanelet2 · OpenDRIVE</code></a>
+<a class="lv" href="#3-simulation-network"><span class="n">3</span><b>Simulation network</b><span class="s">macro, meso and micro: links, lanes, turns</span><code>GMNS · MATSim · SUMO</code></a>
+<a class="lv" href="#4-hd-map"><span class="n">4</span><b>HD map</b><span class="s">the exact shape of each lane, in 3D (experimental)</span><code>Lanelet2 · OpenDRIVE</code></a>
 </div>
 
 Your OSM fixes go into every level.
@@ -47,7 +47,7 @@ The routable network of each mode: edges with their `edge_id`, nodes, and the le
 | rustworkx | [a rustworkx graph](networkx.md): an API like networkx with a Rust engine, faster for large areas | `to_rustworkx()` |
 | petgraph (Rust) | [a petgraph graph](../reference/rust.md) | `duckosm_route::graphs::to_petgraph()` |
 
-### 3. Traffic simulation
+### 3. Simulation network
 
 The network in the formats of simulation tools, from macro (links) to micro (lanes and cells).
 
@@ -59,7 +59,7 @@ The network in the formats of simulation tools, from macro (links) to micro (lan
 | DTALite, Path4GMNS | [GMNS meso and micro](gmns-meso-micro.md) | `duckosm gmns --meso --micro` |
 | Rail planning: OpenTrack, RailSys | [railML 2.4](railml.md) | `duckosm railml` |
 
-### 4. Lane level and 3D
+### 4. HD map
 
 Each lane with its own shape and its connections, for driving simulators and autonomous driving.
 
