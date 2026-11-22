@@ -23,9 +23,14 @@
   without a change, then the rows that the tile owns. Kentucky (driving, with netconvert): 4.9 GB, before 25.9 GB.
   Without netconvert, each column but `lane.geom` is equal to the whole export; the lane lines can differ (the whole
   export also differs from run to run there). `docs/design/gmns_by_tiles.md`.
-- **The crossings of `duckosm gmns` do not stop the export on a GEOS `TopologyException`.** The lane surface is made again
-  with the points rounded to 1 mm, then 1 cm (GEOS also tries again with less precision); a lane that still fails has no
-  crossing, and the export says how many.
+- **A GEOS `TopologyException` in a buffer or an offset line does not stop the export.** As GEOS's `BufferOp`, the
+  buffer tries again with the points rounded to 12, 11, ... 0 digits of precision. This is in the shared buffer code, so
+  each user has it: `duckosm lanelet2` (it stopped on a Kentucky lane line with near-repeated points), the lane lines and
+  the crossings of `duckosm gmns`, and the walking frame. A crossing lane that still fails has no crossing, and the
+  export says how many.
+- **`duckosm opendrive` needs one copy of the file on the disk, not two.** It wrote the body to `<out>.body` and then
+  copied it after the header. Now it writes the body into `<out>` after a space for the header, then writes the header
+  and moves the body back. The bytes do not change (golden test).
 - **The turn-arrow pass of `duckosm gmns` (netconvert's OSM import) stopped with "connection-source edge ... is not
   known".** netconvert joins the OSM nodes at one position: an inner point of an edge at the place of a node split the
   edge. Île-de-France has such a pair (a service road that ends on a point of Rue des Collinettes, two OSM nodes at one

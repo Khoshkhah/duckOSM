@@ -240,17 +240,11 @@ fn clip(line: &[P], polys: &[crate::geos::Polygon]) -> Vec<Vec<P>> {
     out
 }
 
-/// The flat-capped surface of a lane (metres), as `offset::line_buffer`. Where the buffer fails (GEOS's `TopologyException`),
-/// GEOS tries again with less precision: here the points are rounded to 1 mm, then to 1 cm. None: it failed each time.
+/// The flat-capped surface of a lane (metres), as `offset::line_buffer`. None: the buffer failed (it counts in `failed`).
 fn surface(g: &[P], half_w: f64, failed: &mut usize) -> Option<Vec<crate::geos::Polygon>> {
-    for grid in [0.0, 1e-3, 1e-2] {
-        let pts: Vec<P> = if grid == 0.0 { g.to_vec() } else { g.iter().map(|p| ((p.0 / grid).round() * grid, (p.1 / grid).round() * grid)).collect() };
-        if let Ok(gp) = crate::offset::line_buffer(&pts, half_w, true) {
-            return Some(gp);
-        }
-    }
-    *failed += 1;
-    None
+    let r = crate::offset::line_buffer(g, half_w, true).ok();
+    *failed += r.is_none() as usize;
+    r
 }
 
 fn shp_env(l: &[P]) -> (f64, f64, f64, f64) {

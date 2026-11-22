@@ -66,19 +66,36 @@ fn segments(pts: &[(f64, f64)]) -> (Vec<(f64, f64, f64, f64, f64)>, f64) {
     (segs, s)
 }
 
-/// The body of the file: each line goes to a file beside `out` at once, and the extent of all points is kept for the header.
+/// The file `out`, written one line at a time. The header needs the extent of all points, so the file starts with a space
+/// as large as the longest possible header, and `finish` writes the header there and moves the body back. The disk then
+/// holds one copy of the file, not a body file and the file.
 struct Body {
     o: Out,
     path: PathBuf,
+    reserved: usize,
     ext: [f64; 4],
 }
 
+/// The header of the file for the extent `ext` (west, south, east, north).
+fn header(name: &str, crs: &str, ext: [f64; 4]) -> String {
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<OpenDRIVE>\n\t<header revMajor=\"1\" revMinor=\"7\" name={} version=\"1.00\" \
+         north=\"{:.2}\" south=\"{:.2}\" east=\"{:.2}\" west=\"{:.2}\">\n\t\t<geoReference><![CDATA[{}]]></geoReference>\n\t</header>\n",
+        quoteattr(name),
+        ext[3],
+        ext[1],
+        ext[2],
+        ext[0],
+        geo_ref(crs)
+    )
+}
+
 impl Body {
-    fn new(out: &Path) -> Result<Body> {
-        let mut name = out.file_name().unwrap_or_default().to_os_string();
-        name.push(".body");
-        let path = out.with_file_name(name);
-        Ok(Body { o: Out::create(&path, false)?, path, ext: [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY] })
+    fn new(out: &Path, name: &str, crs: &str) -> Result<Body> {
+        let reserved = header(name, crs, [-f64::MAX; 4]).len();
+        let mut o = Out::create(out, false)?;
+        o.put(&" ".repeat(reserved))?;
+        Ok(Body { o, path: out.to_path_buf(), reserved, ext: [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY] })
     }
 
     fn line(&mut self, l: &str) -> Result<()> {
@@ -117,31 +134,37 @@ impl Body {
         self.line("\t\t</lanes>")
     }
 
-    /// The file `out`: the header (the extent of all points), then the body. The body file is removed.
-    fn finish(self, out: &Path, name: &str, crs: &str) -> Result<()> {
-        let Body { o, path, ext } = self;
-        o.finish()?;
-        let r = (|| {
+    /// The header at the start of the file, the body moved back to it, and the end tag. An error removes the file.
+    fn finish(self, name: &str, crs: &str) -> Result<()> {
+        use std::io::{Read, Seek, SeekFrom, Write};
+        let Body { o, path, reserved, ext } = self;
+        let r = o.finish().and_then(|_| {
             if ext[0] == f64::INFINITY {
                 return Err("no road with a geometry of two or more points".to_string());
             }
-            let mut f = Out::create(out, false)?;
-            f.put(&format!(
-                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<OpenDRIVE>\n\t<header revMajor=\"1\" revMinor=\"7\" name={} version=\"1.00\" \
-                 north=\"{:.2}\" south=\"{:.2}\" east=\"{:.2}\" west=\"{:.2}\">\n\t\t<geoReference><![CDATA[{}]]></geoReference>\n\t</header>\n",
-                quoteattr(name),
-                ext[3],
-                ext[1],
-                ext[2],
-                ext[0],
-                geo_ref(crs)
-            ))?;
-            let mut b = std::fs::File::open(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-            f.copy_from(&mut b)?;
-            f.put("</OpenDRIVE>\n")?;
-            f.finish()
-        })();
-        let _ = std::fs::remove_file(&path);
+            let err = |e: std::io::Error| format!("{}: {e}", path.display());
+            let head = header(name, crs, ext);
+            let mut f = std::fs::OpenOptions::new().read(true).write(true).open(&path).map_err(err)?;
+            let len = f.metadata().map_err(err)?.len();
+            f.write_all(head.as_bytes()).map_err(err)?;
+            // the body moves back by `reserved - head.len()` bytes; the target is before the source, so the copy goes forward
+            let (mut from, mut to) = (reserved as u64, head.len() as u64);
+            let mut buf = vec![0u8; 1 << 20];
+            while from < len {
+                let n = buf.len().min((len - from) as usize);
+                f.seek(SeekFrom::Start(from)).map_err(err)?;
+                f.read_exact(&mut buf[..n]).map_err(err)?;
+                f.seek(SeekFrom::Start(to)).map_err(err)?;
+                f.write_all(&buf[..n]).map_err(err)?;
+                from += n as u64;
+                to += n as u64;
+            }
+            f.write_all(b"</OpenDRIVE>\n").map_err(err)?;
+            f.set_len(to + 13).map_err(err)
+        });
+        if r.is_err() {
+            let _ = std::fs::remove_file(&path);
+        }
         r
     }
 }
@@ -339,11 +362,11 @@ pub fn to_opendrive(db: &Path, out: &Path, mode: &str, crs: Option<&str>, with_j
         Some(c) => c.to_string(),
         None => data_utm_crs(&con, &table, geom)?,
     };
-    let mut b = Body::new(out)?;
+    let mut b = Body::new(out, name, &crs)?;
     let s = if with_junctions { junctions(&con, &format!("gmns_{mode}"), &crs, &mut b) } else { phase1(&con, mode, &crs, &mut b) };
     match s {
         Ok(s) => {
-            b.finish(out, name, &crs)?;
+            b.finish(name, &crs)?;
             Ok(s)
         }
         Err(x) => {
