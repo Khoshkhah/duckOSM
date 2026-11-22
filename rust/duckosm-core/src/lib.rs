@@ -4,6 +4,7 @@ pub mod analysis;
 pub mod boundary;
 pub mod building_faces;
 pub mod bus;
+pub mod chains;
 pub mod cutfile;
 #[cfg(feature = "pbf")]
 pub mod cutstream;

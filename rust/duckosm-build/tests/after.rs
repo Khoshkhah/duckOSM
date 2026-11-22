@@ -34,6 +34,23 @@ fn the_steps_after_the_tables_equal_duckosm() {
         )
         .unwrap();
     assert_eq!((n, md5.as_str()), (12130, "b2d975bbac013eaba712db659d033323"), "mm.transfers");
+    // driving.chains: each driving edge in one chain, and each chain line equal to its edge lines one after the other
+    con.execute_batch("LOAD spatial").unwrap();
+    let (edges, in_chains, distinct, joined, bad): (i64, i64, i64, i64, i64) = con
+        .query_row(
+            "WITH u AS (SELECT c.chain_id, c.source, c.target, c.geometry AS g, e.edge_id, i, e.source AS es, e.target AS et, e.geometry AS eg \
+                 FROM driving.chains c, unnest(c.edge_ids) WITH ORDINALITY AS x(edge_id, i) JOIN driving.edges e USING (edge_id)), \
+             s AS (SELECT chain_id, any_value(ST_NPoints(g)) AS n, sum(ST_NPoints(eg)) - count(*) + 1 AS m, \
+                 bool_and(i = 1 OR es = lag_t) AS linked FROM (SELECT *, lag(et) OVER (PARTITION BY chain_id ORDER BY i) AS lag_t FROM u) GROUP BY chain_id) \
+             SELECT (SELECT count(*) FROM driving.edges), (SELECT count(*) FROM u), (SELECT count(DISTINCT edge_id) FROM u), \
+                 (SELECT count(*) FROM driving.chains WHERE len(edge_ids) > 1), (SELECT count(*) FROM s WHERE n <> m OR NOT linked)",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+        )
+        .unwrap();
+    assert_eq!((in_chains, distinct), (edges, edges), "driving.chains: each driving edge in one chain");
+    assert!(joined > 0, "driving.chains: no edge is joined");
+    assert_eq!(bad, 0, "driving.chains: a chain line that is not its edges' lines");
     let indexes: i64 = con.query_row("SELECT count(*) FROM duckdb_indexes()", [], |r| r.get(0)).unwrap();
     assert_eq!(indexes, 24);
 

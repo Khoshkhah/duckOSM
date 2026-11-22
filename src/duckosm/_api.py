@@ -50,10 +50,14 @@ def _paths(d, keys):
 
 def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network", run_netconvert: bool = False,
             netconvert_bin: str = None, connections: bool = True, config=None, bus_edges: bool = False,
-            edge_attrs: dict = None, lanes: dict = None):
-    """See :func:`duckosm.sumo.to_sumo`."""
+            edge_attrs: dict = None, lanes: dict = None, merge: bool = False):
+    """See :func:`duckosm.sumo.to_sumo`. ``merge=True``: one SUMO edge for each chain of ``driving.chains`` (Rust export only)."""
     from duckosm import sumo
     if bus_edges or edge_attrs or lanes or isinstance(config, dict) or netconvert_bin or _db(con) is None:
+        if merge:
+            from duckosm.errors import DuckOSMError
+            raise DuckOSMError("merge=True works only with a database path and without bus_edges, edge_attrs, lanes, "
+                               "netconvert_bin or a config dict")
         def run(c):   # the paths as Path objects, as the Rust code gives them
             return _paths(sumo.to_sumo(c, out_dir, mode=mode, net_name=net_name, run_netconvert=run_netconvert,
                                 netconvert_bin=netconvert_bin, connections=connections, config=config,
@@ -72,7 +76,7 @@ def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network", run_
         except RuntimeError:
             pass                      # not found: the Rust code gives the error
     r = json.loads(_rust().to_sumo(_db(con), str(out_dir), mode, net_name, connections,
-                                   None if config is None else str(config), run_netconvert))
+                                   None if config is None else str(config), run_netconvert, merge))
     return _paths(r, ("nod", "edg", "con", "add", "netccfg", "net", "tll"))
 
 

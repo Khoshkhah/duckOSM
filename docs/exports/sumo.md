@@ -15,6 +15,7 @@ duckosm sumo monaco.duckdb                       # -> sumo/monaco.{nod,edg,con,a
 netconvert -c sumo/monaco.netccfg                # -> sumo/monaco.net.xml
 duckosm sumo monaco.duckdb --netconvert          # duckOSM runs netconvert: also monaco.net.xml and monaco.tll.xml
 duckosm sumo monaco.duckdb --netconvert --join-junctions   # netconvert joins the junctions that are near each other
+duckosm sumo monaco.duckdb --netconvert --merge  # one SUMO edge for each chain of driving.chains
 ```
 
 The files have all that netconvert takes from an OSM file for these items. Thus you do not give netconvert the OSM file,
@@ -57,11 +58,31 @@ change the node. On Monaco: 18 traffic-light junctions, 12 stop-sign junctions, 
 | `tllogic-files` | only after `--netconvert`: the signal programs (see below) |
 | `output-file` | yes |
 | `proj.utm` | yes: `true` gives metres in the UTM zone of the data |
-| `geometry.remove` = `false` | no: with `true`, netconvert joins edges, and an edge id is no longer one `edge_id` |
+| `geometry.remove` = `false` | no: with `true`, netconvert joins edges, and an edge id is no longer one `edge_id`. Use `--merge` (below) |
 | `junctions.join` = `false` | use `--join-junctions` (`config={"junctions.join": "true"}`): duckOSM then keeps the turns through the joined junction |
 | `numerical-ids` = `false` | no: with `true`, netconvert gives new ids |
 | `no-turnarounds.except-deadend` | yes |
 | `tls.default-type` = `actuated` | yes: OSM has no signal timings, so the default program follows the traffic (`static` gives fixed times) |
+
+### Fewer edges: `--merge`
+
+duckOSM cuts a road at each node that another network uses, for example a footway crossing, because the multimodal
+routing needs the cut. SUMO does not need these cuts. `--merge` (`to_sumo(..., merge=True)`) writes one SUMO edge for
+each chain of [`driving.chains`](../reference/database.md#chains): the edges joined where the road only continues.
+
+- The id of a joined edge is its `chain_id`. Its `<param key="edge_ids">` lists the duckOSM edges, and
+  `duckosm.sim.edge_map` gives one row for each of them. An edge that is not joined keeps its `edge_id`.
+- The connections, the traffic lights, the stop signs and the bus stops stay. A chain does not go through a traffic
+  light or a stop sign, or through a turn that has a rule.
+- Driving only, and not with `--join-junctions`. In Python: only with a database path, and without `bus_edges`,
+  `edge_attrs`, `lanes` and a `config` dict.
+
+On Monaco: 2,840 edges become 1,775 edges and 2,995 junctions become 1,592. The same 2,614 edges are in the
+strongly connected part of the network, and all 18 traffic lights stay.
+
+A joined edge can be long and curved, for example a part of a small roundabout with two lanes. netconvert's normal
+junction shapes can then cover the island of the roundabout. netconvert's own join (`geometry.remove=true`) gives the
+same shapes. `config={"junctions.minimal-shape": "true"}` gives small junction shapes and a clean roundabout.
 
 ### The signal programs and the bus stops
 

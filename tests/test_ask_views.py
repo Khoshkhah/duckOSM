@@ -39,6 +39,7 @@ ASKS = [
     # these tables are empty on Monaco, so the result is made from edge_graph: the SQL of the kind must still run and draw
     ("path", ["from_edge", "to_edge"], "SELECT from_edge, to_edge, [from_edge] AS via_edges, 'no_u_turn' AS restriction_type, 'car' AS applies_to, NULL AS condition FROM driving.edge_graph LIMIT 3", True),
     ("permission", ["from_edge", "to_edge"], "SELECT from_edge, to_edge, true AS allowed, 'bus' AS vehicles, 'taxi' AS except_vehicles, NULL AS condition FROM driving.edge_graph LIMIT 3", True),
+    ("chain", "chain_id", "SELECT chain_id FROM driving.chains WHERE len(edge_ids) > 1 LIMIT 5", True),
     ("merged", "new_edge_id", "SELECT edge_id AS new_edge_id FROM driving.edges LIMIT 3", None),     # driving.edge_id_map is empty on Monaco: the SQL must run, no rows are asked for
     *[(f"feature_{t}", "osm_id", f"SELECT osm_id FROM features.{t} LIMIT 5", False) for t in
       ("land", "paved", "place_labels", "pois", "public_transport", "sites", "streets", "water_lines", "water_polygons")],
