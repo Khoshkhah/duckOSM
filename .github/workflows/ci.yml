@@ -69,7 +69,7 @@ jobs:
       # torch for CPU first (the default wheel brings CUDA, about 2.5 GB); then the extras of the install cells ([sim]
       # brings netconvert, [ml] torch_geometric); osmnx: notebook 9 (to_osmnx); momepy, mapclassify: notebook 9 (city blocks)
       - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
-      - run: pip install -e ".[widget,viz,graph,sim,gis,planning,hdmap,analysis,ml]" osmnx momepy mapclassify folium lonboard ortools pandana movingpandas lanelet2 pytest nbmake "playwright==1.55.0"
+      - run: pip install -e ".[widget,viz,graph,sim,gis,planning,hdmap,analysis,ml]" osmnx momepy mapclassify folium lonboard ortools pandana movingpandas traci lanelet2 pytest nbmake "playwright==1.55.0"
       # show="picture" takes a PNG of the live map in headless Chromium
       - run: python -m playwright install --with-deps chromium
       # the notebooks get Monaco with duckosm get. The runners often cannot reach Geofabrik ("Network is unreachable" on
