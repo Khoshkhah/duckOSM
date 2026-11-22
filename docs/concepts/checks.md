@@ -4,7 +4,7 @@ Each output is compared with a reference: another tool, a schema or a specificat
 
 | Level | Output | Reference | Check |
 |---|---|---|---|
-| 0 | [The OSM file](../exports/osm-file.md) | a build with `--fixes` of the original file | a build of the cut file gives the same tables (Monaco) |
+| 0 | [OSM file](../exports/osm-file.md) | a build with `--fixes` of the original file | a build of the cut file gives the same tables (Monaco) |
 | 1 | [QuackOSM table](quackosm.md) | QuackOSM 0.20.0 | each row equals QuackOSM's |
 | 1 | [GDAL's OSM layers](gdal.md) | GDAL's OSM driver | each row equals GDAL's (Monaco, Kentucky) |
 | 1 | [Base-map layers](../exports/base-map.md) | the golden file of Monaco | each row of each layer is equal |

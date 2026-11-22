@@ -4,7 +4,7 @@ A build needs the map data (a `.osm.pbf` file) and, for a city or a district, it
 [Your first network](../first_network.md) shows how to find the OSM id of an area and download its region file.
 
 `duckosm get` does it all in one command: it finds the boundary, downloads the smallest Geofabrik extract that holds it,
-and cuts it ([The OSM file](../exports/osm-file.md)).
+and cuts it ([OSM file](../exports/osm-file.md)).
 
 ```bash
 duckosm get "Monaco"  # -> monaco.osm.pbf and monaco.geojson
@@ -55,7 +55,7 @@ duckosm build --pbf sodermalm.osm.pbf -m driving
 ```
 
 `duckosm build --pbf sweden-latest.osm.pbf --boundary sodermalm.geojson` does the same cut by itself, before it builds.
-`duckosm cut --fixes osm_fixes.yaml` writes your OSM fixes into the cut file ([The OSM file](../exports/osm-file.md)).
+`duckosm cut --fixes osm_fixes.yaml` writes your OSM fixes into the cut file ([OSM file](../exports/osm-file.md)).
 
 | Command | Does | Needs |
 |---|---|---|
