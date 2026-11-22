@@ -28,7 +28,14 @@
 
 ## What duckOSM makes
 
-All outputs come from one `.osm.pbf` file.
+All outputs come from one `.osm.pbf` file, in five levels. Each level keeps the `edge_id` of the routing network.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/images/levels-dark.svg">
+    <img src="https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/images/levels-light.svg" alt="The five levels of duckOSM's outputs: 0 the OSM file (pbfcut), 1 OSM data with no network (QuackOSM, GDAL), 2 the routing network with edges, edge_id and turns (GeoPackage, networkx), 3 simulation network, macro, meso and micro (GMNS, MATSim, SUMO), 4 HD map, each lane's shape in 3D, experimental (Lanelet2, OpenDRIVE)" width="900">
+  </picture>
+</p>
 
 | Output | Command | Format |
 |---|---|---|
