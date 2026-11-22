@@ -225,7 +225,10 @@ def local_images(s):
 
 
 if __name__ == "__main__":
+    import glob
     import shutil
     shutil.copytree(os.path.join(NOTEBOOKS, "images"), os.path.join(HERE, "images"), dirs_exist_ok=True)
+    for page in glob.glob(os.path.join(NOTEBOOKS, "*.html")):     # web pages that a chapter shows in a frame (lonboard)
+        shutil.copy(page, HERE)
     for slug in CHAPTERS:
         print(slug, chapter(slug), "cells")

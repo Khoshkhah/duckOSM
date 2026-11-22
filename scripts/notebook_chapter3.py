@@ -15,8 +15,8 @@ ch = Chapter(3, "03_maps", "Draw maps",
              "The live roadstyle map, the dashboard and the static picture of a network",
              learn="the live map and the static picture, the colors of the modes, how a notebook shows a map (`show=`), the map of one "
                    "mode, the base map (`layers=`), the themes, color by a column, highlight edges, the dashboard, "
-                   "a map as an HTML file, a picture for a paper",
-             time="about 2 minutes", extras="viz",
+                   "a map as an HTML file, web maps with folium and lonboard, a picture for a paper",
+             time="about 2 minutes", extras="viz", more_install="\n    %pip install -q folium mapclassify lonboard",
              next_=("04_join_by_edge_id", "4. Join your data by edge_id", "your own data on the edges, and on the map"))
 
 ch.md("""## Two kinds of map
@@ -206,6 +206,54 @@ ch.md("""The two files are in the folder `out`.
 
 > **Tip:** `net.save_map()` gives the same file as `net.map(show="link", path=...)`, but it shows no link. Use it
 > in a script.""")
+
+ch.md("""## Web maps with folium and lonboard
+
+The edges of duckOSM are a GeoDataFrame, so the web-map tools of Python draw them directly:
+
+| Tool | What it is good for | How it gets the edges |
+|---|---|---|
+| [folium](https://python-visualization.github.io/folium/) | a quick interactive map on a light base map, with a pop-up for each road | `edges.explore()` of GeoPandas uses folium |
+| [lonboard](https://developmentseed.org/lonboard/) | large data: it draws on the graphics card of the computer, so many thousands of lines stay fast | `PathLayer.from_geopandas(edges)` |
+
+Both maps use the same simple light gray base map, Esri World Gray Canvas, so the colored roads stand out. Both maps have a full-screen button. Click a road on the folium map to see its columns.
+
+### folium
+
+`explore` keeps all the columns of the GeoDataFrame in the pop-ups, so the cell keeps only five of them. This makes
+the map smaller. `Fullscreen` adds the full-screen button.""")
+ch.code("""import folium.plugins
+
+edges = net.driving.edges()[["edge_id", "name", "highway", "maxspeed_kmh", "geometry"]]    # five columns
+fmap = edges.explore(column="maxspeed_kmh", cmap="viridis", tiles="Esri.WorldGrayCanvas",
+                     style_kwds={"weight": 3}, legend_kwds={"caption": "speed limit, km/h"})   # color by the speed limit
+folium.plugins.Fullscreen().add_to(fmap)                                        # the full-screen button
+fmap""")
+ch.md("""The roads have the color of their speed limit. Zoom in, and click a road to see its name, its class and its
+speed limit.
+
+### lonboard
+
+This map draws all 11,938 walking edges, colored by their length. lonboard gives each line its color as an array, so
+the cell makes the colors with a matplotlib color ramp. lonboard takes its base map as a MapLibre style at a web
+address: the book has a small style file for the Esri map. The cell saves the map as a web page and shows the page in a
+frame. In Colab, show the map with `lmap` alone in a cell.""")
+ch.code("""import matplotlib
+from IPython.display import IFrame
+from lonboard import Map, PathLayer
+from lonboard.basemap import MaplibreBasemap
+from lonboard.colormap import apply_continuous_cmap
+
+walk = net.walking.edges()[["edge_id", "length_m", "geometry"]]                 # all the walking edges
+share = (walk.length_m.clip(0, 100) / 100).to_numpy()                           # 0 to 1: up to 100 m long
+layer = PathLayer.from_geopandas(walk, get_width=2, width_units="pixels",
+                                 get_color=apply_continuous_cmap(share, matplotlib.colormaps["viridis"]))
+esri = "https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/docs/notebooks/images/esri-light-gray.json"    # the base map
+lmap = Map(layer, basemap=MaplibreBasemap(style=esri))                         # the lonboard map
+lmap.to_html("lonboard_walking.html")                                           # saved as a web page
+IFrame("lonboard_walking.html", width="100%", height=520)                       # the page in a frame""")
+ch.md("""The short edges are dark purple and the edges of 100 m or more are yellow. Most walking edges are short: the
+footways and the steps of Monaco are cut at each junction.""")
 
 ch.md("""## A picture for a paper: `net.plot(ax=...)`
 
