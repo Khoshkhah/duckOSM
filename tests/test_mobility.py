@@ -65,6 +65,17 @@ def test_match_on_20_noisy_traces(net):
         assert np.mean([len(f & set(r)) / len(f) for f in found]) > 0.98            # precision
 
 
+def test_match_with_gps_dtw(net):
+    """method="dtw" (GPS-DTW): the same routes from the same noisy traces, and no match without the time."""
+    for a, b in ((A, B), (B, A)):
+        r = net.driving.route(a, b)["edges"]
+        found = [set(mob.match(net.driving, _trace(net, r, seed=s), method="dtw").edges.edge_id) for s in range(5)]
+        assert np.mean([len(f & set(r)) / len(r) for f in found]) > 0.95            # recall
+        assert np.mean([len(f & set(r)) / len(f) for f in found]) > 0.95            # precision
+    with pytest.raises(duckosm.errors.DuckOSMError, match="time"):
+        mob.match(net.driving, _trace(net, r).drop(columns="time"), method="dtw")
+
+
 def test_two_traces_and_aggregate(net):
     r1, r2 = net.driving.route(A, B), net.driving.route(B, A)
     gps = pd.concat([_trace(net, r1["edges"]).assign(trace_id="a"), _trace(net, r2["edges"], seed=1).assign(trace_id="b")])

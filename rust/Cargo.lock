@@ -907,6 +907,7 @@ version = "0.8.0"
 dependencies = [
  "flate2",
  "geo",
+ "gps-dtw",
  "i_overlay 4.5.2",
  "libc",
  "libm",
@@ -1036,6 +1037,7 @@ dependencies = [
  "clap",
  "duckdb",
  "duckosm-build",
+ "duckosm-core",
  "duckosm-duckdb",
  "serde_json",
 ]
@@ -1368,6 +1370,14 @@ dependencies = [
  "libc",
  "r-efi 6.0.0",
  "rand_core",
+]
+
+[[package]]
+name = "gps-dtw"
+version = "0.1.0"
+source = "git+https://github.com/Khoshkhah/gps-dtw.git?rev=16d9554367cf2c1127e764f92a809d305ae20888#16d9554367cf2c1127e764f92a809d305ae20888"
+dependencies = [
+ "rstar",
 ]
 
 [[package]]

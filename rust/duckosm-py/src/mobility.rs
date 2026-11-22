@@ -15,6 +15,29 @@ fn roads(db: &std::path::Path, mode: &str) -> Result<Vec<Road>, String> {
     Ok(edges.into_iter().map(|e| Road { edge_id: e.edge_id, osm_id: e.osm_id, source: e.source, target: e.target, length_m: e.length_m, line: e.line }).collect())
 }
 
+/// The legal turns of the mode (`edge_graph`) as edge indexes of `r` (the edges sorted by `edge_id`); None without
+/// the table.
+fn turns(db: &std::path::Path, mode: &str, r: &[Road]) -> Result<Option<Vec<(usize, usize)>>, String> {
+    let con = duckosm_route::route::open(db)?;
+    let n: i64 = con
+        .query_row("SELECT count(*) FROM duckdb_tables() WHERE schema_name = ? AND table_name = 'edge_graph'", [mode], |x| x.get(0))
+        .map_err(|e| e.to_string())?;
+    if n == 0 {
+        return Ok(None);
+    }
+    let index: std::collections::HashMap<i64, usize> = r.iter().enumerate().map(|(i, e)| (e.edge_id, i)).collect();
+    let mut st = con.prepare(&format!("SELECT DISTINCT from_edge, to_edge FROM {mode}.edge_graph")).map_err(|e| e.to_string())?;
+    let rows = st.query_map([], |x| Ok((x.get::<_, i64>(0)?, x.get::<_, i64>(1)?))).map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    for row in rows {
+        let (a, b) = row.map_err(|e| e.to_string())?;
+        if let (Some(&a), Some(&b)) = (index.get(&a), index.get(&b)) {
+            out.push((a, b));
+        }
+    }
+    Ok(Some(out))
+}
+
 /// The points on the edges, as columns: edge ids (-1: none), fractions, distances, lon, lat.
 type Snapped = (Vec<i64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>);
 
@@ -60,7 +83,7 @@ fn mobility_snap(py: Python<'_>, db: PathBuf, mode: String, xs: Vec<f64>, ys: Ve
 /// Map matching of traces. `trace`: the trace number of each point (the points of a trace in time order, the traces one
 /// after the other). Returns (the columns of the points, the route rows: trace number and edge id).
 #[pyfunction]
-#[pyo3(signature = (db, mode, trace, xs, ys, radius_m = 50.0, sigma_m = 5.0, beta_m = 10.0, max_route_factor = 4.0, uturn_m = 50.0))]
+#[pyo3(signature = (db, mode, trace, xs, ys, radius_m = 50.0, sigma_m = 5.0, beta_m = 10.0, max_route_factor = 4.0, uturn_m = 50.0, method = "hmm".to_string(), ts = None))]
 #[allow(clippy::too_many_arguments)]
 fn mobility_match(
     py: Python<'_>,
@@ -74,9 +97,19 @@ fn mobility_match(
     beta_m: f64,
     max_route_factor: f64,
     uturn_m: f64,
+    method: String,
+    ts: Option<Vec<i64>>,
 ) -> PyResult<(Snapped, (Vec<i64>, Vec<i64>))> {
     if xs.len() != ys.len() || xs.len() != trace.len() {
         return Err(PyValueError::new_err("trace, x and y must have the same length"));
+    }
+    let dtw = match method.as_str() {
+        "hmm" => false,
+        "dtw" => true,
+        m => return Err(PyValueError::new_err(format!("method {m:?}: give \"hmm\" or \"dtw\""))),
+    };
+    if dtw && ts.as_ref().is_none_or(|t| t.len() != xs.len()) {
+        return Err(PyValueError::new_err("method \"dtw\" needs the time of each point (whole seconds)"));
     }
     if radius_m <= 0.0 || sigma_m <= 0.0 || beta_m <= 0.0 {
         return Err(PyValueError::new_err("radius_m, sigma_m and beta_m must be larger than 0"));
@@ -85,13 +118,18 @@ fn mobility_match(
     py.detach(|| {
         let r = roads(&db, &mode)?;
         let net = Net::new(&r);
+        let dtw_net = if dtw { Some(mm::dtw_network(&net, turns(&db, &mode, &r)?)) } else { None };
         let mut points = Vec::with_capacity(xs.len());
         let mut route = (Vec::new(), Vec::new());
         let mut start = 0;
         while start < trace.len() {
             let end = (start..trace.len()).find(|&i| trace[i] != trace[start]).unwrap_or(trace.len());
             let pts: Vec<(f64, f64)> = (start..end).map(|i| (xs[i], ys[i])).collect();
-            let m = mm::match_trace(&net, &pts, &o);
+            let m = match (&dtw_net, &ts) {
+                (Some(d), Some(t)) => mm::match_trace_dtw(&net, d, &pts, &t[start..end], radius_m, &mm::DtwOptions::default())
+                    .map_err(|e| format!("trace {}: {e}", trace[start]))?,
+                _ => mm::match_trace(&net, &pts, &o),
+            };
             points.extend(m.points);
             for e in m.route {
                 route.0.push(trace[start]);

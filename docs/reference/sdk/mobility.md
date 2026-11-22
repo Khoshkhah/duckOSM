@@ -7,7 +7,7 @@ in Rust (`rust/duckosm-core/src/matching.rs`). Install: `pip install "duckosm[an
 | Call | Returns | Their tool |
 |---|---|---|
 | `snap(view, points, radius_m=None)` | The rows of `points` with `edge_id`, `fraction` (0 at the start of the edge, 1 at its end), `distance_m`, `snap_x`, `snap_y`: the nearest edge of each point, one point at a time | own code |
-| `match(view, traces, trace="trace_id", time="time", radius_m=50, sigma_m=5, beta_m=10)` | `Match(points, edges)`: `points` are the rows with the columns of `snap`; `edges` is the route of each trace (`trace_id`, `seq`, `edge_id`), with the edges between the points | leuvenmapmatching, mappymatch |
+| `match(view, traces, trace="trace_id", time="time", radius_m=50, sigma_m=5, beta_m=10, method="hmm")` | `Match(points, edges)`: `points` are the rows with the columns of `snap`; `edges` is the route of each trace (`trace_id`, `seq`, `edge_id`), with the edges between the points | leuvenmapmatching, mappymatch, gps-dtw |
 | `join(view, data, on="edge_id", how="inner")` | A GeoDataFrame of the edges with the columns of `data` (a DataFrame with `edge_id`, or a Series keyed by `edge_id`) | `merge` |
 | `aggregate(view, matched, time="hour", value=None)` | `edge_id`, `time` (the start of the bin), `count`, and `<value>_mean` | movingpandas, own code |
 | `edge_id_map(old_net, new_net, tol_m=2)` | `old_edge_id`, `new_edge_id`, `share`: the old edges on the edges of a new build | none |
@@ -42,6 +42,27 @@ Monaco, driving, two routes (75 and 64 edges), a GPS point every 15 m, 20 traces
 
 The other edges come from a point near a junction at the start or the end (the edge before or after), and from short
 roads next to the route.
+
+### GPS-DTW: `method="dtw"`
+
+`method="dtw"` matches with [GPS-DTW](https://khoshkhah.github.io/gps-dtw/) (the Rust crate gps-dtw, pinned in
+`rust/duckosm-core/Cargo.toml`). It cleans the trace, interpolates it each second, and aligns it with points along
+the roads by dynamic time warping. The turns come from `edge_graph`, so the turn restrictions apply. It needs the
+`time` column: a time, or numbers of seconds. `sigma_m`, `beta_m` and `uturn_m` do not apply. The edge of each point
+is the nearest edge of the route within `radius_m`.
+
+Monaco, driving, the 600 traces of gps-dtw (50 shortest-path routes, GPS each 1, 5, 15 or 30 s, three noise levels),
+one call for each method and interval:
+
+| GPS interval | Route edges found, HMM | Route edges found, DTW | Matched edges on the route, HMM | Matched edges on the route, DTW | Time, HMM | Time, DTW |
+|---|--:|--:|--:|--:|--:|--:|
+| 1 s | 96.2 % | 94.5 % | 65.6 % | **97.4 %** | 2.4 s | **0.9 s** |
+| 5 s | 96.2 % | 95.5 % | 90.1 % | **95.6 %** | 1.1 s | 1.1 s |
+| 15 s | **94.9 %** | 92.2 % | 93.8 % | 93.9 % | **1.3 s** | 2.3 s |
+| 30 s | **93.9 %** | 89.8 % | **95.1 %** | 91.2 % | **1.9 s** | 4.9 s |
+
+Use `method="dtw"` for dense GPS (1 to 5 s), and the HMM (the default) for sparse GPS. The routes of this test are
+shortest paths, which favour the HMM. A test on real trips can change the default.
 
 ## The edge id map
 
