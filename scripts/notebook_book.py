@@ -53,12 +53,14 @@ def install_cell(extras, more="", book_network=False):
     """The first code cell: in Colab (no duckosm), the newest nightly wheel with the extras of the chapter."""
     return f'''# Install duckOSM when it is not installed (for example in Colab). It takes approximately 1 minute.
 # Until duckOSM 0.9.0 is on PyPI, the SDK of these notebooks is in the nightly wheel of main (the GitHub pre-release "nightly").
+# roadstyle (the maps) also comes from its nightly wheel, so the newest roadstyle parts work with no roadstyle release.
 import importlib.util, json, os, urllib.request
-def nightly_wheel():       # the address of the newest nightly wheel
-    release = json.load(urllib.request.urlopen("https://api.github.com/repos/{REPO}/releases/tags/nightly"))
-    return next(a["browser_download_url"] for a in release["assets"] if a["name"].endswith(".whl"))
+def nightly_wheel(repo="{REPO}", name=".whl"):        # the address of the newest nightly wheel of a repository
+    release = json.load(urllib.request.urlopen(f"https://api.github.com/repos/{{repo}}/releases/tags/nightly"))
+    return next(a["browser_download_url"] for a in release["assets"] if name in a["name"] and a["name"].endswith(".whl"))
 if importlib.util.find_spec("duckosm") is None:      # not installed: install it with the extras of this notebook
     %pip install -q "duckosm[{extras}] @ {{nightly_wheel()}}"{more}
+    %pip install -q --force-reinstall --no-deps "roadstyle @ {{nightly_wheel('Khoshkhah/roadstyle', 'manylinux')}}"
 import duckosm             # the SDK
 if not hasattr(duckosm, "network"):                    # an old duckOSM (0.8.0 or older), without the SDK
     %pip install -q --force-reinstall --no-deps "duckosm @ {{nightly_wheel()}}"
