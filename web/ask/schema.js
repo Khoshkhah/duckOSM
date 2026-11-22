@@ -17,6 +17,7 @@ export const TABLE_NOTES = {
   turn_permission: "The turn rules that the graph cannot hold: a rule for some vehicles or with a condition.",
   lane_profile: "Each lane of each edge, from left to right, with its use, width and arrow.",
   edge_id_map: "For each merged edge, the edges that it was made from.",
+  chains: "The driving edges joined where the road only continues: one row for each chain, with its edges in order and its line. The SUMO export with merge writes one edge for each chain.",
   ways: "The OSM ways that the network kept, with all their tags and nodes.",
   way_nodes: "The nodes of each way, in order.",
   virtual_nodes: "The virtual nodes (node_id below 0) that split self-loops and parallel roads.",
