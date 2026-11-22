@@ -216,28 +216,32 @@ The edges of duckOSM are a GeoDataFrame, so the web-map tools of Python draw the
 | [folium](https://python-visualization.github.io/folium/) | a quick interactive map on a light base map, with a pop-up for each road | `edges.explore()` of GeoPandas uses folium |
 | [lonboard](https://developmentseed.org/lonboard/) | large data: it draws on the graphics card of the computer, so many thousands of lines stay fast | `PathLayer.from_geopandas(edges)` |
 
-Both maps use the same simple light gray base map, Esri World Gray Canvas, so the colored roads stand out. Both maps have a full-screen button. Click a road on the folium map to see its columns.
+Both maps use the same simple light gray base map, Esri World Gray Canvas, so the colored roads stand out. Both maps have a full-screen button, show the columns of a road when the mouse is over it, and save as a web page
+that any browser opens.
 
 ### folium
 
-`explore` keeps all the columns of the GeoDataFrame in the pop-ups, so the cell keeps only five of them. This makes
-the map smaller. `Fullscreen` adds the full-screen button.""")
+`explore` puts the columns of the GeoDataFrame into a tooltip (when the mouse is over a road) and, with `popup=True`,
+into a pop-up (when you click a road). The cell keeps only five columns, so the map stays small. `Fullscreen` adds the
+full-screen button, and `save` writes the map as a web page.""")
 ch.code("""import folium.plugins
 
 edges = net.driving.edges()[["edge_id", "name", "highway", "maxspeed_kmh", "geometry"]]    # five columns
 fmap = edges.explore(column="maxspeed_kmh", cmap="viridis", tiles="Esri.WorldGrayCanvas",
-                     style_kwds={"weight": 3}, legend_kwds={"caption": "speed limit, km/h"})   # color by the speed limit
+                     style_kwds={"weight": 3}, legend_kwds={"caption": "speed limit, km/h"},
+                     popup=True)                                                # color by the speed limit
 folium.plugins.Fullscreen().add_to(fmap)                                        # the full-screen button
+fmap.save("out/folium_driving.html")                                           # the map as a web page
 fmap""")
-ch.md("""The roads have the color of their speed limit. Zoom in, and click a road to see its name, its class and its
-speed limit.
+ch.md("""The roads have the color of their speed limit. Zoom in, and move the mouse over a road to see its name, its
+class and its speed limit. Click it to keep them in a pop-up. The file `out/folium_driving.html` is the same map.
 
 ### lonboard
 
 This map draws all 11,938 walking edges, colored by their length. lonboard gives each line its color as an array, so
 the cell makes the colors with a matplotlib color ramp. lonboard takes its base map as a MapLibre style at a web
-address: the book has a small style file for the Esri map. The cell saves the map as a web page and shows the page in a
-frame. In Colab, show the map with `lmap` alone in a cell.""")
+address: the book has a small style file for the Esri map. The cell saves the map as a web page with `to_html` and shows the page
+in a frame. In Colab, show the map with `lmap` alone in a cell.""")
 ch.code("""import matplotlib
 from IPython.display import IFrame
 from lonboard import Map, PathLayer
