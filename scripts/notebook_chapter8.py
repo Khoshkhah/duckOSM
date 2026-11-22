@@ -322,6 +322,11 @@ tools that planners use:
 | [OR-Tools](https://developers.google.com/optimization) | plans the order of visits, for example a delivery round | the travel time matrix (`matrix`) |
 | [pandana](https://udst.github.io/pandana/) | counts places near every node of a network, for the whole city in one call | the walking nodes and edges |
 
+For trips by public transport, use [r5py](https://r5py.readthedocs.io) in place of duckOSM. r5py reads the
+timetables of the buses and trains (GTFS files) and an OSM file, and it gives travel time matrices that include the
+waiting time at each stop. duckOSM routes on the OSM network only: walking, cycling, driving, and the bus routes
+without timetables.
+
 ### A delivery round with OR-Tools
 
 A van starts at a depot in Fontvieille, visits 10 pharmacies of Monaco and comes back. In which order is the round
