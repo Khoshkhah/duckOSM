@@ -29,8 +29,6 @@ jobs:
       # The look of rustgis.app: Zensical builds the site from mkdocs.yml. The ci job "docs" still checks the links with
       # mkdocs --strict. Zensical does not read exclude_docs, so the developer documents are removed first.
       - run: pip install "zensical==0.0.67" "nbconvert>=7,<8"
-      # Zensical has no notebook plugin: the notebooks become Markdown pages, with their saved outputs
-      - run: python scripts/notebook_pages.py
       - run: rm -rf docs/design docs/rust docs/proposals docs/development.md docs/lane_map.md
       - run: zensical build
       # the notebook book (book/, Quarto): its chapters come from docs/notebooks with their saved outputs; it goes to

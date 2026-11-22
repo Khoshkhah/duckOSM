@@ -20,7 +20,7 @@ lanes, junctions = duckosm.hdmap.surfaces("out/gmns.duckdb")    # the road surfa
 ```
 
 pip extra: `duckosm[hdmap]` (commonroad-io). `to_commonroad` works with commonroad-io 2022.1 to 2026.1: commonroad-io
-2024 and later need protobuf 3.20, so pip takes an older version when another package needs a newer protobuf. Notebook: [14. HD maps](../../notebooks/14_hdmap.md). Guide:
+2024 and later need protobuf 3.20, so pip takes an older version when another package needs a newer protobuf. Notebook: [14. HD maps](https://khoshkhah.github.io/duckOSM/book/14_hdmap.html). Guide:
 [duckOSM for automated driving users](../../compare/for-hdmap-users.md).
 
 Pages: [OpenDRIVE](../../exports/opendrive.md), [Lanelet2](../../exports/lanelet2.md),

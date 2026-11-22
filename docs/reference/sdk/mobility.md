@@ -86,4 +86,4 @@ m = duckosm.mobility.edge_id_map(duckosm.open("old.duckdb").driving, net.driving
 counts = old_counts.merge(m, left_on="edge_id", right_on="old_edge_id")     # your data on the new edges
 ```
 
-Notebook: [11. Mobility data](../../notebooks/11_mobility.md). Page: [Stable edge ids](../../concepts/edge-ids.md).
+Notebook: [11. Mobility data](https://khoshkhah.github.io/duckOSM/book/11_mobility.html). Page: [Stable edge ids](../../concepts/edge-ids.md).
