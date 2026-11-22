@@ -59,6 +59,10 @@ pub fn run(db: &std::path::Path, name: &str, modes: &[&str], a: &After) -> Resul
     if let Some((b, rs)) = &a.boundary_cells {
         crate::place::boundary_cells(db, b, rs)?;
     }
+    if modes.contains(&"driving") {
+        let n = sql::chains(db, "driving")?;
+        eprintln!("  driving.chains: {n} chains");
+    }
     // the comments come before the indexes: DuckDB cannot alter a table that has an index
     sql::comments(db, &comments(modes))?;
     sql::create_indexes(db, modes)?;

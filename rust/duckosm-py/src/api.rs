@@ -26,10 +26,12 @@ fn cli(py: Python<'_>, args: Vec<String>) -> i32 {
 }
 
 #[pyfunction]
-#[pyo3(signature = (db, out_dir, mode, net_name, connections, config, netconvert))]
-fn to_sumo(py: Python<'_>, db: PathBuf, out_dir: PathBuf, mode: String, net_name: String, connections: bool, config: Option<PathBuf>, netconvert: bool) -> PyResult<String> {
+#[pyo3(signature = (db, out_dir, mode, net_name, connections, config, netconvert, merge = false))]
+#[allow(clippy::too_many_arguments)]
+fn to_sumo(py: Python<'_>, db: PathBuf, out_dir: PathBuf, mode: String, net_name: String, connections: bool, config: Option<PathBuf>, netconvert: bool, merge: bool) -> PyResult<String> {
+    let o = duckosm_export::sumo::SumoOptions { merge, ..Default::default() };
     let s = py
-        .detach(|| duckosm_export::sumo::to_sumo(&db, &out_dir, &mode, &net_name, connections, config.as_deref(), netconvert))
+        .detach(|| duckosm_export::sumo::to_sumo_with(&db, &out_dir, &mode, &net_name, connections, config.as_deref(), netconvert, &o))
         .map_err(err)?;
     let mut v = json!({"nod": s.nod, "edg": s.edg, "n_nodes": s.n_nodes, "n_edges": s.n_edges, "n_connections": s.n_connections,
                        "n_traffic_lights": s.n_traffic_lights, "n_stop_signs": s.n_stop_signs, "n_bus_stops": s.n_bus_stops});

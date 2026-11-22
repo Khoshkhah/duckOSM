@@ -31,6 +31,13 @@ def test_edge_map_names_of_netconvert(tmp_path):
     assert list(zip(m.id, m.edge_id)) == [("12#1", 12), ("34+56", 34), ("34+56", 56), ("78", 78)]
 
 
+def test_edge_map_of_a_merged_edge(tmp_path):
+    (tmp_path / "x.net.xml").write_text(
+        '<net><edge id="900"><lane id="900_0"/><param key="edge_ids" value="1 2 3"/></edge><edge id="78"/></net>')
+    m = duckosm.sim.edge_map(tmp_path / "x.net.xml")
+    assert list(zip(m.id, m.edge_id)) == [("900", 1), ("900", 2), ("900", 3), ("78", 78)]
+
+
 def test_sumo_net_and_edge_map(net, tmp_path):
     sumolib = pytest.importorskip("sumolib")
     if not shutil.which("netconvert"):

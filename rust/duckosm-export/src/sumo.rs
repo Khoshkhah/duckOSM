@@ -23,18 +23,7 @@ const DEFAULT_NETCFG: [(&str, &str); 6] = [
     ("tls.default-type", "actuated"),
 ];
 
-/// The traffic lights and stop signs of OSM on the network nodes, as `NODE_TYPES_SQL` of sumo.py (the same text): node id, type
-/// (3 traffic light, 2 all-way stop, 1 stop), the shared program id (`tl`) of the lights within 20 m of each other.
-const NODE_TYPES_SQL: &str = r#"WITH s AS (SELECT osm_id, lon, lat, CASE WHEN tags['highway'] = 'traffic_signals' THEN 3 WHEN tags['stop'] = 'all' THEN 2 ELSE 1 END AS t
-    FROM raw.nodes WHERE tags['highway'] IN ('traffic_signals', 'stop')),
-n AS (SELECT node_id, ST_X(geom) AS x, ST_Y(geom) AS y FROM {mode}.nodes WHERE geom IS NOT NULL),
-c AS (SELECT DISTINCT s.osm_id, s.t, n.node_id, 111320 * sqrt(pow(n.y - s.lat, 2) + pow((n.x - s.lon) * cos(radians(s.lat)), 2)) AS d
-    FROM s JOIN {mode}.way_nodes a ON a.node_id = s.osm_id JOIN {mode}.way_nodes b ON b.way_id = a.way_id JOIN n ON n.node_id = b.node_id),
-k AS (SELECT * FROM c QUALIFY row_number() OVER (PARTITION BY osm_id ORDER BY d, node_id) = 1),
-t AS (SELECT k.node_id, max(k.t) AS t, any_value(n.x) AS x, any_value(n.y) AS y FROM k JOIN n USING (node_id) WHERE k.d <= 25 GROUP BY k.node_id),
-g AS (SELECT a.node_id, min(b.node_id) AS tl, count(*) AS m FROM t a JOIN t b ON a.t = 3 AND b.t = 3
-    AND 111320 * sqrt(pow(b.y - a.y, 2) + pow((b.x - a.x) * cos(radians(a.y)), 2)) <= 20 GROUP BY a.node_id)
-SELECT t.node_id, t.t, CASE WHEN g.m > 1 THEN g.tl END FROM t LEFT JOIN g USING (node_id) ORDER BY t.node_id"#;
+use duckosm_core::chains::NODE_TYPES_SQL;
 
 /// The bus stops (`.add.xml`), as `BUS_STOPS_SQL` of sumo.py (the same text).
 const BUS_STOPS_SQL: &str = r#"WITH p AS (SELECT osm_id, lon, lat, tags['name'] AS name, tags['public_transport'] = 'stop_position' AS pos FROM raw.nodes
@@ -228,6 +217,10 @@ pub fn py_float(x: f64) -> String {
 }
 
 /// 'LINESTRING(lon lat, ...)' -> 'lon,lat lon,lat ...', as `_linestring_points`.
+pub(crate) fn shape_of(wkt: Option<&str>) -> Option<String> {
+    shape(wkt)
+}
+
 fn shape(wkt: Option<&str>) -> Option<String> {
     let w = wkt?;
     let (a, b) = (w.find('(')?, w.rfind(')')?);
@@ -389,6 +382,8 @@ pub struct SumoOptions {
     pub edge_attrs: HashMap<i64, Vec<(String, String)>>,
     /// More netconvert options over the built-in ones (a config dict of Python).
     pub config: Vec<(String, String)>,
+    /// Driving only: one SUMO edge for each chain of `driving.chains` ([`crate::sumo_merge`]).
+    pub merge: bool,
 }
 
 /// Export the mode `mode` of the database `db` to SUMO in `out_dir`, as `to_sumo` with the options of the command `sumo`.
@@ -647,6 +642,11 @@ fn split_lone_lanes(got: Vec<(i64, Vec<(i64, i64, i64)>)>, profile: &HashMap<i64
 #[allow(clippy::too_many_arguments)]
 pub fn to_sumo_with(db: &Path, out_dir: &Path, mode: &str, net_name: &str, connections: bool, config: Option<&Path>, netconvert: bool, o: &SumoOptions) -> Result<Summary> {
     let con = open(db)?;
+    let chains = match o.merge {
+        true if mode != "driving" => return Err(format!("merge: only the driving network has chains, not {mode}")),
+        true => Some(crate::sumo_merge::Chains::read(&con, mode)?),
+        false => None,
+    };
     std::fs::create_dir_all(out_dir).map_err(|x| format!("{}: {x}", out_dir.display()))?;
     let path = |ext: &str| out_dir.join(format!("{net_name}.{ext}"));
     let (nod_path, edg_path, con_path, net_path) = (path("nod.xml"), path("edg.xml"), path("con.xml"), path("net.xml"));
@@ -1071,7 +1071,7 @@ pub fn to_sumo_with(db: &Path, out_dir: &Path, mode: &str, net_name: &str, conne
         }
         Ok((n_nodes, n_edges, n_conns, n_lights, n_stops))
     };
-    let (n_nodes, n_edges, n_connections, n_traffic_lights, n_stop_signs) = write(None, None)?;
+    let (mut n_nodes, mut n_edges, n_connections, n_traffic_lights, n_stop_signs) = write(None, None)?;
     // the bus stops, as `_write_bus_stops`
     let add_path = path("add.xml");
     let mut n_bus_stops = 0;
@@ -1106,6 +1106,18 @@ pub fn to_sumo_with(db: &Path, out_dir: &Path, mode: &str, net_name: &str, conne
         }
     }
     eprintln!("SUMO[{mode}]: {n_traffic_lights} traffic lights, {n_stop_signs} stop signs, {n_bus_stops} bus stops");
+    // the files with one edge for each chain (`merge`)
+    let merge = |add: Option<&Path>| -> Result<(usize, usize)> {
+        match &chains {
+            Some(c) => crate::sumo_merge::merge_files(c, &nod_path, &edg_path, use_conns.then_some(con_path.as_path()), add),
+            None => Ok((0, 0)),
+        }
+    };
+    if let Some(c) = &chains {
+        let before = n_edges;
+        (n_nodes, n_edges) = merge((n_bus_stops > 0).then_some(add_path.as_path()))?;
+        eprintln!("SUMO[{mode}]: merge: {} chains join {before} edges into {n_edges}", c.len());
+    }
     if use_conns && !netconvert && perms.all_keyed().any(|c| c.2.is_some() || !c.3.is_empty()) {
         eprintln!("SUMO connections[{mode}]: some turns are open or closed to some vehicles only; netconvert takes that only lane by lane, which the export writes when it runs netconvert itself");
     }
@@ -1185,7 +1197,11 @@ pub fn to_sumo_with(db: &Path, out_dir: &Path, mode: &str, net_name: &str, conne
     // the merged network when netconvert joins nodes (in memory: a join is an option)
     let (j_nodes, j_rows, j_cs, j_stuck);
     let mut joined: Option<Joined> = None;
-    if use_conns && config.is_none() && opts.iter().any(|(k, v)| k == "junctions.join" && v.eq_ignore_ascii_case("true")) {
+    let join = opts.iter().any(|(k, v)| k == "junctions.join" && v.eq_ignore_ascii_case("true"));
+    if join && chains.is_some() {
+        return Err("merge: not with junctions.join=true; give one of the two".into());
+    }
+    if use_conns && config.is_none() && join {
         // netconvert reads the connections before it joins nodes, and drops each connection to an edge that the join removes (an
         // edge between two joined nodes): a road whose only way on went through such an edge lost its turns. So netconvert names
         // the joins (pass 1), this export merges those nodes and writes each legal path through them as one connection, and
@@ -1240,11 +1256,17 @@ pub fn to_sumo_with(db: &Path, out_dir: &Path, mode: &str, net_name: &str, conne
     if !froms.is_empty() {
         let mut lanes: HashMap<(String, String), Vec<(String, String)>> = HashMap::new();
         for (f, t, fl, tl) in net_connections(&net_path)? {
+            // a joined edge: its connections leave its last edge and enter the first edge of the next one
+            let (f, t) = match &chains {
+                Some(c) => (c.ends_of(&f).1, c.ends_of(&t).0),
+                None => (f, t),
+            };
             if froms.contains(&f) && !f.starts_with(':') {
                 lanes.entry((f, t)).or_default().push((fl, tl));
             }
         }
         write(joined.as_ref(), Some(&lanes))?;
+        merge(None)?;
         run(&[])?;
     }
     let tll = path("tll.xml");

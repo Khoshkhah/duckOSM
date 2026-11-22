@@ -964,6 +964,7 @@ dependencies = [
  "clap",
  "duckdb",
  "duckosm-build",
+ "duckosm-core",
  "flate2",
  "geo",
  "pbfcut",
@@ -1036,6 +1037,7 @@ dependencies = [
  "clap",
  "duckdb",
  "duckosm-build",
+ "duckosm-core",
  "duckosm-duckdb",
  "serde_json",
 ]

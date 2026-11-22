@@ -170,6 +170,10 @@ enum Cmd {
         /// Run netconvert: also the .net.xml and the .tll.xml. With --no-netconvert: the last one on the command line wins.
         #[arg(long, overrides_with = "no_netconvert")]
         netconvert: bool,
+        /// Driving only: write one SUMO edge for each chain of driving.chains (the edges joined where the road only continues).
+        /// The id of a joined edge is its chain_id; its <param key="edge_ids"> lists the duckOSM edges.
+        #[arg(long, conflicts_with = "join_junctions")]
+        merge: bool,
         /// Join close junctions (netconvert's junctions.join): the nodes of a crossroads mapped as two or three nodes become one
         /// junction, and each legal path through them one connection.
         #[arg(long, conflicts_with = "config")]
@@ -345,7 +349,7 @@ pub fn run(args: &[String]) -> Result<()> {
             }
             println!("{msg} -> {}", out_dir.display());
         }
-        Cmd::Sumo { db, mode, out_dir, name, no_connections, config, netconvert, join_junctions, .. } => {
+        Cmd::Sumo { db, mode, out_dir, name, no_connections, config, netconvert, join_junctions, merge, .. } => {
             check_db(&db)?;
             if let Some(c) = config.as_ref().filter(|c| !c.exists()) {
                 return Err(format!("{}: no such file", c.display()));
@@ -353,6 +357,7 @@ pub fn run(args: &[String]) -> Result<()> {
             let name = name.unwrap_or_else(|| stem(&db));
             let o = crate::sumo::SumoOptions {
                 config: if join_junctions { vec![("junctions.join".into(), "true".into())] } else { Vec::new() },
+                merge,
                 ..Default::default()
             };
             let s = crate::sumo::to_sumo_with(&db, &out_dir, &mode, &name, !no_connections, config.as_deref(), netconvert, &o)?;

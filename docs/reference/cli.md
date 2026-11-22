@@ -451,6 +451,7 @@ duckosm sumo [OPTIONS] DB
 | `--connections` / `--no-connections` | write the allowed turns from `edge_graph`; off lets `netconvert` guess them | on |
 | `-c`, `--config PATH` | a `netconvert` config (`.netccfg`) instead of the built-in one | |
 | `--netconvert` / `--no-netconvert` | run `netconvert`: also the `.net.xml` and the signal programs (`.tll.xml`); off writes the plain XML files and the `.netccfg` | off |
+| `--merge` | driving only: one SUMO edge for each chain of `driving.chains`, with the id `chain_id` ([how](../exports/sumo.md#fewer-edges-merge)); not with `--join-junctions` | off |
 | `--join-junctions` | join close junctions (netconvert's `junctions.join`): a crossroads mapped as two or three nodes becomes one junction ([how](../exports/sumo.md)); not with `-c` | off |
 
 ### `matsim`

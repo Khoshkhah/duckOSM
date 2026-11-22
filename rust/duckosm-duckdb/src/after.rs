@@ -341,3 +341,106 @@ pub fn raw_fixes(db: &Path, f: &duckosm_core::fixes::OsmFixes, sidewalks: &[i64]
     con.execute_batch(&sql).map_err(|e| format!("raw.* arrows: {e}"))?;
     con.execute_batch("CHECKPOINT").map_err(err)
 }
+
+/// Write `<mode>.chains` (`duckosm_core::chains`): one row for each chain of the mode's edges, with the joined line. The
+/// edges and the other tables do not change.
+pub fn chains(db: &Path, mode: &str) -> Result<usize, String> {
+    use duckosm_core::chains::{chain_id, chains as find, ChainEdge};
+    use std::collections::HashSet;
+    let con = Connection::open(db).map_err(err)?;
+    con.execute_batch("INSTALL spatial; LOAD spatial;").map_err(err)?;
+    let cols: HashSet<String> = {
+        let mut st = con.prepare("SELECT column_name FROM information_schema.columns WHERE table_schema = ? AND table_name = 'edges'").map_err(err)?;
+        let r = st.query_map([mode], |r| r.get::<_, String>(0)).map_err(err)?.collect::<Result<_, _>>().map_err(err)?;
+        r
+    };
+    // the values that must be the same on the two sides of a join (the columns that the file has)
+    let same = ["highway", "name", "lanes", "maxspeed_kmh", "maxspeed", "oneway", "layer", "bridge", "tunnel", "junction", "access", "service"];
+    let same: Vec<&str> = same.into_iter().filter(|c| cols.contains(*c)).collect();
+    let mut key: Vec<String> = same.iter().map(|c| format!("coalesce(e.\"{c}\"::VARCHAR, '-')")).collect();
+    let profile = has_table(&con, mode, "lane_profile")?;
+    let mut from = format!("{mode}.edges e");
+    if profile {
+        from += &format!(
+            " LEFT JOIN (SELECT edge_id, string_agg(coalesce(use, '') || ':' || width_m::VARCHAR, ',' ORDER BY lane_num) AS p \
+             FROM {mode}.lane_profile GROUP BY edge_id) p USING (edge_id)"
+        );
+        key.push("coalesce(p.p, '-')".into());
+    }
+    let mut st = con.prepare(&format!("SELECT e.edge_id, e.source, e.target, concat_ws('|', {}) FROM {from} ORDER BY e.edge_id", key.join(", "))).map_err(err)?;
+    let edges: Vec<ChainEdge> = st
+        .query_map([], |r| Ok(ChainEdge { id: r.get(0)?, source: r.get(1)?, target: r.get(2)?, key: r.get(3)? }))
+        .map_err(err)?
+        .collect::<Result<_, _>>()
+        .map_err(err)?;
+    let pairs = |sql: &str| -> Result<HashSet<(i64, i64)>, String> {
+        let mut st = con.prepare(sql).map_err(err)?;
+        let r = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).map_err(err)?.collect::<Result<_, _>>().map_err(err);
+        r
+    };
+    let ids = |sql: &str| -> Result<HashSet<i64>, String> {
+        let mut st = con.prepare(sql).map_err(err)?;
+        let r = st.query_map([], |r| r.get(0)).map_err(err)?.collect::<Result<_, _>>().map_err(err);
+        r
+    };
+    let mut turns = HashSet::new();
+    if has_table(&con, mode, "edge_graph")? {
+        let uses = count(&con, &format!("SELECT count(*) FROM information_schema.columns WHERE table_schema = '{mode}' AND table_name = 'edge_graph' AND column_name = 'uses'"))? > 0;
+        let own = match mode { "walking" => "walk", "cycling" => "bike", _ => "car" };
+        let w = if uses { format!(" WHERE uses = '{own}'") } else { String::new() };
+        turns = pairs(&format!("SELECT from_edge, to_edge FROM {mode}.edge_graph{w}"))?;
+    }
+    let mut keep_turns = HashSet::new();
+    if has_table(&con, mode, "turn_restrictions")? {
+        keep_turns.extend(pairs(&format!("SELECT from_edge_id, to_edge_id FROM {mode}.turn_restrictions"))?);
+    }
+    if has_table(&con, mode, "turn_permission")? {
+        keep_turns.extend(pairs(&format!("SELECT from_edge, to_edge FROM {mode}.turn_permission"))?);
+    }
+    let mut keep_edges = HashSet::new();
+    if has_table(&con, mode, "turn_path_restrictions")? {
+        keep_edges = ids(&format!(
+            "SELECT from_edge FROM {mode}.turn_path_restrictions UNION SELECT to_edge FROM {mode}.turn_path_restrictions \
+             UNION SELECT unnest(via_edges) FROM {mode}.turn_path_restrictions"
+        ))?;
+    }
+    // a traffic light or a stop sign stays a node of the export (the SUMO node types: the same nodes as the SUMO export)
+    let mut stop_nodes = HashSet::new();
+    if has_table(&con, "raw", "nodes")? {
+        if has_table(&con, mode, "way_nodes")? {
+            stop_nodes = ids(&format!("SELECT node_id FROM ({})", duckosm_core::chains::NODE_TYPES_SQL.replace("{mode}", mode)))?;
+        }
+    }
+    let cs = find(&edges, &turns, &stop_nodes, &keep_turns, &keep_edges);
+    con.execute_batch("CREATE OR REPLACE TEMP TABLE chain_members (chain_id BIGINT, edge_id BIGINT, seq INTEGER)").map_err(err)?;
+    {
+        let mut ap = con.appender("chain_members").map_err(err)?;
+        for c in &cs {
+            let id = chain_id(c);
+            for (i, e) in c.iter().enumerate() {
+                ap.append_row(duckdb::params![id, e, (i + 1) as i32]).map_err(err)?;
+            }
+        }
+    }
+    let carried: Vec<String> = ["highway", "name", "lanes", "maxspeed_kmh", "oneway", "layer", "bridge", "tunnel", "junction", "access", "service"]
+        .into_iter()
+        .filter(|c| cols.contains(*c))
+        .map(|c| format!("arg_min(e.\"{c}\", m.seq) AS \"{c}\""))
+        .collect();
+    let cost = if cols.contains("cost_s") { ", sum(e.cost_s)::FLOAT AS cost_s" } else { "" };
+    con.execute_batch(&format!(
+        "CREATE OR REPLACE TABLE {mode}.chains AS
+         WITH p AS (
+             SELECT m.chain_id, m.seq, unnest(range(CASE WHEN m.seq = 1 THEN 1 ELSE 2 END, ST_NPoints(e.geometry) + 1)) AS i, e.geometry
+             FROM chain_members m JOIN {mode}.edges e USING (edge_id)),
+         g AS (SELECT chain_id, ST_MakeLine(list(ST_PointN(geometry, i::INTEGER) ORDER BY seq, i)) AS geometry FROM p GROUP BY chain_id)
+         SELECT m.chain_id, arg_min(e.source, m.seq) AS source, arg_max(e.target, m.seq) AS target,
+                list(m.edge_id ORDER BY m.seq) AS edge_ids, sum(e.length_m)::FLOAT AS length_m{cost}, {carried}, any_value(g.geometry) AS geometry
+         FROM chain_members m JOIN {mode}.edges e USING (edge_id) JOIN g USING (chain_id)
+         GROUP BY m.chain_id ORDER BY min(e.rowid);
+         DROP TABLE chain_members;",
+        carried = carried.join(", ")
+    ))
+    .map_err(|e| format!("{mode}.chains: {e}"))?;
+    Ok(cs.len())
+}

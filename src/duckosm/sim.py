@@ -62,7 +62,8 @@ def edge_map(path):
     id in the file) and ``edge_id`` (int64). duckOSM writes ``edge_id`` as the id. netconvert can change it: ``123#1``
     (a part of edge 123) gives 123; ``123+456`` (edges joined) gives one row for each edge. With ``geometry.remove=true`` (not the default of
     ``to_sumo``), netconvert joins edges and keeps only the id of the first edge, without ``+``: the other edges of the join
-    are not in the table. Internal edges of SUMO
+    are not in the table. An edge of ``to_sumo(merge=True)`` (a chain of ``driving.chains``) gives one row for each edge of its
+    ``<param key="edge_ids">``. Internal edges of SUMO
     (``:junction_0``) are not in the table. Join the results of a simulation on ``id``, then the network on ``edge_id``.
 
     >>> m = duckosm.sim.edge_map("out/sumo/network.net.xml")"""
@@ -79,6 +80,11 @@ def edge_map(path):
         for _, el in ET.iterparse(f):
             if el.tag in ("edge", "link") and el.get("function") != "internal":
                 i = el.get("id")
-                rows += [(i, int(p)) for p in re.findall(r"(?:^|\+)-?(\d+)", i)]
-            el.clear()
+                ids = next((p.get("value") for p in el.findall("param") if p.get("key") == "edge_ids"), None)
+                if ids:
+                    rows += [(i, int(p)) for p in ids.split()]
+                else:
+                    rows += [(i, int(p)) for p in re.findall(r"(?:^|\+)-?(\d+)", i)]
+            if el.tag in ("edge", "link"):
+                el.clear()
     return pd.DataFrame(rows, columns=["id", "edge_id"]).astype({"edge_id": "int64"})
