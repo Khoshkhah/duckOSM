@@ -12,8 +12,8 @@ ch = Chapter(9, "09_analysis", "Street network analysis",
              "The numbers of OSMnx, junctions, street directions, components, nearest roads, heights and city blocks",
              learn="the two views of the statistics; junctions; street bearings and their entropy; connected "
                    "components; the nearest node and edge of a point; a smaller area; random points; heights and "
-                   "grades; OSMnx on a duckOSM network; city blocks with momepy",
-             time="about 2 minutes", extras="analysis,viz", more_install="\n    %pip install -q osmnx momepy mapclassify",
+                   "grades; OSMnx on a duckOSM network; street centrality with cityseer; city blocks with momepy",
+             time="about 2 minutes", extras="analysis,viz", more_install="\n    %pip install -q osmnx momepy mapclassify cityseer",
              next_=("10_gis", "10. OSM data for GIS", "OSM features, OSM XML and administrative areas"))
 
 ch.md(f"""## What street network analysis measures
@@ -324,6 +324,60 @@ ch.md("""The two columns are the same: 843 nodes (`n`), 1,484 edges (`m`), 636 i
 So you can use `an.stats` and compare its `osmnx` view with any number that OSMnx gives for another city. The tests
 of duckOSM run this check for each key.""")
 
+
+ch.md("""## Street centrality with cityseer
+
+[cityseer](https://cityseer.benchmarkurbanism.com) measures how central each street junction is, for people who walk.
+It computes two measures within a walking distance:
+
+| Measure | Column | The question it answers |
+|---|---|---|
+| closeness (harmonic) | `cc_harmonic_<distance>` | How easy is it to reach the other junctions from here? The sum of 1 / distance to each junction within the distance |
+| betweenness | `cc_betweenness_<distance>` | How many shortest walks between two junctions within the distance pass through here? |
+
+The steps:
+
+1. Give cityseer the walking network as lines in metres, one line for each street.
+2. cityseer makes its own graph and its network structure (`io.nx_from_generic_geopandas`,
+   `io.network_structure_from_nx`).
+3. Compute the two measures within 400 m and 800 m (about 5 and 10 minutes on foot).
+
+The first lines of the cell stop cityseer's progress bars and information lines.""")
+ch.code("""import logging
+
+from cityseer import config
+from cityseer.metrics import networks
+from cityseer.tools import io
+
+config.QUIET_MODE = True                                                       # no progress bars
+logging.getLogger("cityseer").setLevel(logging.WARNING)                        # no information lines
+walk = net.walking.edges()
+walk = walk[~walk.is_reverse].to_crs(walk.estimate_utm_crs())[["edge_id", "geometry"]]    # 1. one line a street, metres
+graph = io.nx_from_generic_geopandas(walk)                                     # 2. cityseer's graph
+junctions, segments, structure = io.network_structure_from_nx(graph)
+len(junctions), len(segments)""")
+ch.md("""cityseer's network has 4,589 junctions (the walking nodes of duckOSM) and 11,874 segments: each street in
+both directions.""")
+ch.code("""junctions = networks.centrality_shortest(structure, junctions, distances=[400, 800])    # 3. both measures
+columns = ["cc_harmonic_400", "cc_harmonic_800", "cc_betweenness_400", "cc_betweenness_800"]
+junctions[columns].describe().loc[["mean", "50%", "max"]].round(1)""")
+ch.md("""Within 400 m the middle junction has a closeness of 2.4, and within 800 m 3.8. Betweenness is very uneven: the
+middle junction is on 6,060 shortest walks within 800 m, and the busiest junction on 163,846.""")
+ch.code("""from matplotlib.colors import LogNorm, Normalize
+
+junctions["betweenness_800"] = junctions.cc_betweenness_800.clip(lower=1)      # 1 in place of 0, for the log scale
+fig, axes = plt.subplots(1, 2, figsize=(14, 7))
+for ax, column, norm, title in [(axes[0], "cc_harmonic_800", Normalize(), "closeness within 800 m"),
+                                (axes[1], "betweenness_800", LogNorm(), "betweenness within 800 m (log scale)")]:
+    walk.plot(ax=ax, color="lightgray", linewidth=0.4)                        # the streets in light gray
+    order = junctions.sort_values(column)                                      # the high values on top
+    order.plot(ax=ax, column=column, cmap="viridis", norm=norm, markersize=4, legend=True,
+               legend_kwds={"label": title, "shrink": 0.6})
+    ax.set_axis_off()
+plt.show()""")
+ch.md("""Closeness (left) is highest in the dense centers near the port and in Monte Carlo, where many footways and
+steps meet. Betweenness (right, on a log scale) shows lines: the few streets and steps that join the parts of Monaco,
+so many walks pass through them. The dark junctions at the edges are on few or no shortest walks.""")
 
 ch.md("""## City blocks with momepy
 
