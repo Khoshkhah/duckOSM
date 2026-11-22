@@ -44,9 +44,9 @@ levels 1 to 4; level 0 is in chapter 1, and chapter 10 has more of level 1.
 
 | Level | Name | One unit is | In this chapter |
 |---|---|---|---|
-| 0 | The OSM file | the `.osm.pbf`, cut to your area | (chapter 1) |
+| 0 | OSM file | the `.osm.pbf`, cut to your area | (chapter 1) |
 | 1 | OSM data | an OSM feature, with no network | QuackOSM table, PMTiles |
-| 2 | The routing network | one edge for each road direction, with its `edge_id` and turns | GeoPackage, GeoParquet, shapefiles |
+| 2 | Routable network | one edge for each road direction, with its `edge_id` and turns | GeoPackage, GeoParquet, shapefiles |
 | 3 | Simulation network | macro, meso and micro: links, lanes, turns | SUMO, GMNS, MATSim |
 | 4 | HD map | the exact shape of each lane, in 3D (experimental) | OpenDRIVE |
 

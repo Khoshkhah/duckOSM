@@ -1,4 +1,4 @@
-# The OSM file
+# OSM file
 
 Level 0 of the outputs: the OSM data of your area as one `.osm.pbf` file, **with your OSM fixes in it**. Other tools
 then read the edited data: OSMnx, osm2pgsql, SUMO's OSM import, QGIS, osmium.

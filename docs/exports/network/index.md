@@ -1,4 +1,4 @@
-# 2. The network
+# 2. Routable network
 
 The routable network of each mode: the edges with their `edge_id`, the nodes and the legal turns.
 

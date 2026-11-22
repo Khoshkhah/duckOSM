@@ -2,7 +2,7 @@
 <rect width="1080" height="250" fill="#ffffff"/>
 <rect x="12" y="12" width="180" height="226" rx="16" fill="none" stroke="#f0d35b" stroke-width="3"/>
 <circle cx="48" cy="50" r="22" fill="#f0d35b"/><text x="48" y="58" font-size="22" font-weight="700" text-anchor="middle" fill="#17191f">0</text>
-<text x="30" y="102" font-size="21" font-weight="700" fill="#17191f">The OSM file</text>
+<text x="30" y="102" font-size="21" font-weight="700" fill="#17191f">OSM file</text>
 <text x="30" y="131" font-size="14.5" fill="#5f6670">.osm.pbf, cut to</text>
 <text x="30" y="150" font-size="14.5" fill="#5f6670">your area</text>
 <text x="30" y="177" font-size="14" font-family="SFMono-Regular, Menlo, Consolas, monospace" fill="#9a7b12">pbfcut</text>
@@ -16,7 +16,7 @@
 <path d="M417 125.0 h21" stroke="#5f6670" stroke-width="2" fill="none"/><path d="M438 120.0 l7 5 l-7 5" stroke="#5f6670" stroke-width="2" fill="none"/>
 <rect x="450" y="12" width="180" height="226" rx="16" fill="none" stroke="#f0d35b" stroke-width="3"/>
 <circle cx="486" cy="50" r="22" fill="#f0d35b"/><text x="486" y="58" font-size="22" font-weight="700" text-anchor="middle" fill="#17191f">2</text>
-<text x="468" y="102" font-size="21" font-weight="700" fill="#17191f">The routing</text>
+<text x="468" y="102" font-size="21" font-weight="700" fill="#17191f">Routable</text>
 <text x="468" y="127" font-size="21" font-weight="700" fill="#17191f">network</text>
 <text x="468" y="156" font-size="14.5" fill="#5f6670">edges, edge_id,</text>
 <text x="468" y="175" font-size="14.5" fill="#5f6670">turns</text>

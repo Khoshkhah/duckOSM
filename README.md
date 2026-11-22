@@ -83,20 +83,20 @@ Edit roads, turns and buildings on a map, and every output uses your fixes
 
 ## What duckOSM makes
 
-All outputs come from one `.osm.pbf` file, in five levels. Each level keeps the `edge_id` of the routing network.
+All outputs come from one `.osm.pbf` file, in five levels. Each level keeps the `edge_id` of the routable network.
 
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/images/levels-dark.svg">
-    <img src="https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/images/levels-light.svg" alt="The five levels of duckOSM's outputs: 0 the OSM file (pbfcut), 1 OSM data with no network (QuackOSM, GDAL), 2 the routing network with edges, edge_id and turns (GeoPackage, networkx), 3 simulation network, macro, meso and micro (GMNS, MATSim, SUMO), 4 HD map, each lane's shape in 3D, experimental (Lanelet2, OpenDRIVE)" width="900">
+    <img src="https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/images/levels-light.svg" alt="The five levels of duckOSM's outputs: 0 OSM file (pbfcut), 1 OSM data with no network (QuackOSM, GDAL), 2 routable network with edges, edge_id and turns (GeoPackage, networkx), 3 simulation network, macro, meso and micro (GMNS, MATSim, SUMO), 4 HD map, each lane's shape in 3D, experimental (Lanelet2, OpenDRIVE)" width="900">
   </picture>
 </p>
 
 | Level | Command |
 |---|---|
-| 0. The OSM file | `duckosm get` |
+| 0. OSM file | `duckosm get` |
 | 1. OSM data | `duckosm quack` |
-| 2. The routing network | `duckosm build`, `export-gis`, `export-graph` |
+| 2. Routable network | `duckosm build`, `export-gis`, `export-graph` |
 | 3. Simulation network | `duckosm sumo`, `matsim`, `gmns` |
 | 4. HD map (experimental) | `duckosm lanelet2`, `opendrive` |
 

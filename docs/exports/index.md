@@ -5,16 +5,16 @@
 The levels go from the raw OSM data to the most detailed network. Each level is made from the level before it.
 
 <div class="dk-levels">
-<a class="lv" href="#0-the-osm-file"><span class="n">0</span><b>The OSM file</b><span class="s">.osm.pbf, cut to your area</span><code>pbfcut</code></a>
+<a class="lv" href="#0-osm-file"><span class="n">0</span><b>OSM file</b><span class="s">.osm.pbf, cut to your area</span><code>pbfcut</code></a>
 <a class="lv" href="#1-osm-data"><span class="n">1</span><b>OSM data</b><span class="s">no network</span><code>QuackOSM · GDAL</code></a>
-<a class="lv" href="#2-the-network"><span class="n">2</span><b>The network</b><span class="s">edges, edge_id, turns</span><code>GeoPackage · networkx</code></a>
+<a class="lv" href="#2-routable-network"><span class="n">2</span><b>Routable network</b><span class="s">edges, edge_id, turns</span><code>GeoPackage · networkx</code></a>
 <a class="lv" href="#3-simulation-network"><span class="n">3</span><b>Simulation network</b><span class="s">macro, meso and micro: links, lanes, turns</span><code>GMNS · MATSim · SUMO</code></a>
 <a class="lv" href="#4-hd-map"><span class="n">4</span><b>HD map</b><span class="s">the exact shape of each lane, in 3D (experimental)</span><code>Lanelet2 · OpenDRIVE</code></a>
 </div>
 
 Your OSM fixes go into every level.
 
-### 0. The OSM file
+### 0. OSM file
 
 The OSM data of the area as one `.osm.pbf` file, with your OSM fixes in it.
 
@@ -34,7 +34,7 @@ The OSM objects as tables, with no network. Each row is one OSM object.
 | PostGIS map servers, OSM Carto | the four tables of osm2pgsql, into PostGIS or as GeoParquet ([osm2pgsql tables](osm2pgsql.md)) | `duckosm quack --osm2pgsql` |
 | MapLibre, OpenLayers, QGIS | a base map in one file: vector tiles of the Shortbread schema ([Vector tiles (PMTiles)](pmtiles.md)) | `duckosm quack --pmtiles` |
 
-### 2. The network
+### 2. Routable network
 
 The routable network of each mode: edges with their `edge_id`, nodes, and the legal turns.
 
