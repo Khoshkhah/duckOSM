@@ -165,6 +165,7 @@ net = duckosm.build(pbf="my.osm.pbf", config={"options": {"bus_routes": False}, 
 | `color_by` | a column of the edges, or your own data: a Series keyed by `edge_id`, or a DataFrame with `edge_id` and one value column. Numbers get a color ramp (`cmap=`); classes need `colors={value: color}`. |
 | `layers` | the base map of the file under the roads: `True` (all layers), `False` (the roads only) or a list of roadstyle layer names, for example `["water", "buildings"]`. The default: all layers on the live map, the roads only with `plot`. `plot` draws `ocean`, `landcover`, `water`, `waterways` and `buildings`. With `color_by` or `routes`, the live map has roadstyle's default base map and `layers` has no effect. |
 | `highlight` | edge ids in orange; the other edges gray |
+| `linewidth` | `plot` only: the width of the colored roads of a number `color_by` (default 1.2). Use 3 or more when only a few roads have a value. |
 | (no `color_by`, all modes) | `plot` gives each road one color for the set of modes that can use it: all modes, driving + walking, driving + cycling, walking + cycling, driving, walking or cycling. These are the colors of the "Modes" option of `net.dashboard()`. |
 | `routes` | a route, a list of routes or `{label: route}`: lines on top, each in its own color |
 

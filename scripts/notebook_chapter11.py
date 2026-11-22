@@ -294,9 +294,11 @@ by_speed = mob.aggregate(drive, points, time=None, value="speed")              #
 by_speed.speed_mean.describe()[["count", "50%", "min", "max"]].round(1)        # the speeds of the edges, km/h""")
 ch.md("""119 edges get a mean speed, and the middle edge has 31 km/h. A few edges with only one or two points show
 4 km/h or 56 km/h: with so few points, the GPS noise decides the speed.""")
-ch.code("""net.driving.plot(color_by=by_speed.set_index("edge_id").speed_mean.rename("mean speed, km/h"), cmap="RdYlGn")    # 4. the edges by speed""")
-ch.md("""Most of the route is yellow: about 30 km/h. The red and the dark green pieces are short edges with few points,
-near junctions.""")
+ch.code("""speed = by_speed.set_index("edge_id").speed_mean.rename("mean speed, km/h")    # edge_id -> speed
+net.driving.plot(color_by=speed, cmap="viridis", linewidth=3)                   # 4. the edges by speed, thick lines""")
+ch.md("""The colored line is the route of the two traces. Most of it is blue-green: about 30 km/h. The dark purple and
+the light green pieces are short edges with few points, near junctions. `linewidth=3` draws the roads with a value thick, because
+only 119 of the 2,840 edges have one.""")
 
 ch.md("""## Keep your data after a rebuild: `edge_id_map`
 

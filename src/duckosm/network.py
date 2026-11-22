@@ -633,6 +633,9 @@ class Network(os.PathLike):
         one color for each set of modes that can use a road (``"all modes"``, ``"driving + walking"``, ... ``"cycling"``),
         the colors of the "Modes" option of :meth:`dashboard`; one mode: one color for each road class. Returns the axis.
 
+        ``linewidth``: the width of the colored roads of a number ``color_by`` (default 1.2). Use 3 or more when only a
+        few roads have a value.
+
         ``layers``: the base map of the file under the roads: False (the default: the roads only), True (the layers below)
         or a list of these names:
         ``ocean``, ``landcover``, ``water``, ``waterways``, ``buildings`` (the names of roadstyle's layers).
@@ -658,7 +661,7 @@ class Network(os.PathLike):
                 gdf[gdf[color_by] == value].plot(ax=ax, color=color, linewidth=3)
                 handles.append(Line2D([], [], color=color, linewidth=3, label=value))
         elif color_by is not None:                   # numbers: a color ramp, gray where there is no value
-            gdf.plot(ax=ax, column=color_by, cmap=style.get("cmap", "viridis"), linewidth=1.2, legend=True,
+            gdf.plot(ax=ax, column=color_by, cmap=style.get("cmap", "viridis"), linewidth=style.get("linewidth", 1.2), legend=True,
                      legend_kwds={"label": color_by, "shrink": 0.6}, missing_kwds={"color": "#cccccc", "linewidth": 0.5})
         elif "modes" in gdf and not plain:           # all modes: one color for each set of modes, as the dashboard
             for label, color in MODES_COLORS.items():
