@@ -98,6 +98,12 @@ pub fn run(db: &std::path::Path, name: &str, modes: &[&str], a: &After) -> Resul
     Ok(())
 }
 
+/// Write `<mode>.chains` (`duckosm_duckdb::after::chains`) in the file `db`: also for the Python engine, which calls it.
+#[cfg(feature = "duckdb")]
+pub fn chains(db: &std::path::Path, mode: &str) -> Result<usize, String> {
+    duckosm_duckdb::after::chains(db, mode)
+}
+
 /// The report as Markdown (duckOSM `report.write_report`).
 #[cfg(feature = "duckdb")]
 fn report_md(

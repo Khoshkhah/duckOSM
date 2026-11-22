@@ -25,6 +25,12 @@ fn cli(py: Python<'_>, args: Vec<String>) -> i32 {
     py.detach(|| program::main_with(args))
 }
 
+/// `<mode>.chains` in the database `db` (the Python engine calls it after its build); gives the number of chains.
+#[pyfunction]
+fn chains(py: Python<'_>, db: PathBuf, mode: String) -> PyResult<usize> {
+    py.detach(|| duckosm_build::after::chains(&db, &mode)).map_err(err)
+}
+
 #[pyfunction]
 #[pyo3(signature = (db, out_dir, mode, net_name, connections, config, netconvert, merge = false))]
 #[allow(clippy::too_many_arguments)]
@@ -339,6 +345,7 @@ fn graph_rows(py: Python<'_>, db: PathBuf, mode: String, weight: String)
 pub fn add(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(cli, m)?)?;
     m.add_function(wrap_pyfunction!(to_sumo, m)?)?;
+    m.add_function(wrap_pyfunction!(chains, m)?)?;
     m.add_function(wrap_pyfunction!(to_gis, m)?)?;
     m.add_function(wrap_pyfunction!(to_matsim, m)?)?;
     m.add_function(wrap_pyfunction!(to_matsim_lanes, m)?)?;
