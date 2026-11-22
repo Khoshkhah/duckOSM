@@ -17,6 +17,7 @@
 
 <p align="center">
   <a href="https://khoshkhah.github.io/duckOSM/"><b>Documentation</b></a> ·
+  <a href="https://khoshkhah.github.io/duckOSM/book/"><b>The book</b></a> ·
   <a href="https://khoshkhah.github.io/duckosm-studio/">duckOSM Studio (browser)</a> ·
   <a href="https://khoshkhah.github.io/duckOSM/first_network/">Your first network</a> ·
   <a href="https://khoshkhah.github.io/duckOSM/reference/cli/">Command line</a> ·
@@ -36,7 +37,8 @@ All outputs come from one `.osm.pbf` file.
 | **Map data**: the drawing order of the roads, the walls of the buildings | `duckosm build` | DuckDB |
 | **The OSM features table** of [QuackOSM](https://khoshkhah.github.io/duckOSM/concepts/quackosm/) | `duckosm quack`, [in the browser](https://khoshkhah.github.io/duckosm-studio/quack.html) | GeoParquet, DuckDB |
 | **GDAL's five OSM layers**, as [QGIS reads them](https://khoshkhah.github.io/duckOSM/concepts/gdal/) | `duckosm quack --gdal`, [in the browser](https://khoshkhah.github.io/duckosm-studio/quack.html) | GeoPackage, GeoParquet |
-| **Traffic simulation networks** | `duckosm sumo`, `matsim`, `gmns` | SUMO, MATSim, GMNS |
+| **Traffic simulation networks** | `duckosm sumo` (`--merge`: one SUMO edge for each chain of roads), `matsim`, `gmns` | SUMO, MATSim, GMNS |
+| **GPS traces on the roads**: map matching (HMM or GPS-DTW), counts and speeds per edge | Python `duckosm.mobility` | DataFrames |
 | **GIS files and graphs** of the network | `duckosm export-gis`, `export-graph` | GeoPackage, shapefile, networkx |
 | **Heights**: the ground height of each node | `duckosm elevation` | DuckDB |
 | **Maps and pages**: maps, a route planner, an editor, Ask | `duckosm viz`, `route-map`, `edit`, `ask` | HTML |
@@ -122,6 +124,19 @@ duckosm.to_gis(db, "monaco.gpkg")         # a GeoPackage for QGIS
 ```
 
 All functions: [Python SDK](https://khoshkhah.github.io/duckOSM/reference/python/). Rust: [Rust SDK](https://khoshkhah.github.io/duckOSM/reference/rust/).
+
+## Learn with the book
+
+[**The duckOSM book**](https://khoshkhah.github.io/duckOSM/book/) teaches the Python SDK in 15 chapters. Each chapter
+is one Jupyter notebook on Monaco, with its outputs, and opens in Colab with one click.
+
+| Part | Chapters |
+|---|---|
+| The core | get and build an area · look inside the file · draw maps · join your data by `edge_id` · fix the OSM data · exports |
+| The modules | routing · advanced routing · street network analysis · OSM data for GIS · mobility data and map matching · traffic simulation · transport planning · HD maps · graph machine learning |
+
+The book uses other tools on duckOSM's outputs too: OSMnx, momepy, cityseer, OR-Tools, pandana, movingpandas,
+folium, lonboard, SUMO and traci.
 
 Each output is compared with a reference tool: QuackOSM, GDAL, SUMO, MATSim and the GMNS specification
 ([how each output is checked](https://khoshkhah.github.io/duckOSM/concepts/checks/)).

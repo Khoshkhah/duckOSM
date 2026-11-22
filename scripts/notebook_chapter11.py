@@ -186,6 +186,21 @@ match must use a different edge, and some edges come two times. Keep `radius_m` 
 > **Tip:** set `sigma_m` to the GPS error of your data. A phone in a car is about 5 m (the default). For data with
 > large errors, increase `sigma_m` and `radius_m` together. For points that are far apart in time (one point each
 > minute), increase `beta_m`, because the route between two points is then much longer than the straight line.""")
+ch.md("""### The second method: GPS-DTW
+
+`method="dtw"` matches with [GPS-DTW](https://khoshkhah.github.io/gps-dtw/), dynamic time warping in Rust. It
+interpolates the trace each second and aligns it with points along the roads, in windows of 60 s. The roads of a
+window come from a forward and a backward Dijkstra search, with no detour longer than 1.2 times the trace. It needs
+the `time` column. `sigma_m`, `beta_m` and `uturn_m` do not apply.
+
+```python
+d = mob.match(drive, traces, method="dtw")      # GPS-DTW in place of the HMM
+```
+
+On 600 Monaco traces, GPS-DTW is faster at each GPS interval and gives far fewer wrong edges with dense GPS (one point
+each 1 to 5 s). The HMM (the default) finds a little more of the route with sparse GPS (15 to 30 s). The numbers:
+[duckosm.mobility](https://khoshkhah.github.io/duckOSM/reference/sdk/mobility/).""")
+
 
 ch.md("""## Snap fixed points: `snap`
 
