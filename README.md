@@ -19,7 +19,7 @@
   <a href="https://khoshkhah.github.io/duckOSM/"><b>Documentation</b></a> ·
   <a href="https://khoshkhah.github.io/duckOSM/book/"><b>The notebook manual</b></a> ·
   <a href="https://khoshkhah.github.io/duckosm-studio/">duckOSM Studio (browser)</a> ·
-  <a href="https://khoshkhah.github.io/duckOSM/first_network/">Your first network</a> ·
+  <a href="https://khoshkhah.github.io/duckOSM/reference/python/">Python SDK</a> ·
   <a href="https://khoshkhah.github.io/duckOSM/reference/cli/">Command line</a>
 </p>
 
@@ -28,16 +28,58 @@
 ## What duckOSM is
 
 duckOSM reads an OpenStreetMap `.osm.pbf` file and makes the routable road network of an area, its map layers, and
-files for GIS, routing and traffic simulation.
+files for GIS, routing and traffic simulation. One Rust engine runs it all: the command line, the Python SDK and the
+browser.
 
-- **Large areas, little memory.** duckOSM builds an area tile by tile, so the build time stays short and the memory
-  stays low, also for a whole country.
-- **In the browser too.** The same Rust engine runs in a web page, [duckOSM Studio](https://khoshkhah.github.io/duckosm-studio/),
-  with no install, and gives the same rows.
-- **One id for each road direction.** `edge_id = hash(osm_id, source, target)` stays the same after a rebuild, so
-  your own data joins to the right edge ([how](https://khoshkhah.github.io/duckOSM/concepts/edge-ids/)).
-- **Fix the OSM data once.** Edit roads, turns and buildings on a map; every output uses your fixes
-  ([Edit OSM data](https://khoshkhah.github.io/duckOSM/guides/edit-osm-data/)).
+<table>
+<tr>
+<td width="50%" valign="top">
+
+**Large areas, little memory**<br>
+duckOSM builds an area tile by tile, so the build stays fast and the memory stays low, also for a whole country.
+
+</td>
+<td width="50%" valign="top">
+
+**In your browser**<br>
+[duckOSM Studio](https://khoshkhah.github.io/duckosm-studio/) runs the same engine in a web page, with no install,
+and gives the same rows.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+**Python SDK**<br>
+`pip install duckosm`, then `import duckosm`: build, route, match GPS traces and export from Python
+([Python SDK](https://khoshkhah.github.io/duckOSM/reference/python/)).
+
+</td>
+<td valign="top">
+
+**The notebook manual**<br>
+15 chapters, each one a Jupyter notebook on Monaco that opens in Colab
+([notebook manual](https://khoshkhah.github.io/duckOSM/book/)).
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+**One id for each road direction**<br>
+`edge_id = hash(osm_id, source, target)` stays the same after a rebuild, so your data joins to the right edge
+([how](https://khoshkhah.github.io/duckOSM/concepts/edge-ids/)).
+
+</td>
+<td valign="top">
+
+**Fix the OSM data once**<br>
+Edit roads, turns and buildings on a map, and every output uses your fixes
+([Edit OSM data](https://khoshkhah.github.io/duckOSM/guides/edit-osm-data/)).
+
+</td>
+</tr>
+</table>
 
 ## What duckOSM makes
 
@@ -83,9 +125,15 @@ All functions: [Python SDK](https://khoshkhah.github.io/duckOSM/reference/python
 
 ## Learn with the notebook manual
 
-[**The notebook manual**](https://khoshkhah.github.io/duckOSM/book/) teaches the Python SDK in 15 chapters, from your
-first network to routing, map matching, traffic simulation and HD maps. Each chapter is one Jupyter notebook on Monaco
-and opens in Colab with one click.
+The [**notebook manual**](https://khoshkhah.github.io/duckOSM/book/) teaches the Python SDK in 15 chapters: your first
+network, maps, routing, street network analysis, map matching, traffic simulation, transport planning, HD maps and
+graph machine learning.
+
+<p>
+  <a href="https://khoshkhah.github.io/duckOSM/book/"><img alt="Read the notebook manual" src="https://img.shields.io/badge/Read-the%20notebook%20manual-f0d35b?style=for-the-badge"></a>
+  <a href="https://colab.research.google.com/github/Khoshkhah/duckOSM/blob/main/docs/notebooks/01_area_to_network.ipynb"><img alt="Open chapter 1 in Colab" src="https://img.shields.io/badge/Open%20chapter%201-in%20Colab-F9AB00?style=for-the-badge&logo=googlecolab&logoColor=white"></a>
+  <a href="https://khoshkhah.github.io/duckosm-studio/"><img alt="Try duckOSM Studio" src="https://img.shields.io/badge/Try-duckOSM%20Studio-17191f?style=for-the-badge"></a>
+</p>
 
 ## For AI agents
 
