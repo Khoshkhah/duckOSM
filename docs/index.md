@@ -10,6 +10,7 @@ traffic simulation and routing. Fix the OSM data once, on a map. Your fixes go i
 [Try it in your browser](https://khoshkhah.github.io/duckosm-studio/){ .md-button .md-button--primary }
 [Install](install.md){ .md-button }
 [Get started](first_network.md){ .md-button }
+[Read the book](https://khoshkhah.github.io/duckOSM/book/){ .md-button }
 [Compare](compare/index.md){ .md-button }
 
 </div>
@@ -55,7 +56,8 @@ traffic simulation and routing. Fix the OSM data once, on a map. Your fixes go i
 
     ---
 
-    SUMO, MATSim and GMNS (macro, meso, micro), checked with each tool's own validator.
+    SUMO, MATSim and GMNS (macro, meso, micro), checked with each tool's own validator. SUMO with one edge
+    for each chain of roads (`--merge`), and every `edge_id` kept.
     [Exports](exports/index.md)
 
 -   :material-layers-triple:{ .lg .middle } **GIS layers**
@@ -71,6 +73,13 @@ traffic simulation and routing. Fix the OSM data once, on a map. Your fixes go i
 
     A boundary, a place name, a box or an H3 cell. Countries build by map tiles, in little memory.
     [Prepare an area](guides/prepare-area.md)
+
+-   :material-map-marker-path:{ .lg .middle } **GPS traces on the roads**
+
+    ---
+
+    Map matching with an HMM or with GPS-DTW, then counts and speeds on each edge.
+    [duckosm.mobility](reference/sdk/mobility.md)
 
 -   :material-language-rust:{ .lg .middle } **One Rust program**
 
@@ -149,7 +158,7 @@ All outputs, by level: [Export](exports/index.md). Speed against other tools: [C
 
     `pip install duckosm`, then `import duckosm`: build, quack, route and export from Python, all in the Rust engine.
 
-    [Python SDK](reference/python.md) · [Notebooks](notebooks/index.md) · [Quick start](install.md#quick-start)
+    [Python SDK](reference/python.md) · [The book](https://khoshkhah.github.io/duckOSM/book/) · [Notebooks](notebooks/index.md) · [Quick start](install.md#quick-start)
 
 -   :material-language-rust:{ .lg .middle } **Rust SDK**
 

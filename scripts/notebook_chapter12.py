@@ -113,6 +113,20 @@ SUMO edge. netconvert joined the other 1211 edges into their neighbors.
 > **Warning:** keep `geometry.remove` set to `false`. With `true`, netconvert joins the edges between two junctions
 > into one SUMO edge, and keeps only the id of the first edge. The other edges then have no SUMO edge, and their
 > results are lost.""")
+ch.md("""### Fewer SUMO edges, with all the edge ids: `merge=True`
+
+duckOSM cuts a road at each node that another network uses, for example a footway crossing, because the multimodal
+routing needs the cut. SUMO does not need these cuts. The table `driving.chains` joins the edges where the road only
+continues, and `merge=True` writes one SUMO edge for each chain:
+
+```python
+chained = net.driving.to_sumo("out/sumo_chains", merge=True, run_netconvert=True)
+duckosm.sim.edge_map(chained)    # each SUMO edge, with every edge_id of its chain
+```
+
+On Monaco, the 2840 edges become 1775 SUMO edges, and the junctions go from 2995 to 1592. All 18 traffic lights stay.
+Each joined edge has `<param key="edge_ids">`, so `edge_map` gives back every `edge_id`, and no result is lost.""")
+
 
 ch.md("""### Without netconvert
 

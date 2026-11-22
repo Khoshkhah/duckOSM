@@ -32,3 +32,11 @@ A good way to do something, or a short way.
 ::: {.callout-warning title="Warning"}
 A trap, and how to avoid it.
 :::
+
+## Where to find more
+
+| You want | Go to |
+|---|---|
+| Each function and its options | [The manual](https://khoshkhah.github.io/duckOSM/): Python SDK, command line, database schema |
+| duckOSM in the browser, with no install | [duckOSM Studio](https://khoshkhah.github.io/duckosm-studio/) |
+| The source and the issues | [GitHub](https://github.com/Khoshkhah/duckOSM) |
