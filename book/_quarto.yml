@@ -19,6 +19,13 @@ book:
     style: docked
     collapse-level: 2
     logo: duckosm-mark.svg
+    tools:
+      - icon: house
+        href: https://khoshkhah.github.io/duckOSM/
+        text: "The duckOSM manual"
+  page-footer:
+    left: "[← The duckOSM manual](https://khoshkhah.github.io/duckOSM/)"
+    right: "Map data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright)"
   chapters:
     - part: "Start"
       chapters:
