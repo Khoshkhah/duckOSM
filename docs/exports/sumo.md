@@ -120,8 +120,11 @@ Mac mini (Apple M6, 12 cores, 16 GB). The plain XML only (`--no-netconvert`).
 
 | Area (input) | Time | Memory | Output |
 |---|---|---|---|
-| Kentucky (148 MB) | 11 s | 5.0 GB | 1.4 GB |
+| Kentucky (148 MB) | 11 s | 2.6 GB | 1.4 GB |
 | France (5.1 GB) | not run: the Mac mini has too little free disk | | |
+
+The files are written while DuckDB reads the rows. Before this change, Kentucky needed 5.0 GB. The files have the same
+bytes.
 
 ## duckOSM and SUMO's OSM import
 

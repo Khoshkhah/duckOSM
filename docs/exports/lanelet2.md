@@ -33,8 +33,11 @@ Mac mini (Apple M6, 12 cores, 16 GB).
 | Area (input) | Time | Memory | Output |
 |---|---|---|---|
 | Monaco (0.7 MB) | 0.11 s | 63.6 MB | 10.6 MB |
-| Kentucky (148 MB) | not run: `duckosm gmns` stops on Kentucky | | |
+| Kentucky (148 MB) ¹ | 84 s | 10.2 GB | 9.8 GB |
 | France (5.1 GB) | not run | | |
+
+¹ On the GMNS database made by tiles (`duckosm gmns`, zoom 10). lanelet2 reads the whole database, so its memory does not
+go down with the tiles. France can need more than 16 GB.
 
 ## Limits
 
