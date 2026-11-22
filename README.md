@@ -20,11 +20,24 @@
   <a href="https://khoshkhah.github.io/duckOSM/book/"><b>The notebook manual</b></a> ·
   <a href="https://khoshkhah.github.io/duckosm-studio/">duckOSM Studio (browser)</a> ·
   <a href="https://khoshkhah.github.io/duckOSM/first_network/">Your first network</a> ·
-  <a href="https://khoshkhah.github.io/duckOSM/reference/cli/">Command line</a> ·
-  <a href="https://khoshkhah.github.io/duckOSM/reference/database/">Database schema</a>
+  <a href="https://khoshkhah.github.io/duckOSM/reference/cli/">Command line</a>
 </p>
 
 ---
+
+## What duckOSM is
+
+duckOSM reads an OpenStreetMap `.osm.pbf` file and makes the routable road network of an area, its map layers, and
+files for GIS, routing and traffic simulation.
+
+- **Large areas, little memory.** duckOSM builds an area tile by tile, so the build time stays short and the memory
+  stays low, also for a whole country.
+- **In the browser too.** The same Rust engine runs in a web page, [duckOSM Studio](https://khoshkhah.github.io/duckosm-studio/),
+  with no install, and gives the same rows.
+- **One id for each road direction.** `edge_id = hash(osm_id, source, target)` stays the same after a rebuild, so
+  your own data joins to the right edge ([how](https://khoshkhah.github.io/duckOSM/concepts/edge-ids/)).
+- **Fix the OSM data once.** Edit roads, turns and buildings on a map; every output uses your fixes
+  ([Edit OSM data](https://khoshkhah.github.io/duckOSM/guides/edit-osm-data/)).
 
 ## What duckOSM makes
 
@@ -37,77 +50,13 @@ All outputs come from one `.osm.pbf` file, in five levels. Each level keeps the 
   </picture>
 </p>
 
-| Output | Command | Format |
-|---|---|---|
-| **Road networks**: driving, walking and cycling, and the graph of legal turns | `duckosm build` | DuckDB |
-| **Base-map layers**: water, land use, buildings, POIs | `duckosm build` | DuckDB (`features.*`) |
-| **Map data**: the drawing order of the roads, the walls of the buildings | `duckosm build` | DuckDB |
-| **The OSM features table** of [QuackOSM](https://khoshkhah.github.io/duckOSM/concepts/quackosm/) | `duckosm quack`, [in the browser](https://khoshkhah.github.io/duckosm-studio/quack.html) | GeoParquet, DuckDB |
-| **GDAL's five OSM layers**, as [QGIS reads them](https://khoshkhah.github.io/duckOSM/concepts/gdal/) | `duckosm quack --gdal`, [in the browser](https://khoshkhah.github.io/duckosm-studio/quack.html) | GeoPackage, GeoParquet |
-| **Traffic simulation networks** | `duckosm sumo` (`--merge`: one SUMO edge for each chain of roads), `matsim`, `gmns` | SUMO, MATSim, GMNS |
-| **GPS traces on the roads**: map matching (HMM or GPS-DTW), counts and speeds per edge | Python `duckosm.mobility` | DataFrames |
-| **GIS files and graphs** of the network | `duckosm export-gis`, `export-graph` | GeoPackage, shapefile, networkx |
-| **Heights**: the ground height of each node | `duckosm elevation` | DuckDB |
-| **Maps and pages**: maps, a route planner, an editor, Ask | `duckosm viz`, `route-map`, `edit`, `ask` | HTML |
-
-## Fix the OSM data
-
-OSM has errors: a wrong one-way, a missing road, a wrong bridge layer. Fix them on a map. duckOSM keeps your fixes in one
-file, `osm_fixes.yaml`, and applies them at each build, so a new OSM file does not remove them.
-
-<img src="https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/docs/images/edit-turn.png" alt="The Turn tab: road 688731299 is picked, the junction box shows its junction, and the list shows the two roads that leave it, each with Allowed. On the map, the road is blue, the roads that leave are green and the road that only arrives is violet" width="720">
-
-| Where | How |
+| Level | Command |
 |---|---|
-| Browser | [duckOSM Studio](https://khoshkhah.github.io/duckosm-studio/), step **Edit OSM data** |
-| Your computer | `duckosm edit my_area.duckdb` opens the same editor |
-| Build | `duckosm build --fixes osm_fixes.yaml` |
-
-| You can change | Examples |
-|---|---|
-| Roads | one-way, lanes, speed, road class, access; delete a road |
-| Buildings | floors, height, roof; the type of each wall and its door |
-| Nodes | traffic signals, crossings |
-| Turns | a turn that a driver cannot make, or must make |
-| New roads | a road that OSM does not have |
-
-The network, all its exports, and the quack outputs (`duckosm quack --fixes`) use your fixes. More: [Edit OSM data](https://khoshkhah.github.io/duckOSM/guides/edit-osm-data/).
-
-## Two versions, one engine
-
-| | Native | Browser |
-|---|---|---|
-| Program | `duckosm` on your computer | [duckOSM Studio](https://khoshkhah.github.io/duckosm-studio/), a web page |
-| Install | `pip install duckosm` | none |
-| Rows | the same | the same |
-
-In the browser, open:
-
-- [**duckOSM Studio**](https://khoshkhah.github.io/duckosm-studio/): choose an area, build its network, edit the OSM data, and export.
-- [**The quack page**](https://khoshkhah.github.io/duckosm-studio/quack.html): the OSM features table of QuackOSM and GDAL's five layers.
-
-Both build every area by map tiles, cut by [pbfcut](https://github.com/Khoshkhah/pbfcut), so the memory does not grow with the area
-([Browser and native builds](https://khoshkhah.github.io/duckOSM/concepts/browser-native/)).
-
-## Speed on France
-
-France: 5.1 GB `.osm.pbf`, Mac mini (Apple M6, 12 cores, 16 GB).
-
-| Job | Native | Browser | Other tool |
-|---|---|---|---|
-| Road network, driving | 3 min 36 s | 5 min 16 s | |
-| OSM features table (`quack`) | 2 min 9 s | 4 min 54 s | QuackOSM: 9 min 30 s |
-| GDAL's layers, GeoParquet (`quack --gdal`) | 3 min 37 s | 5 min 23 s | `ogr2ogr`: 14 min 18 s |
-
-## One edge id for each direction
-
-```text
-edge_id = hash(osm_id, source, target)
-```
-
-**Each direction of a road has its own id**: a two-way street is two edges, A → B and B → A, so data per direction joins
-to the right edge. The id comes only from OSM ids (the way and its two end nodes), so it stays the same after a rebuild,
-a cut and every export ([how](https://khoshkhah.github.io/duckOSM/concepts/edge-ids/)).
+| 0. The OSM file | `duckosm get` |
+| 1. OSM data | `duckosm quack` |
+| 2. The routing network | `duckosm build`, `export-gis`, `export-graph` |
+| 3. Simulation network | `duckosm sumo`, `matsim`, `gmns` |
+| 4. HD map (experimental) | `duckosm lanelet2`, `opendrive` |
 
 ## Quick start
 
@@ -130,26 +79,13 @@ r["time_s"], r["length_m"], r["edges"]   # the fastest path, door to door, and t
 duckosm.to_gis(db, "monaco.gpkg")         # a GeoPackage for QGIS
 ```
 
-All functions: [Python SDK](https://khoshkhah.github.io/duckOSM/reference/python/). Rust: [Rust SDK](https://khoshkhah.github.io/duckOSM/reference/rust/).
+All functions: [Python SDK](https://khoshkhah.github.io/duckOSM/reference/python/) and [Rust SDK](https://khoshkhah.github.io/duckOSM/reference/rust/).
 
 ## Learn with the notebook manual
 
-[**The notebook manual**](https://khoshkhah.github.io/duckOSM/book/) teaches the Python SDK in 15 chapters. Each chapter
-is one Jupyter notebook on Monaco, with its outputs, and opens in Colab with one click.
-
-| Part | Chapters |
-|---|---|
-| The core | get and build an area · look inside the file · draw maps · join your data by `edge_id` · fix the OSM data · exports |
-| The modules | routing · advanced routing · street network analysis · OSM data for GIS · mobility data and map matching · traffic simulation · transport planning · HD maps · graph machine learning |
-
-The notebook manual uses other tools on duckOSM's outputs too: OSMnx, momepy, cityseer, OR-Tools, pandana, movingpandas,
-folium, lonboard, SUMO and traci.
-
-Each output is compared with a reference tool: QuackOSM, GDAL, SUMO, MATSim and the GMNS specification
-([how each output is checked](https://khoshkhah.github.io/duckOSM/concepts/checks/)).
-
-Experimental exports: OpenDRIVE, Lanelet2, railML, lane-level routing. See the
-[documentation](https://khoshkhah.github.io/duckOSM/exports/).
+[**The notebook manual**](https://khoshkhah.github.io/duckOSM/book/) teaches the Python SDK in 15 chapters, from your
+first network to routing, map matching, traffic simulation and HD maps. Each chapter is one Jupyter notebook on Monaco
+and opens in Colab with one click.
 
 ## For AI agents
 
