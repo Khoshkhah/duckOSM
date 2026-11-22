@@ -83,7 +83,7 @@ def snap(view, points, radius_m: float | None = None, *, x: str = "x", y: str = 
 
 def match(view, traces, *, trace: str | None = "trace_id", time: str | None = "time", x: str = "x", y: str = "y",
           radius_m: float = 50.0, sigma_m: float = 5.0, beta_m: float = 10.0, uturn_m: float = 50.0,
-          method: str = "hmm", mode: str | None = None) -> Match:
+          method: str = "hmm", window_s: int = 30, mode: str | None = None) -> Match:
     """Map matching: the edges that each GPS trace drove, and the edge of each point. ``traces``: a GeoDataFrame or a
     DataFrame with lon and lat columns (``x=``, ``y=``); ``trace``: the column of the trace id (None or missing: one
     trace); ``time``: the column to order the points of a trace by (None or missing: the row order).
@@ -95,6 +95,7 @@ def match(view, traces, *, trace: str | None = "trace_id", time: str | None = "t
     | ``beta_m`` | how much longer than the straight line a route between two points can be |
     | ``uturn_m`` | the extra metres of a U-turn onto the other direction of the same road |
     | ``method`` | ``"hmm"`` (default): the hidden Markov model. ``"dtw"``: GPS-DTW (dynamic time warping, the gps-dtw crate); it needs ``time``, and ``sigma_m``, ``beta_m`` and ``uturn_m`` do not apply. On 600 Monaco traces, GPS-DTW finds far fewer wrong roads with dense GPS (1 to 5 s) and is faster at 1 s; the HMM finds more of the true roads, and is better and faster with sparse GPS (15 to 30 s) |
+    | ``window_s`` | ``method="dtw"``: the seconds of one DTW window (0: the whole trace in one window) |
 
     Returns :class:`Match`: ``points`` (the rows with ``edge_id``, ``fraction``, ``distance_m``, ``snap_x``,
     ``snap_y``; no ``edge_id`` when no edge is within ``radius_m``) and ``edges`` (``trace_id``, ``seq``, ``edge_id``:
@@ -121,7 +122,7 @@ def match(view, traces, *, trace: str | None = "trace_id", time: str | None = "t
             t = (pd.to_datetime(t, utc=True) - pd.Timestamp("1970-01-01", tz="UTC")) / pd.Timedelta("1s")
         ts = t.round().astype("int64").tolist()
     cols, (rt, re) = _rust().mobility_match(db, mode, list(map(int, ids)), xs.tolist(), ys.tolist(), float(radius_m),
-                                            float(sigma_m), float(beta_m), 4.0, float(uturn_m), method, ts)
+                                            float(sigma_m), float(beta_m), 4.0, float(uturn_m), method, ts, int(window_s))
     points = _columns(df, cols)
     labels = df[tcol].drop_duplicates().to_numpy() if tcol else [0]
     edges = pd.DataFrame({"trace_id": [labels[i] for i in rt], "edge_id": pd.array(re, dtype="int64")})

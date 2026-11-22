@@ -83,7 +83,7 @@ fn mobility_snap(py: Python<'_>, db: PathBuf, mode: String, xs: Vec<f64>, ys: Ve
 /// Map matching of traces. `trace`: the trace number of each point (the points of a trace in time order, the traces one
 /// after the other). Returns (the columns of the points, the route rows: trace number and edge id).
 #[pyfunction]
-#[pyo3(signature = (db, mode, trace, xs, ys, radius_m = 50.0, sigma_m = 5.0, beta_m = 10.0, max_route_factor = 4.0, uturn_m = 50.0, method = "hmm".to_string(), ts = None))]
+#[pyo3(signature = (db, mode, trace, xs, ys, radius_m = 50.0, sigma_m = 5.0, beta_m = 10.0, max_route_factor = 4.0, uturn_m = 50.0, method = "hmm".to_string(), ts = None, window_s = 30))]
 #[allow(clippy::too_many_arguments)]
 fn mobility_match(
     py: Python<'_>,
@@ -99,6 +99,7 @@ fn mobility_match(
     uturn_m: f64,
     method: String,
     ts: Option<Vec<i64>>,
+    window_s: usize,
 ) -> PyResult<(Snapped, (Vec<i64>, Vec<i64>))> {
     if xs.len() != ys.len() || xs.len() != trace.len() {
         return Err(PyValueError::new_err("trace, x and y must have the same length"));
@@ -126,7 +127,7 @@ fn mobility_match(
             let end = (start..trace.len()).find(|&i| trace[i] != trace[start]).unwrap_or(trace.len());
             let pts: Vec<(f64, f64)> = (start..end).map(|i| (xs[i], ys[i])).collect();
             let m = match (&dtw_net, &ts) {
-                (Some(d), Some(t)) => mm::match_trace_dtw(&net, d, &pts, &t[start..end], radius_m, &mm::DtwOptions::default())
+                (Some(d), Some(t)) => mm::match_trace_dtw(&net, d, &pts, &t[start..end], radius_m, &mm::DtwOptions { window: window_s, ..Default::default() })
                     .map_err(|e| format!("trace {}: {e}", trace[start]))?,
                 _ => mm::match_trace(&net, &pts, &o),
             };
