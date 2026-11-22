@@ -61,3 +61,4 @@ src/duckosm/_rust*.pyd
 book/_book/
 book/.quarto/
 book/[0-9]*.ipynb
+book/lonboard_*.html
