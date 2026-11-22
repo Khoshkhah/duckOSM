@@ -83,7 +83,7 @@ fn mobility_snap(py: Python<'_>, db: PathBuf, mode: String, xs: Vec<f64>, ys: Ve
 /// Map matching of traces. `trace`: the trace number of each point (the points of a trace in time order, the traces one
 /// after the other). Returns (the columns of the points, the route rows: trace number and edge id).
 #[pyfunction]
-#[pyo3(signature = (db, mode, trace, xs, ys, radius_m = 50.0, sigma_m = 5.0, beta_m = 10.0, max_route_factor = 4.0, uturn_m = 50.0, method = "hmm".to_string(), ts = None, window_s = 30))]
+#[pyo3(signature = (db, mode, trace, xs, ys, radius_m = 50.0, sigma_m = 5.0, beta_m = 10.0, max_route_factor = 4.0, uturn_m = 50.0, method = "hmm".to_string(), ts = None, window_s = 60))]
 #[allow(clippy::too_many_arguments)]
 fn mobility_match(
     py: Python<'_>,
