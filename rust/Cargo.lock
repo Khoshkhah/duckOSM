@@ -907,6 +907,7 @@ version = "0.8.0"
 dependencies = [
  "flate2",
  "geo",
+ "gps-dtw",
  "i_overlay 4.5.2",
  "libc",
  "libm",
@@ -1370,6 +1371,14 @@ dependencies = [
  "libc",
  "r-efi 6.0.0",
  "rand_core",
+]
+
+[[package]]
+name = "gps-dtw"
+version = "0.1.0"
+source = "git+https://github.com/Khoshkhah/gps-dtw.git?rev=62538f37589e5f51ad1a3d030a0d2774f16302c4#62538f37589e5f51ad1a3d030a0d2774f16302c4"
+dependencies = [
+ "rstar",
 ]
 
 [[package]]

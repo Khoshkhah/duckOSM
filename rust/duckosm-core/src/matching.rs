@@ -10,6 +10,9 @@
 //! | Emission | a normal distribution of the distance from the point to the edge, `sigma_m` |
 //! | Transition | an exponential distribution of the difference between the route distance (along the edge directions) and the straight distance of the two points, `beta_m` |
 //! | Break | when no state of a point can follow a state of the point before, the trace starts again at that point |
+//!
+//! The second matcher is GPS-DTW (the gps-dtw crate, [`match_trace_dtw`]): dynamic time warping of the trace,
+//! interpolated each second, against the points of the road. It needs the time of each point.
 
 use crate::analysis::Flat;
 use rstar::primitives::{GeomWithData, Line};
@@ -209,6 +212,35 @@ impl Default for MatchOptions {
     fn default() -> Self {
         MatchOptions { radius_m: 50.0, sigma_m: 5.0, beta_m: 10.0, max_route_factor: 4.0, uturn_m: 50.0 }
     }
+}
+
+/// The options of GPS-DTW: `GpsDtwParams` of the gps-dtw crate (its `Default` gives its defaults).
+pub use gps_dtw::core::GpsDtwParams as DtwOptions;
+
+/// The network of GPS-DTW for the edges of `net`, in the same metres; `turns`: the allowed (from edge, to edge)
+/// pairs as edge indexes (`edge_graph`), None: each edge that starts where an edge ends.
+pub fn dtw_network(net: &Net, turns: Option<Vec<(usize, usize)>>) -> gps_dtw::core::Network {
+    let shapes = net.roads.iter().map(|r| r.line.iter().map(|&p| net.flat.at(p)).collect()).collect();
+    let from = net.roads.iter().map(|r| net.node[&r.source]).collect();
+    let to = net.roads.iter().map(|r| net.node[&r.target]).collect();
+    gps_dtw::core::Network::new(shapes, from, to, turns)
+}
+
+/// Match one trace with GPS-DTW: the route of [`gps_dtw::core::match_gps_dtw`], and for each point the nearest edge
+/// of that route within `radius_m` (None: no route edge so near). `ts`: the time of each point in whole seconds,
+/// in increasing order. `dtw`: [`dtw_network`] of `net`.
+pub fn match_trace_dtw(net: &Net, dtw: &gps_dtw::core::Network, points: &[(f64, f64)], ts: &[i64], radius_m: f64, o: &DtwOptions) -> Result<Matched, String> {
+    if points.is_empty() {
+        return Ok(Matched::default());
+    }
+    let (x, y): (Vec<f64>, Vec<f64>) = points.iter().map(|&p| net.flat.at(p)).map(|q| (q[0], q[1])).unzip();
+    let route = gps_dtw::core::match_gps_dtw(dtw, &x, &y, ts, o)?;
+    let on: std::collections::HashSet<usize> = route.iter().copied().collect();
+    let points = points
+        .iter()
+        .map(|&p| net.within(p, radius_m).into_iter().filter(|c| on.contains(&c.edge)).min_by(|a, b| a.distance_m.partial_cmp(&b.distance_m).unwrap_or(Ordering::Equal)))
+        .collect();
+    Ok(Matched { points, route })
 }
 
 /// The result of one trace: the edge of each point (None: no edge within the radius), and the edges of the route
@@ -430,6 +462,22 @@ mod tests {
         let back: Vec<(f64, f64)> = pts.iter().rev().copied().collect();
         let m = match_trace(&net, &back, &MatchOptions::default());
         assert_eq!(m.route.iter().map(|&e| r[e].edge_id).collect::<Vec<_>>(), vec![6, 2]);
+    }
+
+    #[test]
+    fn gps_dtw_matches_the_same_trace() {
+        let r = roads();
+        let net = Net::new(&r);
+        let dtw = dtw_network(&net, None);
+        let pts: Vec<(f64, f64)> = [(0.1, 0.02), (0.4, -0.02), (0.7, 0.02), (0.95, 0.02), (1.02, 0.3), (0.98, 0.6), (1.02, 0.9)]
+            .iter()
+            .map(|&(x, y)| (x * 0.001, y * 0.001))
+            .collect();
+        let ts: Vec<i64> = (0..pts.len() as i64).map(|i| i * 3).collect();
+        let m = match_trace_dtw(&net, &dtw, &pts, &ts, 50.0, &DtwOptions::default()).unwrap();
+        assert_eq!(m.route.iter().map(|&e| r[e].edge_id).collect::<Vec<_>>(), vec![1, 5]);
+        assert_eq!(r[m.points[0].unwrap().edge].edge_id, 1);
+        assert_eq!(r[m.points[6].unwrap().edge].edge_id, 5);
     }
 
     /// A noisy point next to a 5.5 m dead end: the route does not go into the dead end and back (the U-turn cost).
