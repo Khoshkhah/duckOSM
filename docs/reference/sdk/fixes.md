@@ -31,4 +31,4 @@ net.diff(fixed)
 ```
 
 `save` writes the whole file: its comments are not kept. The other keys of the file (`new_ways`,
-`turn_restrictions`, `extra`) stay. Notebook: [5. Fix the OSM data once](../../notebooks/05_osm_fixes.md).
+`turn_restrictions`, `extra`) stay. Notebook: [5. Fix the OSM data once](https://khoshkhah.github.io/duckOSM/book/05_osm_fixes.html).

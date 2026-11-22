@@ -25,7 +25,7 @@ g = net.driving.to_networkx()                           # = duckosm.ml.to_networ
 data = duckosm.ml.to_pyg(net.driving, graph="turns", features=["length_m", "lanes", "highway"])
 ```
 
-Notebook: [15. Graph machine learning](../../notebooks/15_ml.md). Guide:
+Notebook: [15. Graph machine learning](https://khoshkhah.github.io/duckOSM/book/15_ml.html). Guide:
 [duckOSM for graph machine learning users](../../compare/for-ml-users.md).
 
 The top-level `duckosm.to_networkx(con, ...)` takes a DuckDB connection, as before. Page: [networkx](../../exports/networkx.md).

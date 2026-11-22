@@ -2,7 +2,7 @@
 
 This page is for users of SUMO (netconvert, osmWebWizard, sumolib) and MATSim (pt2matsim, matsim-tools). Each table
 gives the call of your tool and the duckOSM call that does the same work. The module is `duckosm.sim`
-([reference](../reference/sdk/sim.md)). The notebook [12. Traffic simulation](../notebooks/12_sim.md) runs each call
+([reference](../reference/sdk/sim.md)). The notebook [12. Traffic simulation](https://khoshkhah.github.io/duckOSM/book/12_sim.html) runs each call
 on Monaco.
 
 ```bash

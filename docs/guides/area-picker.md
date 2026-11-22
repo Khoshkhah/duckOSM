@@ -51,7 +51,7 @@ picker
                     "--boundary", str(area.boundary), "-o", "data/area.duckdb", "-m", "driving"], check=True)
     ```
 
-    The notebook [From an area to a network](../notebooks/01_area_to_network.md) does these steps and queries the new database.
+    The notebook [From an area to a network](https://khoshkhah.github.io/duckOSM/book/01_area_to_network.html) does these steps and queries the new database.
 
 You can also set the area and get the file from Python, with no click:
 

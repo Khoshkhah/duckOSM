@@ -77,4 +77,4 @@ G = an.to_osmnx(drive)                    # the OSMnx graph, for each OSMnx func
 | Turn restrictions | no | yes, in routes |
 | Size | the Overpass API, a city | an `.osm.pbf` file, up to a country |
 
-Reference: [duckosm.analysis](../reference/sdk/analysis.md). Notebook: [9. Street network analysis](../notebooks/09_analysis.md).
+Reference: [duckosm.analysis](../reference/sdk/analysis.md). Notebook: [9. Street network analysis](https://khoshkhah.github.io/duckOSM/book/09_analysis.html).
