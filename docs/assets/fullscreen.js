@@ -1,20 +1,12 @@
-// Full screen for the embedded maps (iframe) and the pictures of the docs. A map gets a "Full screen" button above it: a click on the map
-// acts in the map. A picture gets no button (Kaveh, 2026-11-06: a large button over each picture is too much): a click on the picture opens
-// it full screen, with the zoom-in pointer and a tooltip.
-// The theme can load a page with no full page load (navigation.instant), so a picture click is caught on the document, and the map
-// buttons are added again after each page change.
+// Full screen for the embedded maps (iframe) of the docs: each map gets a "Full screen" button above it; a click on the map acts in the
+// map. The pictures have no zoom and no full screen (Kaveh, 2026-11-22: no zoom pointer on a picture that does not zoom).
+// The theme can load a page with no full page load (navigation.instant), so the buttons are added again after each page change.
 const full = (el) => {
   if (el.requestFullscreen) el.requestFullscreen();
   else window.open(el.src, "_blank");              // no fullscreen API (iPhone Safari): its own tab
 };
 
-if (!window.dkFullClick) window.dkFullClick = document.addEventListener("click", (e) => {
-  const img = e.target.closest && e.target.closest('.md-content img[src*="images/"]');
-  if (img) full(img);
-}) || true;  // once, also if the theme runs this script again on a page change
-
 function addButtons() {
-  for (const img of document.querySelectorAll('.md-content img[src*="images/"]')) img.title ||= "Click to see the picture full screen";
   for (const f of document.querySelectorAll(".md-content iframe")) {
     if (f.previousElementSibling && f.previousElementSibling.classList.contains("dk-frame-bar")) continue;
     const bar = document.createElement("div"), b = document.createElement("button");
