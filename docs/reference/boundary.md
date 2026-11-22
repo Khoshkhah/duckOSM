@@ -53,7 +53,7 @@ For a place, `duckosm boundary` and `duckosm get` write the properties `name`, `
 
 | Tool | How |
 |---|---|
-| `duckosm get` | `duckosm get "Monaco"` writes `monaco.geojson` next to `monaco.osm.pbf` ([The OSM file](../exports/osm-file.md)). |
+| `duckosm get` | `duckosm get "Monaco"` writes `monaco.geojson` next to `monaco.osm.pbf` ([OSM file](../exports/osm-file.md)). |
 | `duckosm boundary` | `duckosm boundary "Tartu"` or `duckosm boundary --osm-id 2220322`: an OSM boundary relation, from Nominatim or from a PBF ([CLI](cli.md#boundary)). |
 | [geojson.io](https://geojson.io) | Draw a polygon. Then **Save → GeoJSON**. The file is in WGS 84. |
 | QGIS | Right-click the layer → **Export → Save Features As**. Format **GeoJSON**, CRS **EPSG:4326**. |

@@ -75,7 +75,7 @@ duckosm tiles [OPTIONS] [REGION] [-- BUILD_OPTIONS...]
 ### `get`
 
 Finds the boundary of an area, downloads the smallest Geofabrik extract that holds it (to a cache folder), and cuts
-the extract to the boundary. Writes `<name>.osm.pbf` and `<name>.geojson`. Guide: [The OSM file](../exports/osm-file.md).
+the extract to the boundary. Writes `<name>.osm.pbf` and `<name>.geojson`. Guide: [OSM file](../exports/osm-file.md).
 
 ```text
 duckosm get [OPTIONS] [PLACE]
@@ -97,7 +97,7 @@ duckosm get [OPTIONS] [PLACE]
 ### `cut`
 
 Cuts a region file to a boundary and writes the area as a `.osm.pbf` file. Only lists of ids stay in memory.
-Guide: [The OSM file](../exports/osm-file.md#duckosm-cut).
+Guide: [OSM file](../exports/osm-file.md#duckosm-cut).
 
 ```text
 duckosm cut [OPTIONS] --boundary FILE -o FILE REGION
