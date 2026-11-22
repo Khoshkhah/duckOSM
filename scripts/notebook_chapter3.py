@@ -244,15 +244,19 @@ from lonboard import Map, PathLayer
 from lonboard.basemap import MaplibreBasemap
 from lonboard.colormap import apply_continuous_cmap
 
-walk = net.walking.edges()[["edge_id", "length_m", "geometry"]]                 # all the walking edges
+walk = net.walking.edges()[["edge_id", "name", "highway", "length_m", "geometry"]]    # all the walking edges
 share = (walk.length_m.clip(0, 100) / 100).to_numpy()                           # 0 to 1: up to 100 m long
 layer = PathLayer.from_geopandas(walk, get_width=2, width_units="pixels",
                                  get_color=apply_continuous_cmap(share, matplotlib.colormaps["viridis"]))
 esri = "https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/docs/notebooks/images/esri-light-gray.json"    # the base map
-lmap = Map(layer, basemap=MaplibreBasemap(style=esri))                         # the lonboard map
+lmap = Map(layer, basemap=MaplibreBasemap(style=esri), show_tooltip=True)      # the lonboard map, with a tooltip
 lmap.to_html("lonboard_walking.html")                                           # saved as a web page
-IFrame("lonboard_walking.html", width="100%", height=520)                       # the page in a frame""")
-ch.md("""The short edges are dark purple and the edges of 100 m or more are yellow. Most walking edges are short: the
+IFrame("lonboard_walking.html", width="100%", height=520, extras=["allowfullscreen"])    # the page in a frame""")
+ch.md("""Move the mouse over a road to see its `edge_id`, name, class and length, and click it to keep them in a side
+panel. The square button at the bottom right draws a box to select the roads in it. The box goes back to Python as
+`lmap.selected_bounds`, so it is useful only in a running notebook, not in this book.
+
+The short edges are dark purple and the edges of 100 m or more are yellow. Most walking edges are short: the
 footways and the steps of Monaco are cut at each junction.""")
 
 ch.md("""## A picture for a paper: `net.plot(ax=...)`
