@@ -10,7 +10,7 @@ traffic simulation and routing. Fix the OSM data once, on a map. Your fixes go i
 [Try it in your browser](https://khoshkhah.github.io/duckosm-studio/){ .md-button .md-button--primary }
 [Install](install.md){ .md-button }
 [Get started](first_network.md){ .md-button }
-[Read the book](https://khoshkhah.github.io/duckOSM/book/){ .md-button }
+[Notebook manual](https://khoshkhah.github.io/duckOSM/book/){ .md-button }
 [Compare](compare/index.md){ .md-button }
 
 </div>
@@ -158,7 +158,7 @@ All outputs, by level: [Export](exports/index.md). Speed against other tools: [C
 
     `pip install duckosm`, then `import duckosm`: build, quack, route and export from Python, all in the Rust engine.
 
-    [Python SDK](reference/python.md) · [The book](https://khoshkhah.github.io/duckOSM/book/) · [Quick start](install.md#quick-start)
+    [Python SDK](reference/python.md) · [Notebook manual](https://khoshkhah.github.io/duckOSM/book/) · [Quick start](install.md#quick-start)
 
 -   :material-language-rust:{ .lg .middle } **Rust SDK**
 

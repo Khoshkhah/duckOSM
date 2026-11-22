@@ -179,7 +179,7 @@ nav:
           - Lane-level routing: exports/lane-routing.md
           - Lanelet2: exports/lanelet2.md
           - OpenDRIVE: exports/opendrive.md
-  - The book: notebooks/index.md
+  - Notebook manual: notebooks/index.md
   - Python SDK:
       - Core: reference/python.md
       - The modules: reference/python-modules.md

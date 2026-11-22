@@ -224,7 +224,7 @@ that any browser opens.
 `explore` puts the columns of the GeoDataFrame into a tooltip (when the mouse is over a road) and, with `popup=True`,
 into a pop-up (when you click a road). The cell keeps only five columns, so the map stays small. `Fullscreen` adds the
 full-screen button, and `save` writes the map as a web page. The map has two Esri base maps, light gray and dark
-gray: the layer button at the top right changes between them, and the book shows the one that fits the theme of the
+gray: the layer button at the top right changes between them, and the notebook manual shows the one that fits the theme of the
 page (the light or the dark theme).""")
 ch.code("""import folium.plugins
 
@@ -248,8 +248,8 @@ This map draws all 11,938 walking edges, colored by their length. Each line has 
 footway, steps, a path or a cycleway, and 6 m for a road. Zoom in, and the roads become wider than the footways.
 `width_min_pixels=1` keeps each line visible when you zoom out. lonboard gives each line its color as an array, so
 the cell makes the colors with a matplotlib color ramp. lonboard takes its base map as a MapLibre style at a web
-address: the book has a small style file for each Esri map, light gray and dark gray. lonboard cannot change its
-base map in a saved page, so the cell saves the map two times, and the book shows the page that fits its theme. The cell saves the map as a web page with `to_html` and shows the page
+address: the notebook manual has a small style file for each Esri map, light gray and dark gray. lonboard cannot change its
+base map in a saved page, so the cell saves the map two times, and the notebook manual shows the page that fits its theme. The cell saves the map as a web page with `to_html` and shows the page
 in a frame. In Colab, show the map with `lmap` alone in a cell.""")
 ch.code("""import matplotlib
 from IPython.display import IFrame

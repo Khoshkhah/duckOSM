@@ -1,6 +1,6 @@
-# The book
+# Notebook manual
 
-The chapters of duckOSM's Python SDK are in one place: [**the duckOSM book**](https://khoshkhah.github.io/duckOSM/book/).
+The chapters of duckOSM's Python SDK are in one place: [**the notebook manual**](https://khoshkhah.github.io/duckOSM/book/).
 Each chapter is one Jupyter notebook on Monaco, with the outputs of its last run. This page lists the chapters, with a
 button to run each one in Colab and a link to download it. Each notebook installs duckOSM when it is not installed.
 
