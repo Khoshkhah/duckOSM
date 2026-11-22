@@ -9,7 +9,7 @@
 //! - `buffer::PolygonBuilder`: the maximal and minimal edge rings, shells and holes.
 //!
 //! The order of the steps and of each loop is as in GEOS, so the rings have the same points in the same order. Where
-//! GEOS throws a `TopologyException`, `buffer_polygons` gives an error (GEOS then tries again with less precision).
+//! GEOS throws a `TopologyException`, `buffer_polygons` tries again with less precision, as `BufferOp`.
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap, VecDeque};
@@ -1115,8 +1115,31 @@ fn outside_depth(g: &Graph, processed: &[Vec<usize>], p: P) -> i32 {
 }
 
 /// The polygons of the buffer whose raw curves are `curves` (closed), each with its depth delta (-1: the left side is outside,
-/// +1: the right side is outside): GEOS's `BufferBuilder::buffer` with no precision model.
+/// +1: the right side is outside). First GEOS's `BufferBuilder::buffer` with no precision model. Where it gives a
+/// `TopologyException`, it tries again as `BufferOp::bufferReducedPrecision`: the points rounded to a grid of 12, 11, ... 0
+/// digits of precision of the extent of the curves. The error of the first try when each try fails.
+// ponytail: GEOS rounds the curves while it makes them and nodes them with snap rounding; here the made curves are rounded
+// and the same noder runs again. The result can differ from GEOS's by less than the grid, only where the first try fails.
 pub fn buffer_polygons(curves: &[(Vec<P>, i32)]) -> Result<Vec<Polygon>, Err> {
+    let first = match buffer_full_precision(curves) {
+        Ok(p) => return Ok(p),
+        Err(e) => e,
+    };
+    let max = curves.iter().flat_map(|c| c.0.iter()).fold(0.0f64, |m, p| m.max(p.0.abs()).max(p.1.abs()));
+    // BufferOp::precisionScaleFactor: the digits of the extent are taken from the precision
+    let env_digits = if max > 0.0 { (max.log10() + 1.0) as i32 } else { 1 };
+    for digits in (0..=12).rev() {
+        let scale = 10f64.powi(digits - env_digits);
+        let rounded: Vec<(Vec<P>, i32)> =
+            curves.iter().map(|(c, d)| (c.iter().map(|p| ((p.0 * scale).round() / scale, (p.1 * scale).round() / scale)).collect(), *d)).collect();
+        if let Ok(p) = buffer_full_precision(&rounded) {
+            return Ok(p);
+        }
+    }
+    Err(first)
+}
+
+fn buffer_full_precision(curves: &[(Vec<P>, i32)]) -> Result<Vec<Polygon>, Err> {
     // computeNodedEdges and insertUniqueEdge
     let mut edges: Vec<Edge> = Vec::new();
     let mut index: HashMap<Vec<(u64, u64)>, usize> = HashMap::new();
