@@ -255,12 +255,13 @@ walk["length_m"] = walk.length_m.round(1)                                      #
 share = (walk.length_m.clip(0, 100) / 100).to_numpy()                           # 0 to 1: up to 100 m long
 width = walk.highway.isin(["footway", "steps", "path", "cycleway"]).map({True: 2.0, False: 6.0})    # metres
 layer = PathLayer.from_geopandas(walk, get_width=width.to_numpy(), width_units="meters", width_min_pixels=1,
-                                 get_color=apply_continuous_cmap(share, matplotlib.colormaps["viridis"]))
+                                 get_color=apply_continuous_cmap(share, matplotlib.colormaps["viridis"]),
+                                 auto_highlight=True, highlight_color=[255, 0, 0])    # the road under the mouse in red
 esri = "https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/docs/notebooks/images/esri-light-gray.json"    # the base map
 lmap = Map(layer, basemap=MaplibreBasemap(style=esri), show_tooltip=True)      # the lonboard map, with a tooltip
 lmap.to_html("lonboard_walking.html")                                           # saved as a web page
 IFrame("lonboard_walking.html", width="100%", height=520, extras=["allowfullscreen"])    # the page in a frame""")
-ch.md("""Move the mouse over a road to see its `edge_id`, name, class and length, and click it to keep them in a side
+ch.md("""Move the mouse over a road: it turns red, and a tooltip shows its `edge_id`, name, class and length, and click it to keep them in a side
 panel. The square button at the bottom right draws a box to select the roads in it. The box goes back to Python as
 `lmap.selected_bounds`, so it is useful only in a running notebook, not in this book.
 
