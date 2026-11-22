@@ -94,7 +94,7 @@ def match(view, traces, *, trace: str | None = "trace_id", time: str | None = "t
     | ``sigma_m`` | the GPS error (metres) |
     | ``beta_m`` | how much longer than the straight line a route between two points can be |
     | ``uturn_m`` | the extra metres of a U-turn onto the other direction of the same road |
-    | ``method`` | ``"hmm"`` (default): the hidden Markov model. ``"dtw"``: GPS-DTW (dynamic time warping, the gps-dtw crate); it needs ``time``, and ``sigma_m``, ``beta_m`` and ``uturn_m`` do not apply. On 600 Monaco traces, GPS-DTW finds far fewer wrong roads with dense GPS (1 to 5 s) and is faster at 1 s; the HMM finds more of the true roads, and is better and faster with sparse GPS (15 to 30 s) |
+    | ``method`` | ``"hmm"`` (default): the hidden Markov model. ``"dtw"``: GPS-DTW (dynamic time warping, the gps-dtw crate); it needs ``time``, and ``sigma_m``, ``beta_m`` and ``uturn_m`` do not apply. On 600 Monaco traces, GPS-DTW finds far fewer wrong roads with dense GPS (1 to 5 s) and is faster up to 15 s; the HMM finds more of the true roads, and is better with sparse GPS (15 to 30 s) |
     | ``window_s`` | ``method="dtw"``: the seconds of one DTW window (0: the whole trace in one window) |
 
     Returns :class:`Match`: ``points`` (the rows with ``edge_id``, ``fraction``, ``distance_m``, ``snap_x``,

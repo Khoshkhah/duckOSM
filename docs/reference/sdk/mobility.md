@@ -48,7 +48,8 @@ roads next to the route.
 `method="dtw"` matches with [GPS-DTW](https://khoshkhah.github.io/gps-dtw/) (the Rust crate gps-dtw, pinned in
 `rust/duckosm-core/Cargo.toml`). It cleans the trace, interpolates it each second, and aligns it with points along
 the roads by dynamic time warping, in windows of `window_s` seconds (default 30; each window gives its 20 best ends
-to the next one). The turns come from `edge_graph`, so the turn restrictions apply. It needs the
+to the next one). The search radius is 30 m at a real GPS point and grows with the seconds to the nearest GPS point,
+up to the GPS spacing at the middle of a gap. The turns come from `edge_graph`, so the turn restrictions apply. It needs the
 `time` column: a time, or numbers of seconds. `sigma_m`, `beta_m` and `uturn_m` do not apply. The edge of each point
 is the nearest edge of the route within `radius_m`.
 
@@ -58,12 +59,13 @@ one call for each method and interval:
 | GPS interval | Route edges found, HMM | Route edges found, DTW | Matched edges on the route, HMM | Matched edges on the route, DTW | Time, HMM | Time, DTW |
 |---|--:|--:|--:|--:|--:|--:|
 | 1 s | 96.2 % | 94.0 % | 65.6 % | **97.1 %** | 2.4 s | **0.6 s** |
-| 5 s | 96.2 % | 95.2 % | 90.1 % | **95.4 %** | 1.1 s | **0.7 s** |
-| 15 s | **94.9 %** | 92.2 % | 93.8 % | 93.9 % | **1.3 s** | 1.6 s |
-| 30 s | **93.9 %** | 89.8 % | **95.1 %** | 91.1 % | **1.9 s** | 3.7 s |
+| 5 s | 96.2 % | 94.9 % | 90.1 % | **95.5 %** | 1.1 s | **0.6 s** |
+| 15 s | **94.9 %** | 92.2 % | 93.8 % | 93.9 % | 1.3 s | **1.0 s** |
+| 30 s | **93.9 %** | 89.7 % | **95.1 %** | 91.0 % | 1.9 s | 2.0 s |
 
 Against windows of 60 s (the default of gps-dtw), windows of 30 s are 20 to 30 % faster, with at most 0.5 points
-less of each measure. Use `method="dtw"` for dense GPS (1 to 5 s), and the HMM (the default) for sparse GPS. The routes of this test are
+less of each measure. Use `method="dtw"` for dense GPS (1 to 5 s): far fewer wrong roads, and faster. With sparse GPS
+the HMM (the default) finds more of the route, at about the same time. The routes of this test are
 shortest paths, which favour the HMM. A test on real trips can change the default.
 
 ## The edge id map

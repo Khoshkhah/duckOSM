@@ -1376,7 +1376,7 @@ dependencies = [
 [[package]]
 name = "gps-dtw"
 version = "0.1.0"
-source = "git+https://github.com/Khoshkhah/gps-dtw.git?rev=16d9554367cf2c1127e764f92a809d305ae20888#16d9554367cf2c1127e764f92a809d305ae20888"
+source = "git+https://github.com/Khoshkhah/gps-dtw.git?rev=f83d74816471da68ac91f77b55f87d0793af57e1#f83d74816471da68ac91f77b55f87d0793af57e1"
 dependencies = [
  "rstar",
 ]

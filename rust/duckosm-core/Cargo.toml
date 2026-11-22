@@ -16,7 +16,7 @@ zstd = ["dep:zstd"]
 pbfcut = { git = "https://github.com/Khoshkhah/pbfcut.git", rev = "2facc00595ff6397660d76211ca255098affab38" }
 rstar = "0.12"
 # the map matching with GPS-DTW (`matching::match_trace_dtw`): the plain Rust matcher of gps-dtw, at one pinned commit
-gps-dtw = { git = "https://github.com/Khoshkhah/gps-dtw.git", rev = "16d9554367cf2c1127e764f92a809d305ae20888", default-features = false }
+gps-dtw = { git = "https://github.com/Khoshkhah/gps-dtw.git", rev = "f83d74816471da68ac91f77b55f87d0793af57e1", default-features = false }
 osmpbf = { version = "0.3.8", optional = true }
 # pbfraw inflates the blocks with flate2; zlib-rs is a pure-Rust zlib that also builds for WebAssembly
 flate2 = { version = "1.1", default-features = false, features = ["zlib-rs"], optional = true }
