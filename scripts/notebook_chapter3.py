@@ -249,6 +249,7 @@ from lonboard.basemap import MaplibreBasemap
 from lonboard.colormap import apply_continuous_cmap
 
 walk = net.walking.edges()[["edge_id", "name", "highway", "length_m", "geometry"]]    # all the walking edges
+walk["length_m"] = walk.length_m.round(1)                                      # 0.1 m is enough in the tooltip
 share = (walk.length_m.clip(0, 100) / 100).to_numpy()                           # 0 to 1: up to 100 m long
 layer = PathLayer.from_geopandas(walk, get_width=2, width_units="pixels",
                                  get_color=apply_continuous_cmap(share, matplotlib.colormaps["viridis"]))
