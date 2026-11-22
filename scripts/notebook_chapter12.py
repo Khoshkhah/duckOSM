@@ -12,8 +12,8 @@ ch = Chapter(12, "12_sim", "Traffic simulation",
              "SUMO and MATSim networks whose ids are the edge ids",
              learn="what a traffic simulation needs; the SUMO network with `to_sumo` and its options; how you read it "
                    "with sumolib; `edge_map` from the SUMO ids to `edge_id`; a short SUMO run and its counts on the "
-                   "edges; the MATSim network, and MATSim lanes and signals",
-             time="about 3 minutes", extras="sim,viz",
+                   "edges; a closed street with traci, and where its traffic goes; the MATSim network, and MATSim lanes and signals",
+             time="about 3 minutes", extras="sim,viz", more_install="\n    %pip install -q traci",
              next_=("13_planning", "13. Transport planning", "GMNS networks, path4gmns and AequilibraE"))
 
 ch.md(f"""## What a traffic simulation needs
@@ -208,6 +208,100 @@ top.assign(cars=top.edge_id.map(cars)).sort_values("cars", ascending=False)     
 ch.md("""**What the output shows.** The busiest edge is on the Place d'Armes (144 cars). The next two are two edges of
 the Boulevard Albert 1er (128 cars each). These are secondary roads. The names come from the duckOSM
 edges, through the `edge_id`.""")
+
+ch.md("""## Control the simulation with traci
+
+The run above starts SUMO and reads its file at the end. [traci](https://sumo.dlr.de/docs/TraCI.html) is SUMO's
+Python interface: Python starts SUMO, moves it one second at a time, reads values while it runs, and changes the
+network. The `edge_id` is the key in both directions: it names the street to change in SUMO, and it brings the SUMO
+values back to the duckOSM edges.
+
+The question here: when the busiest street is closed after 10 minutes, where does its traffic go? The steps:
+
+1. Ask SUMO to count the vehicles on each edge in the time window from 600 s to 1200 s (an edgeData file with
+   `begin` and `end`).
+2. Run the same trips one time with no change. This is the baseline.
+3. Run them again with traci. At 600 s, close the busiest edge to cars (`traci.edge.setDisallowed`), and send the
+   vehicles on the road to a new route (`traci.vehicle.rerouteTraveltime`). Every 10 s, read the number of vehicles in
+   the network. At 900 s, read the position of each vehicle.
+4. Compare the two runs in the same window, edge by edge.
+
+`--ignore-route-errors` lets SUMO go on when a trip has no route after the closure (SUMO then drops the trip).""")
+ch.code("""closed = int(cars.idxmax())                                              # the busiest edge of the run above
+closed_sumo = edges.id[edges.edge_id == closed].tolist()                 # its SUMO id (or ids, when netconvert cut it)
+window = '<additional><edgeData id="w" file="{}" begin="600" end="1200"/></additional>'    # 1. the window 600-1200 s
+open("out/sumo/base.add.xml", "w").write(window.format("base.xml"))
+open("out/sumo/closed.add.xml", "w").write(window.format("closed.xml"))
+run = [f"{sumo.SUMO_HOME}/bin/sumo", "-n", str(files["net"]), "-r", "out/sumo/trips.xml",
+       "--no-step-log", "--no-warnings", "--ignore-route-errors", "--seed", "1", "--end", "1800"]    # the same trips
+subprocess.run(run + ["-a", "out/sumo/base.add.xml"], check=True, capture_output=True).returncode    # 2. the baseline""")
+ch.code("""import traci
+
+traci.start(run + ["-a", "out/sumo/closed.add.xml",                      # 3. the same run, controlled by Python
+                   "--fcd-output", "out/sumo/fcd.parquet", "--fcd-output.geo", "true"])    # and each vehicle each second
+in_network, positions = [], None
+for t in range(1, 1801):
+    traci.simulationStep()                                               # one second of the simulation
+    if t == 600:                                                         # close the edge to cars, and reroute
+        for sid in closed_sumo:
+            traci.edge.setDisallowed(sid, ["passenger"])
+        for vehicle in traci.vehicle.getIDList():
+            traci.vehicle.rerouteTraveltime(vehicle)
+    if t % 10 == 0:
+        in_network.append((t, traci.vehicle.getIDCount()))               # the vehicles in the network
+    if t == 900:                                                         # the position of each vehicle, as lon, lat
+        positions = pd.DataFrame([traci.simulation.convertGeo(*traci.vehicle.getPosition(v))
+                                  for v in traci.vehicle.getIDList()], columns=["x", "y"])
+traci.close()
+in_network = pd.DataFrame(in_network, columns=["t", "vehicles"])
+net.driving.edges(where=f"edge_id = {closed}")[["edge_id", "name"]], len(positions)    # the closed edge, the vehicles at 900 s""")
+ch.md("""The closed edge is the Place d'Armes, the busiest edge of the first run. At 900 s, 255 vehicles are in the
+network. traci prints "Retrying in 1 seconds" while it connects to SUMO.""")
+ch.code("""import matplotlib.pyplot as plt
+
+fig, ax = plt.subplots(figsize=(8, 3))
+ax.plot(in_network.t / 60, in_network.vehicles, color="#1f6feb")       # the vehicles in the network
+ax.axvline(10, color="#d62728", linestyle="--", label="the edge closes")    # 600 s
+ax.set_xlabel("minutes"); ax.set_ylabel("vehicles in the network"); ax.legend()
+plt.show()""")
+ch.md("""The trips start in the first 15 minutes, so the network fills up to about 250 vehicles. The closure at
+10 minutes does not change this total much: the vehicles take other routes. After 15 minutes no new trip starts, and
+the network is empty after about 25 minutes.""")
+ch.code("""fig, ax = plt.subplots(figsize=(8, 8))
+net.driving.edges().plot(ax=ax, color="lightgray", linewidth=0.6)       # the roads in light gray
+ax.scatter(positions.x, positions.y, s=8, color="#d62728", label="vehicle at 900 s")    # the vehicles
+spot = net.driving.edges(where=f"edge_id = {closed}").geometry.iloc[0].centroid           # the closed edge
+ax.scatter([spot.x], [spot.y], s=400, facecolors="none", edgecolors="black", linewidths=2, label="closed edge")
+ax.legend(title="SUMO at 15 minutes"); ax.set_axis_off()
+plt.show()""")
+ch.md("""Each red dot is one vehicle at 15 minutes. traci gives its position in SUMO's coordinates, and
+`traci.simulation.convertGeo` turns it into longitude and latitude. The black ring is the closed edge. The same run
+also wrote every vehicle at every second to `out/sumo/fcd.parquet` (SUMO's FCD output). A later version of the book
+can play this file as moving vehicles on the live map, with roadstyle's vehicle player.""")
+ch.code("""def entered(path):                                                       # the vehicles that entered each edge_id
+    rows = pd.read_xml(path, xpath=".//edge", parser="etree", dtype={"id": str})
+    return rows.merge(edges, on="id").groupby("edge_id").entered.sum()
+
+
+change = entered("out/sumo/closed.xml").sub(entered("out/sumo/base.xml"), fill_value=0)    # 4. closed run - baseline
+streets = net.driving.edges().set_index("edge_id").name
+pd.DataFrame({"name": streets.reindex(change.index), "change": change}).sort_values("change").iloc[[0, 1, 2, -3, -2, -1]]""")
+ch.md("""In the window from 10 to 20 minutes, 72 fewer vehicles enter the Place d'Armes than in the baseline, and 52
+fewer enter two edges of the Avenue Prince Pierre, the street that leads to the square. The Avenue d'Ostende and the
+Avenue Princesse Alice each get 36 more: the vehicles go around the closed square on them.""")
+ch.code("""from matplotlib.colors import TwoSlopeNorm
+
+roads = net.driving.edges()
+moved = roads.merge(change[change != 0].rename("change"), left_on="edge_id", right_index=True)    # the edges that changed
+fig, ax = plt.subplots(figsize=(8, 8))
+roads.plot(ax=ax, color="lightgray", linewidth=0.6)                      # all the roads in light gray
+moved.plot(ax=ax, column="change", cmap="RdBu_r", norm=TwoSlopeNorm(0), linewidth=3, legend=True,
+           legend_kwds={"label": "vehicles: closed run - baseline", "shrink": 0.6})    # blue: fewer, red: more
+ax.set_axis_off()
+plt.show()""")
+ch.md("""Blue streets have fewer vehicles than in the baseline, and red streets have more. Gray streets have no change.
+The blue streets lead to the closed square. The red streets, along the port and up to Monte Carlo, are the new routes
+around it.""")
 
 ch.md("""## MATSim
 
