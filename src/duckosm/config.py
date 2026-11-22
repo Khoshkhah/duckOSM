@@ -56,6 +56,7 @@ class Options:
     simplify_batches: int = 0
     boundary_cells: bool = False
     boundary_cell_resolutions: Optional[list[int]] = None
+    chains: bool = True                    # write driving.chains: the driving edges joined where the road only continues (the SUMO export with merge=True needs it)
 
     build_features: bool = True            # build the features.* base-map layers (water, land, buildings, POIs…) for base maps (mapstyle); PBF builds only
     levels: bool = True                    # the last step: visualization.edge_levels, the drawing order of the roads, solved with your edits kept in visualization.level_* (a rebuild keeps them). Set false for a big area; `duckosm levels` makes it later. See docs/design/levels_in_build.md

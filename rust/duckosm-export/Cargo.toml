@@ -10,6 +10,8 @@ license.workspace = true
 [dependencies]
 duckdb = { version = "=1.10506.1", features = ["bundled"] }
 clap = { version = "4", features = ["derive"] }
+# the node types of the SUMO export, which the chains of duckosm-core share
+duckosm-core = { path = "../duckosm-core", default-features = false }
 flate2 = "1"
 geo = { version = "0.33", default-features = false }
 # the map tiles of GMNS by tiles: the tile grid of the tile cut (the rev of duckosm-core)

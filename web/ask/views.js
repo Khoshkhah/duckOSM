@@ -33,7 +33,7 @@ const TABLES = {
   // the area
   boundary: "kind:boundary", boundary_cells: "kind:cell",
   // a pair or a path of roads: the parts of one row (step 3)
-  edge_graph: "kind:turn", turn_restrictions: "kind:restriction", turn_path_restrictions: "kind:path", turn_permission: "kind:permission", edge_id_map: "kind:merged", movement: "kind:movement",
+  edge_graph: "kind:turn", turn_restrictions: "kind:restriction", turn_path_restrictions: "kind:path", turn_permission: "kind:permission", edge_id_map: "kind:merged", chains: "kind:chain", movement: "kind:movement",
   // H3 cells made by the page, and the card of a cell (steps 2 and 4)
   boundary_h3: "pending:2",
   // the changes of the fixes file
@@ -141,6 +141,10 @@ export function viewKinds({ names = [], hasTags = true, h3 = null, query = null 
     const idMap = names.find((n) => n.endsWith(".edge_id_map"));
     if (idMap) kinds.merged = { label: "Merged edge", idColumns: ["new_edge_id"], geometryBy: (sql, column) => `SELECT m.new_edge_id AS id, ST_AsGeoJSON(any_value(e.geometry)) AS geom, count(*) AS old_edges, any_value(m.osm_id) AS osm_id FROM (SELECT DISTINCT * FROM ${idMap} WHERE new_edge_id ${ids(sql, column)}) m JOIN ${roadsSql} e ON e.edge_id = m.new_edge_id GROUP BY m.new_edge_id` };
   }
+
+  // a chain of driving.chains: its own joined line, with the number of its edges in the card
+  const chains = names.find((n) => n.endsWith(".chains"));
+  if (chains) kinds.chain = { label: "Chain of edges", idColumns: ["chain_id"], geometryBy: (sql, column) => `SELECT c.chain_id AS id, ST_AsGeoJSON(c.geometry) AS geom, len(c.edge_ids) AS edges, c.name, round(c.length_m) AS length_m FROM ${chains} c WHERE c.chain_id ${ids(sql, column)}` };
 
   // GMNS (the file of `duckosm gmns`): a movement is the link in, the node and the link out
   for (const t of names.filter((n) => /^gmns_\w+\.movement$/.test(n))) {

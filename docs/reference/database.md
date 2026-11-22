@@ -267,6 +267,25 @@ Every driving edge's lanes, and every bus-only edge's (`private_edges` with `acc
 `lanes` does not count the bike lanes (as OSM, and the OSM import of SUMO). A count or a width that no tag gives has
 `default`. To see how much of the network has no lane tags, count these rows (`WHERE source = 'default'`).
 
+### `chains` {#chains}
+
+Driving only, with `options.chains` (on; `--no-chains` turns it off). One row for each chain: the edges joined at the nodes where the road only continues (for example a
+footway crossing). The edges keep every cut, because the multimodal routing needs them. An export can write one
+edge for each chain: `to_sumo(..., merge=True)`. Each driving edge is in one chain. Edge `a` joins the next edge `b`
+only where no other driving road meets the node, the two edges have the same values in the columns below and the
+same lanes in `lane_profile`, the node has no traffic light or stop sign, and no turn rule names the two edges.
+
+| Column | Type | Description |
+|---|---|---|
+| `chain_id` | BIGINT | the chain's id: the `edge_id` for a chain of one edge, else a hash of `edge_ids`. The same on every rebuild of the same data |
+| `source` | BIGINT | the node the chain starts at |
+| `target` | BIGINT | the node the chain ends at |
+| `edge_ids` | BIGINT[] | the edges, in driving order. `unnest(edge_ids)` gives one row for each edge |
+| `length_m` | FLOAT | the sum of the edge lengths |
+| `cost_s` | FLOAT | the sum of the edge travel times |
+| `highway`, `name`, `lanes`, `maxspeed_kmh`, `oneway`, `layer`, `bridge`, `tunnel`, `junction`, `access`, `service` | | the same values as on each edge of the chain |
+| `geometry` | GEOMETRY | the edge lines joined into one line, from `source` to `target`, with no simplification |
+
 ### `virtual_nodes`
 
 | Column | Type |

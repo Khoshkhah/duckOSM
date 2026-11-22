@@ -78,6 +78,10 @@ struct Cli {
     /// --boundary and the driving mode.
     #[arg(long, conflicts_with = "config")]
     no_bus_routes: bool,
+    /// Do not write driving.chains, the driving edges joined where the road only continues (duckOSM option chains: false).
+    /// The SUMO export with --merge needs it.
+    #[arg(long, conflicts_with = "config")]
+    no_chains: bool,
     /// A duckOSM OSM fixes file (YAML). With --config, it replaces the config's osm_overrides.
     #[arg(long, value_name = "FILE")]
     fixes: Option<PathBuf>,
@@ -1489,6 +1493,7 @@ fn params(cli: &Cli) -> Result<(PathBuf, PathBuf, Params), String> {
         p.modes = NetworkMode::parse_all(&cli.modes.split(',').collect::<Vec<_>>())?;
         p.infer_sidewalks = !cli.no_sidewalk_inference;
         p.bus_routes = !cli.no_bus_routes;
+        p.after.chains = !cli.no_chains;
         p.options = NetworkOptions {
             cycling_dismount: !cli.no_cycling_dismount,
             merge_segments: !cli.no_merge_segments,

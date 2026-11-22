@@ -60,6 +60,7 @@ Each step is on by default, except where the table says off.
 | `options.building_faces` | off | the [walls of the buildings](../concepts/building-walls.md) |
 | `options.bus_routes` | on | the [bus routes](../concepts/networks.md#bus-routes) on the driving edges |
 | `options.boundary_cells`, `options.boundary_cell_resolutions` | off | the H3 cells that cover the boundary |
+| `options.chains` | on | [`driving.chains`](database.md#chains): the driving edges joined where the road only continues. The SUMO export with `merge` needs it. Command line: `--no-chains` |
 | `options.clip_strategy` | `smart` with the base-map layers, else `complete_ways` | how the file is cut to the boundary: `complete_ways`, `smart` or `simple` |
 | `options.memory_limit`, `options.threads` | DuckDB's own | the memory and the threads of DuckDB |
 

@@ -324,6 +324,7 @@ pub(crate) fn lanes_from_sumo(c: &Ctx, source: &Path, sch: &str, mode: &str, geo
         lanes: Some(ours_lanes),
         edge_attrs,
         config: if drive_side == "left" { vec![("lefthand".into(), "true".into())] } else { vec![] },
+        merge: false,
     };
     let s = crate::sumo::to_sumo_with(source, &tmp, mode, "gmns", true, None, true, &opts)?;
     let net = read_net(s.net.as_ref().ok_or("netconvert built no net")?)?;

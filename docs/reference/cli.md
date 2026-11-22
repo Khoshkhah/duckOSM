@@ -45,7 +45,7 @@ duckosm [OPTIONS] [PBF]
 | `--h3-resolution RES` | the H3 columns at this resolution, 0 to 15 | |
 | `--raw` | with `--boundary`: also write `raw.*` | off |
 | `--cut-pbf`, `--cut-osm` | with `--boundary`: also write the cut area as `cut.osm.pbf` or `cut.osm` | off |
-| `--no-graph`, `--no-restrictions`, `--no-speeds`, `--no-costs`, `--no-merge-segments`, `--no-functional-types`, `--no-bus-routes`, `--no-ways-tables` | turn off one step | |
+| `--no-graph`, `--no-restrictions`, `--no-speeds`, `--no-costs`, `--no-merge-segments`, `--no-functional-types`, `--no-bus-routes`, `--no-ways-tables`, `--no-chains` | turn off one step | |
 | `--no-connect-paths`, `--snap-m M` | the [connection of dangling paths](../concepts/cleanup.md), and its distance | on, 10 m |
 | `--timing` | print the time of each step | |
 
@@ -451,6 +451,7 @@ duckosm sumo [OPTIONS] DB
 | `--connections` / `--no-connections` | write the allowed turns from `edge_graph`; off lets `netconvert` guess them | on |
 | `-c`, `--config PATH` | a `netconvert` config (`.netccfg`) instead of the built-in one | |
 | `--netconvert` / `--no-netconvert` | run `netconvert`: also the `.net.xml` and the signal programs (`.tll.xml`); off writes the plain XML files and the `.netccfg` | off |
+| `--merge` | driving only: one SUMO edge for each chain of `driving.chains`, with the id `chain_id` ([how](../exports/sumo.md#fewer-edges-merge)); not with `--join-junctions` | off |
 | `--join-junctions` | join close junctions (netconvert's `junctions.join`): a crossroads mapped as two or three nodes becomes one junction ([how](../exports/sumo.md)); not with `-c` | off |
 
 ### `matsim`
