@@ -81,3 +81,39 @@ window.addEventListener("load", () => {
   });
 });
 </script>
+<!-- Web maps follow the theme of the page: the folium maps show their dark Esri layer in the dark theme, and the
+     lonboard frames load the dark page (lonboard_*_dark.html in place of lonboard_*_light.html). -->
+<script>
+(function () {
+  function dark() { return document.body.classList.contains("quarto-dark"); }
+  function folium(frame, isDark) {                   // a folium map: its tile layers are globals tile_layer_<id>
+    const w = frame.contentWindow;
+    if (!w || !w.L) return false;
+    const names = Object.keys(w).filter((k) => k.startsWith("tile_layer_"));
+    const map = Object.keys(w).filter((k) => k.startsWith("map_")).map((k) => w[k]).find((m) => m && m.addLayer);
+    if (!map || names.length < 2) return true;
+    names.forEach((k) => {
+      const layer = w[k], isDarkLayer = /Dark_Gray/.test(layer._url || "");
+      if (isDarkLayer === isDark) { if (!map.hasLayer(layer)) map.addLayer(layer); }
+      else if (map.hasLayer(layer)) map.removeLayer(layer);
+    });
+    return true;
+  }
+  function apply() {
+    const isDark = dark();
+    document.querySelectorAll(".cell-output-display iframe").forEach((frame) => {
+      const src = frame.getAttribute("src") || "";
+      if (/lonboard_.*_(light|dark)\.html/.test(src)) {
+        const want = src.replace(/_(light|dark)\.html/, isDark ? "_dark.html" : "_light.html");
+        if (want !== src) frame.setAttribute("src", want);
+      } else if (frame.hasAttribute("srcdoc") && !folium(frame, isDark)) {
+        frame.addEventListener("load", () => folium(frame, dark()), { once: true });    // not loaded yet
+      }
+    });
+  }
+  window.addEventListener("load", () => {
+    apply();
+    new MutationObserver(apply).observe(document.body, { attributes: true, attributeFilter: ["class"] });
+  });
+})();
+</script>

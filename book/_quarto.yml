@@ -3,7 +3,8 @@ project:
   output-dir: _book
   resources:
     - panzoom.min.js
-    - lonboard_walking.html
+    - lonboard_walking_light.html
+    - lonboard_walking_dark.html
 
 book:
   title: "duckOSM"

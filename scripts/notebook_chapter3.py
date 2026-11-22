@@ -223,13 +223,19 @@ that any browser opens.
 
 `explore` puts the columns of the GeoDataFrame into a tooltip (when the mouse is over a road) and, with `popup=True`,
 into a pop-up (when you click a road). The cell keeps only five columns, so the map stays small. `Fullscreen` adds the
-full-screen button, and `save` writes the map as a web page.""")
+full-screen button, and `save` writes the map as a web page. The map has two Esri base maps, light gray and dark
+gray: the layer button at the top right changes between them, and the book shows the one that fits the theme of the
+page (the light or the dark theme).""")
 ch.code("""import folium.plugins
 
 edges = net.driving.edges()[["edge_id", "name", "highway", "maxspeed_kmh", "geometry"]]    # five columns
 fmap = edges.explore(column="maxspeed_kmh", cmap="viridis", tiles="Esri.WorldGrayCanvas",
                      style_kwds={"weight": 3}, legend_kwds={"caption": "speed limit, km/h"},
                      popup=True)                                                # color by the speed limit
+dark = "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}"
+folium.TileLayer(dark, attr="Esri, HERE, Garmin, © OpenStreetMap contributors", name="Esri dark gray",
+                 show=False).add_to(fmap)                                       # a second base map, dark
+folium.LayerControl().add_to(fmap)                                              # a button to change the base map
 folium.plugins.Fullscreen().add_to(fmap)                                        # the full-screen button
 fmap.save("out/folium_driving.html")                                           # the map as a web page
 fmap""")
@@ -242,7 +248,8 @@ This map draws all 11,938 walking edges, colored by their length. Each line has 
 footway, steps, a path or a cycleway, and 6 m for a road. Zoom in, and the roads become wider than the footways.
 `width_min_pixels=1` keeps each line visible when you zoom out. lonboard gives each line its color as an array, so
 the cell makes the colors with a matplotlib color ramp. lonboard takes its base map as a MapLibre style at a web
-address: the book has a small style file for the Esri map. The cell saves the map as a web page with `to_html` and shows the page
+address: the book has a small style file for each Esri map, light gray and dark gray. lonboard cannot change its
+base map in a saved page, so the cell saves the map two times, and the book shows the page that fits its theme. The cell saves the map as a web page with `to_html` and shows the page
 in a frame. In Colab, show the map with `lmap` alone in a cell.""")
 ch.code("""import matplotlib
 from IPython.display import IFrame
@@ -257,10 +264,12 @@ width = walk.highway.isin(["footway", "steps", "path", "cycleway"]).map({True: 2
 layer = PathLayer.from_geopandas(walk, get_width=width.to_numpy(), width_units="meters", width_min_pixels=1,
                                  get_color=apply_continuous_cmap(share, matplotlib.colormaps["viridis"]),
                                  auto_highlight=True, highlight_color=[255, 0, 0])    # the road under the mouse in red
-esri = "https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/docs/notebooks/images/esri-light-gray.json"    # the base map
-lmap = Map(layer, basemap=MaplibreBasemap(style=esri), show_tooltip=True)      # the lonboard map, with a tooltip
-lmap.to_html("lonboard_walking.html")                                           # saved as a web page
-IFrame("lonboard_walking.html", width="100%", height=520, extras=["allowfullscreen"])    # the page in a frame""")
+styles = "https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/docs/notebooks/images/"    # the Esri base maps
+lmap = Map(layer, basemap=MaplibreBasemap(style=styles + "esri-light-gray.json"), show_tooltip=True)    # the map
+lmap.to_html("lonboard_walking_light.html")                                     # saved as a web page, light
+lmap.basemap = MaplibreBasemap(style=styles + "esri-dark-gray.json")            # the same map on the dark base map
+lmap.to_html("lonboard_walking_dark.html")                                      # saved as a web page, dark
+IFrame("lonboard_walking_light.html", width="100%", height=520, extras=["allowfullscreen"])    # a page in a frame""")
 ch.md("""Move the mouse over a road: it turns red, and a tooltip shows its `edge_id`, name, class and length, and click it to keep them in a side
 panel. The square button at the bottom right draws a box to select the roads in it. The box goes back to Python as
 `lmap.selected_bounds`, so it is useful only in a running notebook, not in this book.
