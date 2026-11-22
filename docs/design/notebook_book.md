@@ -12,6 +12,10 @@ python scripts/notebook_chapter1.py docs/notebooks/01_area_to_network.ipynb
 cd docs/notebooks && IPYTHONDIR=../../book/ipython DUCKOSM_MAP_SHOW=plot jupyter nbconvert --to notebook --execute --inplace 01_area_to_network.ipynb
 ```
 
+In Colab, the install cell of each chapter installs the nightly wheel of duckOSM and the nightly wheel of roadstyle
+(the GitHub pre-releases `nightly` of the two repositories). So a merged roadstyle change reaches the book with no
+roadstyle release.
+
 `IPYTHONDIR=book/ipython` gives the matplotlib pictures two times the pixels at the same size (retina). In the book,
 each output picture has a badge "Click to zoom" at its top-right corner, and a click on it opens it in a popup (`lightbox: auto` in `book/_quarto.yml`). There, the mouse wheel
 zooms in at the mouse pointer, a click zooms in where you click and a second click shows the whole picture again, the
