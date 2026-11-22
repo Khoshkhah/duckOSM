@@ -238,7 +238,9 @@ class and its speed limit. Click it to keep them in a pop-up. The file `out/foli
 
 ### lonboard
 
-This map draws all 11,938 walking edges, colored by their length. lonboard gives each line its color as an array, so
+This map draws all 11,938 walking edges, colored by their length. Each line has a width on the ground: 2 m for a
+footway, steps, a path or a cycleway, and 6 m for a road. Zoom in, and the roads become wider than the footways.
+`width_min_pixels=1` keeps each line visible when you zoom out. lonboard gives each line its color as an array, so
 the cell makes the colors with a matplotlib color ramp. lonboard takes its base map as a MapLibre style at a web
 address: the book has a small style file for the Esri map. The cell saves the map as a web page with `to_html` and shows the page
 in a frame. In Colab, show the map with `lmap` alone in a cell.""")
@@ -251,7 +253,8 @@ from lonboard.colormap import apply_continuous_cmap
 walk = net.walking.edges()[["edge_id", "name", "highway", "length_m", "geometry"]]    # all the walking edges
 walk["length_m"] = walk.length_m.round(1)                                      # 0.1 m is enough in the tooltip
 share = (walk.length_m.clip(0, 100) / 100).to_numpy()                           # 0 to 1: up to 100 m long
-layer = PathLayer.from_geopandas(walk, get_width=2, width_units="pixels",
+width = walk.highway.isin(["footway", "steps", "path", "cycleway"]).map({True: 2.0, False: 6.0})    # metres
+layer = PathLayer.from_geopandas(walk, get_width=width.to_numpy(), width_units="meters", width_min_pixels=1,
                                  get_color=apply_continuous_cmap(share, matplotlib.colormaps["viridis"]))
 esri = "https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/docs/notebooks/images/esri-light-gray.json"    # the base map
 lmap = Map(layer, basemap=MaplibreBasemap(style=esri), show_tooltip=True)      # the lonboard map, with a tooltip
