@@ -12,8 +12,8 @@ ch = Chapter(11, "11_mobility", "Mobility data",
              "GPS traces, sensors and counts on the edges of the network",
              learn="what mobility data is; how map matching works; `match` for GPS traces; `snap` for sensors; "
                    "counts for each edge and hour with `aggregate`; your data on the edges with `join`; "
-                   "how your data stays after a rebuild with `edge_id_map`",
-             time="about 2 minutes", extras="analysis,viz",
+                   "speeds on the edges with movingpandas; how your data stays after a rebuild with `edge_id_map`",
+             time="about 2 minutes", extras="analysis,viz", more_install="\n    %pip install -q movingpandas",
              next_=("12_sim", "12. Traffic simulation", "SUMO and MATSim networks, and the results back on the edges"))
 
 ch.md(f"""## What mobility data is
@@ -254,6 +254,51 @@ most points (21), then the Tunnel Dorsale (17) and the Tunnel Rocher Palais (14)
 ch.code("""net.driving.plot(color_by=by_edge, cmap="magma_r")                                 # the map, colored by the count""")
 ch.md("""The colors show the number of points on each edge. The long edges of the route
 (the boulevard along the sea and the tunnels) are the darkest.""")
+
+ch.md("""## Trajectories with movingpandas
+
+[movingpandas](https://movingpandas.org) is a Python library for tracks: it turns GPS points into trajectories, and
+it measures their length, duration, speed and direction. duckOSM puts the points on the edges. Together they answer
+"how fast do vehicles drive on each street":
+
+| Tool | What it gives |
+|---|---|
+| movingpandas | the speed at each GPS point, from the distance and the time to the point before |
+| duckOSM | the edge of each point (`match`), and the mean of a value on each edge (`aggregate`) |
+
+The steps:
+
+1. Make one movingpandas trajectory for each trace, from the same table `traces`.
+2. Add the speed of each point, in km/h.
+3. Put the speeds on the matched points of `m.points` (the same trace and time), and take the mean speed of each
+   edge with `aggregate`.
+4. Draw the edges in the color of their speed.""")
+ch.code("""import warnings
+
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore")              # movingpandas warns about an optional part that this chapter does not use
+    import movingpandas as mpd
+
+tc = mpd.TrajectoryCollection(traces, traj_id_col="trace_id", t="time", x="x", y="y", crs=4326)    # 1. one for each trace
+tc.add_speed(units=("km", "h"))                                                 # 2. the speed of each point, km/h
+pd.DataFrame({"length_m": [round(t.get_length()) for t in tc],                  # the length of each trajectory
+              "route_m": [round({"there": there, "back": back}[t.id].length_m) for t in tc],    # the true route
+              "minutes": [round(t.get_duration().total_seconds() / 60, 1) for t in tc],
+              "mean_kmh": [round(t.df.speed.mean(), 1) for t in tc]}, index=[t.id for t in tc])""")
+ch.md("""Each trajectory takes about 6 minutes. Its length (3,151 m and 3,179 m) is about 200 m more than the true route
+(2,939 m and 3,002 m): the GPS noise makes the line zigzag, so it is longer than the road. So the mean speed is
+31 km/h, not the true 28.8 km/h (8 m/s) of the made-up traces.""")
+ch.code("""speeds = tc.to_point_gdf().reset_index()[["trace_id", "time", "speed"]]        # the speed of each GPS point
+points = m.points.merge(speeds, on=["trace_id", "time"])                       # 3. each matched point with its speed
+by_speed = mob.aggregate(drive, points, time=None, value="speed")              # the mean speed on each edge
+by_speed.speed_mean.describe()[["count", "50%", "min", "max"]].round(1)        # the speeds of the edges, km/h""")
+ch.md("""119 edges get a mean speed, and the middle edge has 31 km/h. A few edges with only one or two points show
+4 km/h or 56 km/h: with so few points, the GPS noise decides the speed.""")
+ch.code("""speed = by_speed.set_index("edge_id").speed_mean.rename("mean speed, km/h")    # edge_id -> speed
+net.driving.plot(color_by=speed, cmap="viridis", linewidth=3)                   # 4. the edges by speed, thick lines""")
+ch.md("""The colored line is the route of the two traces. Most of it is blue-green: about 30 km/h. The dark purple and
+the light green pieces are short edges with few points, near junctions. `linewidth=3` draws the roads with a value thick, because
+only 119 of the 2,840 edges have one.""")
 
 ch.md("""## Keep your data after a rebuild: `edge_id_map`
 
