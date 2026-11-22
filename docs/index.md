@@ -131,9 +131,9 @@ traffic simulation and routing. Fix the OSM data once, on a map. Your fixes go i
 All outputs come from one `.osm.pbf` file, in five levels, and all take your OSM fixes. Each output is checked against a reference tool ([how](concepts/checks.md)).
 
 <div class="dk-levels">
-<a class="lv" href="exports/osm-file/"><span class="n">0</span><b>The OSM file</b><span class="s">.osm.pbf, cut to your area</span><code>pbfcut</code></a>
+<a class="lv" href="exports/osm-file/"><span class="n">0</span><b>OSM file</b><span class="s">.osm.pbf, cut to your area</span><code>pbfcut</code></a>
 <a class="lv" href="exports/osm-data/"><span class="n">1</span><b>OSM data</b><span class="s">no network</span><code>QuackOSM · GDAL</code></a>
-<a class="lv" href="exports/network/"><span class="n">2</span><b>The network</b><span class="s">edges, edge_id, turns</span><code>GeoPackage · networkx</code></a>
+<a class="lv" href="exports/network/"><span class="n">2</span><b>Routable network</b><span class="s">edges, edge_id, turns</span><code>GeoPackage · networkx</code></a>
 <a class="lv" href="exports/simulation/"><span class="n">3</span><b>Simulation network</b><span class="s">macro, meso and micro: links, lanes, turns</span><code>GMNS · MATSim · SUMO</code></a>
 <a class="lv" href="exports/lanes/"><span class="n">4</span><b>HD map</b><span class="s">the exact shape of each lane, in 3D (experimental)</span><code>Lanelet2 · OpenDRIVE</code></a>
 </div>

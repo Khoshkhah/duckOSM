@@ -153,7 +153,7 @@ nav:
       - Drawing order: guides/drawing-order.md
   - Export:
       - Overview: exports/index.md
-      - 0. The OSM file: exports/osm-file.md
+      - 0. OSM file: exports/osm-file.md
       - 1. OSM data:
           - exports/osm-data/index.md
           - QuackOSM table: concepts/quackosm.md
@@ -162,7 +162,7 @@ nav:
           - Geofabrik layers: exports/geofabrik.md
           - osm2pgsql tables: exports/osm2pgsql.md
           - Vector tiles (PMTiles): exports/pmtiles.md
-      - 2. The network:
+      - 2. Routable network:
           - exports/network/index.md
           - The turn graph: exports/turn-graph.md
           - GeoPackage / shapefile: exports/gis.md
