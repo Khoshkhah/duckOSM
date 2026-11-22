@@ -97,8 +97,13 @@ Kentucky by tiles takes more time than the whole area on the Mac mini (1406 s ag
 
 A smaller zoom (`--tile-zoom 8`) gives fewer tiles and less band, for more memory. It is not measured.
 
-Known limit: netconvert 1.28 (SUMO) stops with a crash (exit 245) on the Kentucky tile 9/134/197. netconvert 1.27 has no
-problem. Use SUMO 1.27 (`pip install "eclipse-sumo==1.27.*"`) if netconvert stops on a tile.
+Known limit: netconvert stops with a crash (exit 245) on the Kentucky tile 9/134/197: version 1.28 on Linux, and versions
+1.27 and 1.28 on macOS (Apple silicon). netconvert 1.27 on Linux has no problem with the same input files. If netconvert
+stops on a tile:
+
+- On Linux, use SUMO 1.27: `pip install "eclipse-sumo==1.27.*" "sumo-data==1.27.*"`.
+- Use other tiles: `--tile-zoom 10` gives netconvert other input. Kentucky at zoom 10 runs to the end on macOS (150
+  tiles, 747 s, 3.9 GB).
 
 ## duckOSM and osm2gmns
 

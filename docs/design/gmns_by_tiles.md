@@ -84,5 +84,14 @@ Three faults came out on Île-de-France, and each one is also a fault of the who
 | netconvert joins two OSM nodes at one position: a shape point of an edge split the edge in the turn-arrow pass | The pass leaves out such a point |
 | A `turn_permission` row into a private edge that is not in the SUMO network | Only the connections between edges of the network |
 
-Known limit: netconvert 1.28 stops with a crash (exit 245) on the Kentucky tile 9/134/197; 1.27 has no problem. The CI
-uses 1.27.
+Known limit: netconvert stops with a crash (exit 245) on the Kentucky tile 9/134/197: 1.28 on Linux, 1.27 and 1.28 on
+macOS (Apple silicon). 1.27 on Linux has no problem with the same input files. The CI uses 1.27 on Linux. On the Mac
+mini, Kentucky runs to the end with `--tile-zoom 10`.
+
+Lanelet2 and OpenDRIVE on the Kentucky GMNS db by tiles (zoom 10, Mac mini):
+
+| Export | Time | Memory | File |
+|---|---|---|---|
+| `duckosm gmns --tile-zoom 10` | 747 s | 3.9 GB | 5.8 GB |
+| `duckosm lanelet2` | 84 s | 10.2 GB | 9.8 GB |
+| `duckosm opendrive --junctions` | 35 s | 2.2 GB | 7.9 GB |
