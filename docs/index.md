@@ -95,33 +95,33 @@ traffic simulation and routing. Fix the OSM data once, on a map. Your fixes go i
 <div class="grid tour" markdown>
 
 <figure markdown="span">
-  ![The Turn tab of Edit OSM data: a picked road and the roads that leave its junction](images/edit-turn.png)
-  <figcaption>Edit OSM data: the turns at a junction, in the browser or with <code>duckosm edit</code>.</figcaption>
+  [![The Turn tab of Edit OSM data: a picked road and the roads that leave its junction](images/edit-turn.png)](guides/edit-osm-data.md)
+  <figcaption>Edit OSM data: the turns at a junction, in the browser or with <code>duckosm edit</code>. <a href="guides/edit-osm-data/">Edit OSM data →</a></figcaption>
 </figure>
 
 <figure markdown="span">
-  ![The quack page: the counts of the five GDAL layers of Monaco and a download button for each layer](images/tour-quack.png)
-  <figcaption>The quack page: GDAL's five OSM layers or the QuackOSM table, made in the browser.</figcaption>
+  [![The quack page: the counts of the five GDAL layers of Monaco and a download button for each layer](images/tour-quack.png)](https://khoshkhah.github.io/duckosm-studio/quack.html)
+  <figcaption>The quack page: GDAL's five OSM layers or the QuackOSM table, made in the browser. <a href="https://khoshkhah.github.io/duckosm-studio/quack.html">Open the quack page →</a></figcaption>
 </figure>
 
 <figure markdown="span">
-  ![The route planner: a walking route from Fontvieille to Larvotto on the map, with the directions](images/tour-route.png)
-  <figcaption>The route planner of <code>duckosm route-map</code>: a route on the turn graph, with directions.</figcaption>
+  [![The route planner: a walking route from Fontvieille to Larvotto on the map, with the directions](images/tour-route.png)](guides/route.md)
+  <figcaption>The route planner of <code>duckosm route-map</code>: a route on the turn graph, with directions. <a href="guides/route/">Routing →</a></figcaption>
 </figure>
 
 <figure markdown="span">
-  ![The map of duckosm viz in 3D: the buildings of Monaco stand up around the port, with the roads between them](images/tour-map.png)
-  <figcaption>The map of <code>duckosm viz</code> in 3D: the roads of all modes between the buildings, on the base map of the database.</figcaption>
+  [![The map of duckosm viz in 3D: the buildings of Monaco stand up around the port, with the roads between them](images/tour-map.png)](guides/draw-map.md)
+  <figcaption>The map of <code>duckosm viz</code> in 3D: the roads of all modes between the buildings, on the base map of the database. <a href="guides/draw-map/">Draw a map →</a></figcaption>
 </figure>
 
 <figure markdown="span">
-  ![The lanes of one Monaco junction from the GMNS export: each lane at its width, with its turn arrows](images/tour-lanes-gmns.png)
-  <figcaption>GMNS lanes of one Monaco junction: each lane at its width, with its turns. <a href="exports/sumo/">Against SUMO</a></figcaption>
+  [![The lanes of one Monaco junction from the GMNS export: each lane at its width, with its turn arrows](images/tour-lanes-gmns.png)](exports/gmns.md)
+  <figcaption>GMNS lanes of one Monaco junction: each lane at its width, with its turns. <a href="exports/sumo/">Against SUMO</a> <a href="exports/gmns/">GMNS →</a></figcaption>
 </figure>
 
 <figure markdown="span">
-  ![Monaco in 3D on the ground of the area, with hillshade: the hill rises behind the port, and the roads climb it](images/tour-elevation.png)
-  <figcaption>Monaco in 3D on the ground of the area: the hill behind the port and the roads that climb it (<code>duckosm elevation</code>, or the step Ground height in Studio).</figcaption>
+  [![Monaco in 3D on the ground of the area, with hillshade: the hill rises behind the port, and the roads climb it](images/tour-elevation.png)](guides/elevation.md)
+  <figcaption>Monaco in 3D on the ground of the area: the hill behind the port and the roads that climb it (<code>duckosm elevation</code>, or the step Ground height in Studio). <a href="guides/elevation/">Elevation →</a></figcaption>
 </figure>
 
 </div>
