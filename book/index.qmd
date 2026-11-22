@@ -1,13 +1,13 @@
 # Preface {.unnumbered}
 
-This book teaches duckOSM from the Python SDK. Each chapter is one Jupyter notebook: you read it here, and you can
+This notebook manual teaches duckOSM from the Python SDK. Each chapter is one Jupyter notebook: you read it here, and you can
 run the same notebook in Colab with the button at the top of the chapter.
 
 duckOSM builds the road network of an area from OpenStreetMap into one DuckDB file: the networks of each mode
 (driving, walking, cycling), the nodes, the turns and the base map. Each road has an `edge_id` that stays the same
 when you build the area again, so your own data can join to it.
 
-## How to read this book
+## How to read this manual
 
 | Part | Chapters |
 |---|---|

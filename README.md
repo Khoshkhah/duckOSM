@@ -17,7 +17,7 @@
 
 <p align="center">
   <a href="https://khoshkhah.github.io/duckOSM/"><b>Documentation</b></a> ·
-  <a href="https://khoshkhah.github.io/duckOSM/book/"><b>The book</b></a> ·
+  <a href="https://khoshkhah.github.io/duckOSM/book/"><b>The notebook manual</b></a> ·
   <a href="https://khoshkhah.github.io/duckosm-studio/">duckOSM Studio (browser)</a> ·
   <a href="https://khoshkhah.github.io/duckOSM/first_network/">Your first network</a> ·
   <a href="https://khoshkhah.github.io/duckOSM/reference/cli/">Command line</a> ·
@@ -125,9 +125,9 @@ duckosm.to_gis(db, "monaco.gpkg")         # a GeoPackage for QGIS
 
 All functions: [Python SDK](https://khoshkhah.github.io/duckOSM/reference/python/). Rust: [Rust SDK](https://khoshkhah.github.io/duckOSM/reference/rust/).
 
-## Learn with the book
+## Learn with the notebook manual
 
-[**The duckOSM book**](https://khoshkhah.github.io/duckOSM/book/) teaches the Python SDK in 15 chapters. Each chapter
+[**The notebook manual**](https://khoshkhah.github.io/duckOSM/book/) teaches the Python SDK in 15 chapters. Each chapter
 is one Jupyter notebook on Monaco, with its outputs, and opens in Colab with one click.
 
 | Part | Chapters |
@@ -135,7 +135,7 @@ is one Jupyter notebook on Monaco, with its outputs, and opens in Colab with one
 | The core | get and build an area · look inside the file · draw maps · join your data by `edge_id` · fix the OSM data · exports |
 | The modules | routing · advanced routing · street network analysis · OSM data for GIS · mobility data and map matching · traffic simulation · transport planning · HD maps · graph machine learning |
 
-The book uses other tools on duckOSM's outputs too: OSMnx, momepy, cityseer, OR-Tools, pandana, movingpandas,
+The notebook manual uses other tools on duckOSM's outputs too: OSMnx, momepy, cityseer, OR-Tools, pandana, movingpandas,
 folium, lonboard, SUMO and traci.
 
 Each output is compared with a reference tool: QuackOSM, GDAL, SUMO, MATSim and the GMNS specification

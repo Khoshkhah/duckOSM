@@ -486,7 +486,7 @@ ch.md("""## What to do next
 > `duckosm.ml.to_networkx_nodes(net.driving)` gives the junction graph as a networkx `MultiDiGraph` in the layout of
 > OSMnx.
 
-This is the last chapter of the book. Each chapter is in the [notebook manual](index.md), and the
+This is the last chapter of the notebook manual. Each chapter is in the [notebook manual](index.md), and the
 [Python SDK reference](../reference/python.md) has every call.""")
 
 ch.exercises([

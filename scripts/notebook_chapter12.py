@@ -290,7 +290,7 @@ ax.legend(title="SUMO at 15 minutes"); ax.set_axis_off()
 plt.show()""")
 ch.md("""Each red dot is one vehicle at 15 minutes. traci gives its position in SUMO's coordinates, and
 `traci.simulation.convertGeo` turns it into longitude and latitude. The black ring is the closed edge. The same run
-also wrote every vehicle at every second to `out/sumo/fcd.parquet` (SUMO's FCD output). A later version of the book
+also wrote every vehicle at every second to `out/sumo/fcd.parquet` (SUMO's FCD output). A later version of this manual
 can play this file as moving vehicles on the live map, with roadstyle's vehicle player.""")
 ch.code("""def entered(path):                                                       # the vehicles that entered each edge_id
     rows = pd.read_xml(path, xpath=".//edge", parser="etree", dtype={"id": str})
