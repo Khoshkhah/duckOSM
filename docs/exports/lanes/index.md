@@ -1,6 +1,6 @@
-# 4. Lane level and 3D
+# 4. HD map
 
-Each lane with its own shape and its connections, for driving simulators and autonomous driving. These outputs read the
+The HD map (high-definition map): each lane with its exact shape and its connections, for driving simulators and autonomous driving. These exports are experimental. These outputs read the
 GMNS database of `duckosm gmns`, because it has the lanes and the turns of each lane.
 
 | Tool | Output | Command |

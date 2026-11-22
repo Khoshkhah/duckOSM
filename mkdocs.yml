@@ -167,14 +167,14 @@ nav:
           - The turn graph: exports/turn-graph.md
           - GeoPackage / shapefile: exports/gis.md
           - networkx: exports/networkx.md
-      - 3. Traffic simulation:
+      - 3. Simulation network:
           - exports/simulation/index.md
           - GMNS: exports/gmns.md
           - GMNS meso and micro: exports/gmns-meso-micro.md
           - MATSim: exports/matsim.md
           - SUMO: exports/sumo.md
           - railML: exports/railml.md
-      - 4. Lane level and 3D:
+      - 4. HD map:
           - exports/lanes/index.md
           - Lane-level routing: exports/lane-routing.md
           - Lanelet2: exports/lanelet2.md
