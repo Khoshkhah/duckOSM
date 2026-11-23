@@ -37,16 +37,40 @@ OSM update.
 
 ## Heterogeneous graphs from Level 3 GMNS
 
-While Level 2 exports homogenous turn and junction graphs (`Data` in PyTorch Geometric), Level 3 GMNS DuckDB (`<area>_gmns.duckdb`) provides the full multi-relational urban topology as **`HeteroData`**:
+While Level 2 exports homogenous turn and junction graphs (`Data` in PyTorch Geometric), Level 3 GMNS DuckDB (`<area>_gmns.duckdb`) structures urban space into a **three-tier hierarchy** represented as **`HeteroData`**:
 
-| GMNS Table | `HeteroData` Entity | Features |
-|---|---|---|
-| `link` | `data['road'].x` | `length`, `free_speed`, `lanes`, `capacity`, `facility_type` |
-| `lane` | `data['lane'].x` | `width`, `allowed_uses`, `turn_arrow` |
-| `node` | `data['intersection'].x` | `lon`, `lat`, `degree`, `ctrl_type` |
-| `signal_controller` | `data['signal'].x` | `cycle_time`, `phase_count` |
+```mermaid
+flowchart TD
+  subgraph Tier1 ["1. Macro Tier · Intersections & Corridors"]
+    Node["Intersection (node)<br/>Coordinates · Degree · Control Type"]
+    Link["Road Link (link)<br/>Length · Free Speed · Lanes · Capacity"]
+  end
 
-Edges connect different entity types using specific relations:
+  subgraph Tier2 ["2. Meso Tier · Physical Lanes"]
+    Lane["Physical Lane (lane)<br/>Width · Allowed Uses · Turn Arrow"]
+  end
+
+  subgraph Tier3 ["3. Micro & Control Tier · Movements & Timing"]
+    Movement["Turn Movement (movement)<br/>Lane-to-Lane Turn Arc · Legal Rules"]
+    Signal["Signal Controller (signal_controller)<br/>Cycle Time · Phases · Offsets"]
+  end
+
+  %% Hierarchical & Relational Connections
+  Link -->|"starts_at / ends_at"| Node
+  Lane -->|"part_of"| Link
+  Lane -->|"turns_into"| Movement
+  Movement -->|"leads_to"| Lane
+  Signal -->|"controls"| Movement
+  Signal -->|"installed_at"| Node
+```
+
+| Hierarchy Tier | GMNS Table | `HeteroData` Entity | Features | Role in GNN |
+|---|---|---|---|---|
+| **Macro** | `link` | `data['road'].x` | `length`, `free_speed`, `lanes`, `capacity` | Corridor-level traffic assignment & speed estimation |
+| **Macro** | `node` | `data['intersection'].x` | `lon`, `lat`, `degree`, `ctrl_type` | Network topology & routing decisions |
+| **Meso** | `lane` | `data['lane'].x` | `width`, `allowed_uses`, `turn_arrow` | Lateral lane changes & bus-lane spillover |
+| **Micro/Control** | `signal_controller` | `data['signal'].x` | `cycle_time`, `phase_count` | Signal timing optimization & queue control RL |
+| **Micro/Control** | `movement` | `data['movement']` | `turning_angle`, `curve_length` | Lane-to-lane turning friction & delay |
 
 ```python
 from torch_geometric.data import HeteroData
@@ -61,10 +85,11 @@ data['intersection'].x = torch.tensor(...)  # nodes: coordinates, in/out degrees
 data['signal'].x = torch.tensor(...)        # signal controllers: cycle time, phases
 
 # Edge indices: relations connecting different entity types
-data['road', 'movement', 'road'].edge_index = ...     # legal road-to-road turns
-data['lane', 'part_of', 'road'].edge_index = ...      # lane-to-road membership
-data['lane', 'to_lane', 'lane'].edge_index = ...      # lane-to-lane turning arcs
-data['signal', 'controls', 'road'].edge_index = ...   # signalized intersection controls
+data['lane', 'part_of', 'road'].edge_index = ...            # lane-to-road containment
+data['road', 'starts_at', 'intersection'].edge_index = ...  # topological junction connection
+data['lane', 'turns_into', 'movement'].edge_index = ...     # lane-to-movement transition
+data['movement', 'leads_to', 'lane'].edge_index = ...       # movement-to-exit-lane connection
+data['signal', 'controls', 'movement'].edge_index = ...     # signal phase regulation
 ```
 
 This multi-relational structure allows relational GNN architectures (such as `RGCNConv` or `HGTConv`) to model lane-level friction, queue spillover, and intelligent signal coordination. See [Chapter 15 of the notebook manual](https://khoshkhah.github.io/duckOSM/book/15_ml.html).

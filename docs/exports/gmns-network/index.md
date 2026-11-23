@@ -43,23 +43,56 @@ The GMNS DuckDB database (`<area>_gmns.duckdb`) serves as the Level 3 multi-reso
 
 ## Heterogeneous graphs for AI (PyG `HeteroData`)
 
-While Level 2 exports homogeneous graphs (`Data` in PyTorch Geometric) with a single entity type, Level 3 GMNS DuckDB tables translate directly into PyTorch Geometric **`HeteroData`** (heterogeneous graphs with multiple node and edge types):
+While Level 2 exports homogeneous graphs (`Data` in PyTorch Geometric) with a single entity type, Level 3 GMNS DuckDB tables structure urban space into a **three-tier hierarchy**:
+
+### The 3-tier urban network hierarchy
+
+1. **Tier 1: Macro Level (Corridors & Intersections)**
+   * **`Intersection (node)`:** Top-level spatial decision points, centroids, and network boundaries (`lon`, `lat`, `degree`, `ctrl_type`).
+   * **`Road Link (link)`:** Directed vehicular corridors between intersections with aggregated travel characteristics (`length`, `free_speed`, `lanes`, `capacity`).
+2. **Tier 2: Meso Level (Physical Lanes & Cross-Sections)**
+   * **`Physical Lane (lane)`:** Individual longitudinal travel channels with dedicated rights-of-way (`width`, `allowed_uses`, `turn_arrow`).
+   * **`Road Section (meso_link)`:** Corridor segments trimmed at junction approaches.
+3. **Tier 3: Micro & Control Level (Movements & Signal Optimization)**
+   * **`Turn Movement (movement)`:** Lane-to-lane turning curves and transitions across intersections, enforcing legal turn rules.
+   * **`Signal Controller (signal_controller)`:** Phase allocation, cycle timing, and signal coordination across approaches.
 
 ```mermaid
 flowchart TD
-  subgraph Nodes ["GMNS Entities (Node Types)"]
-    sig["🚦 signal (signal_controller)<br/>cycle_time, phases"]
-    junc["⚪ intersection (node)<br/>lon, lat, degree, ctrl_type"]
-    rd["🛣️ road (link)<br/>length, speed, lanes, capacity"]
-    ln["🚗 lane (lane)<br/>width, allowed_uses, turn_arrow"]
+  subgraph Tier1 ["1. Macro Tier · Intersections & Corridors"]
+    Node["Intersection (node)<br/>Coordinates · Degree · Control Type"]
+    Link["Road Link (link)<br/>Length · Free Speed · Lanes · Capacity"]
   end
 
-  ln -- "part_of" --> rd
-  rd -- "starts_at / ends_at" --> junc
-  ln -- "to_lane (movement)" --> ln
-  rd -- "connects_to (movement)" --> rd
-  sig -- "controls" --> rd
+  subgraph Tier2 ["2. Meso Tier · Physical Lanes"]
+    Lane["Physical Lane (lane)<br/>Width · Allowed Uses · Turn Arrow"]
+  end
+
+  subgraph Tier3 ["3. Micro & Control Tier · Movements & Timing"]
+    Movement["Turn Movement (movement)<br/>Lane-to-Lane Turn Arc · Legal Rules"]
+    Signal["Signal Controller (signal_controller)<br/>Cycle Time · Phases · Offsets"]
+  end
+
+  %% Hierarchical & Relational Connections
+  Link -->|"starts_at / ends_at"| Node
+  Lane -->|"part_of"| Link
+  Lane -->|"turns_into"| Movement
+  Movement -->|"leads_to"| Lane
+  Signal -->|"controls"| Movement
+  Signal -->|"installed_at"| Node
 ```
+
+### Mapping GMNS to PyTorch Geometric `HeteroData`
+
+In PyTorch Geometric, this hierarchy translates directly into multi-relational tensors:
+
+| Hierarchy Tier | GMNS Entity | `HeteroData` Node Type | Node Features (`x`) | Role in Graph Neural Network |
+|---|---|---|---|---|
+| **Macro** | `link` | `data['road']` | `length`, `free_speed`, `lanes`, `capacity` | Corridor-level traffic assignment & travel time |
+| **Macro** | `node` | `data['intersection']` | `lon`, `lat`, `degree`, `ctrl_type` | Network topology & junction routing decisions |
+| **Meso** | `lane` | `data['lane']` | `width`, `allowed_uses`, `turn_arrow` | Lateral lane changes & bus-lane spillover |
+| **Micro/Control** | `signal_controller` | `data['signal']` | `cycle_time`, `phase_count` | Signal timing optimization & queue control RL |
+| **Micro/Control** | `movement` | `data['movement']` | `turning_angle`, `curve_length` | Lane-to-lane turning delay and friction |
 
 ```python
 from torch_geometric.data import HeteroData
@@ -67,19 +100,20 @@ import torch
 
 data = HeteroData()
 
-# Node feature matrices: each entity type keeps its own columns
-data['road'].x = torch.tensor(...)          # links: length, speed, lanes, facility_type
+# 1. Node feature matrices: each entity type retains its specific attributes
+data['road'].x = torch.tensor(...)          # links: length, speed, lanes, capacity
 data['lane'].x = torch.tensor(...)          # physical lanes: width, allowed_uses, turn arrow
-data['intersection'].x = torch.tensor(...)  # nodes: coordinates, in/out degrees, control type
+data['intersection'].x = torch.tensor(...)  # nodes: coordinates, degree, control type
 data['signal'].x = torch.tensor(...)        # signal controllers: cycle time, phases
 
-# Edge indices: relations connecting different entity types
-data['road', 'movement', 'road'].edge_index = ...     # legal road-to-road turns
-data['lane', 'part_of', 'road'].edge_index = ...      # lane-to-road membership
-data['lane', 'to_lane', 'lane'].edge_index = ...      # lane-to-lane turning arcs
-data['signal', 'controls', 'road'].edge_index = ...   # signalized intersection controls
+# 2. Hierarchical & kinematic relations between tiers
+data['lane', 'part_of', 'road'].edge_index = ...      # lane-to-road containment
+data['road', 'starts_at', 'intersection'].edge_index = ...  # topological junction connection
+data['lane', 'turns_into', 'movement'].edge_index = ...     # lane-to-movement transition
+data['movement', 'leads_to', 'lane'].edge_index = ...       # movement-to-exit-lane connection
+data['signal', 'controls', 'movement'].edge_index = ...     # signal phase regulation
 ```
 
-This multi-relational topology allows Relational Graph Neural Networks (RGCN, HGT) to jointly predict lane-level bottlenecks, signal timing optimizations, and citywide congestion propagation. See [Chapter 15 of the notebook manual](https://khoshkhah.github.io/duckOSM/book/15_ml.html) and [duckOSM for Graph ML users](../../compare/for-ml-users.md).
+This multi-relational structure allows Relational Graph Neural Networks (RGCN, HGT) to jointly predict lane-level bottlenecks, signal timing optimizations, and citywide congestion propagation. See [Chapter 15 of the notebook manual](https://khoshkhah.github.io/duckOSM/book/15_ml.html) and [duckOSM for Graph ML users](../../compare/for-ml-users.md).
 
 For the full specification and schema details, see [GMNS](../gmns.md) and the [GMNS tables reference](../gmns_tables.md).
