@@ -679,21 +679,19 @@ duckosm route-lanes [OPTIONS] GMNS_DB FROM_LANE TO_LANE
 
 ### `hdmap` (planned)
 
-Writes the [HD map database](hdmap-database.md) (`<area>_hdmap.duckdb`) from a GMNS database. The code does not exist
-yet.
+Writes the [HD map database](hdmap-database.md) (`<area>_hdmap.duckdb`) of the driving network from a GMNS database
+and its routing database. One road for each chain of `driving.chains`. The code does not exist yet.
 
 ```text
-duckosm hdmap [OPTIONS] GMNS_DB
+duckosm hdmap [OPTIONS] GMNS_DB --source DB
 ```
 
 | Option | Does | Default |
 |---|---|---|
+| `--source PATH` | the routing database: `driving.chains`, the heights and the ground | required |
 | `--out PATH` | the HD map database | `<area>_hdmap.duckdb`, next to the GMNS database |
-| `-m`, `--mode TEXT` | the GMNS mode; repeat for several | `driving` |
-| `--source PATH` | the Level 2 database: the ground and the heights | none: no heights |
 | `--crs TEXT` | the metric CRS | UTM zone of the data |
 | `--default-width M` | the width of a lane with no width | `3.25` |
-| `--bridge-grade G` | the grade of a bridge deck from its landings | `0.05` |
 | `--clearance M` | the free height over or under a crossed road | `5.0` |
 
 ## Enrich a built database

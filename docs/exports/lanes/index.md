@@ -15,11 +15,13 @@ All three are **experimental**. Tests check their structure. They are not loaded
 
 Today each output makes its own lanes from the GMNS database, so the files do not agree, and they have no stop lines,
 signals or road marks. The plan: `duckosm hdmap` writes one [HD map database](../../reference/hdmap-database.md)
-(`<area>_hdmap.duckdb`) from the GMNS database, and each output reads only this database.
+(`<area>_hdmap.duckdb`) of the driving network from the GMNS database and the routing database, and each output reads
+only this database. A road is one chain of `driving.chains`, as in SUMO `--merge`: it is not cut at a crosswalk.
 
 ```mermaid
 flowchart LR
-  gmns[("monaco_gmns.duckdb<br/>duckosm gmns")] --> hd[("monaco_hdmap.duckdb<br/>duckosm hdmap (planned)")]
+  db[("monaco.duckdb<br/>driving.chains")] --> hd[("monaco_hdmap.duckdb<br/>duckosm hdmap (planned)")]
+  gmns[("monaco_gmns.duckdb<br/>duckosm gmns")] --> hd
   hd --> ll2["Lanelet2"]
   hd --> xodr["OpenDRIVE"]
   hd --> cr["CommonRoad"]
