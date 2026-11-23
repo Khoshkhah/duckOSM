@@ -117,3 +117,59 @@ window.addEventListener("load", () => {
   });
 })();
 </script>
+<!-- Maintain sidebar scroll position across chapter navigation to avoid jumping -->
+<script>
+(function () {
+  const KEY = "duckosm-book-sidebar-scroll";
+  function restoreScroll() {
+    const sb = document.getElementById("quarto-sidebar");
+    if (!sb) return;
+
+    const activeItem = sb.querySelector("li.sidebar-item a.active");
+    const saved = sessionStorage.getItem(KEY);
+
+    if (saved !== null) {
+      const pos = parseInt(saved, 10);
+      sb.scrollTop = pos;
+      if (activeItem) {
+        const itemTop = activeItem.offsetTop;
+        const itemBottom = itemTop + activeItem.offsetHeight;
+        const viewTop = sb.scrollTop;
+        const viewBottom = viewTop + sb.clientHeight;
+        if (itemTop < viewTop || itemBottom > viewBottom) {
+          activeItem.scrollIntoView({ block: "nearest", inline: "nearest" });
+          sessionStorage.setItem(KEY, sb.scrollTop);
+        }
+      }
+    } else if (activeItem) {
+      activeItem.scrollIntoView({ block: "nearest", inline: "nearest" });
+      sessionStorage.setItem(KEY, sb.scrollTop);
+    }
+  }
+
+  function setup() {
+    const sb = document.getElementById("quarto-sidebar");
+    if (!sb) return;
+
+    restoreScroll();
+
+    sb.addEventListener("scroll", () => {
+      sessionStorage.setItem(KEY, sb.scrollTop);
+    }, { passive: true });
+
+    sb.querySelectorAll("a.sidebar-link").forEach((link) => {
+      link.addEventListener("click", () => {
+        sessionStorage.setItem(KEY, sb.scrollTop);
+      });
+    });
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", setup);
+  } else {
+    setup();
+  }
+
+  window.addEventListener("load", restoreScroll);
+})();
+</script>

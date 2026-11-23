@@ -107,7 +107,7 @@ figure figcaption, .figure-caption { font-size: .82rem; color: var(--bk-muted); 
 .sidebar-navigation .sidebar-item-container .sidebar-link { display: flex; gap: .55rem; align-items: baseline; padding: .42rem .65rem;
   border-radius: 7px; color: var(--bk-muted); font-size: .92rem; font-weight: 500; }
 .sidebar-navigation .sidebar-link:hover { background: var(--bk-surface-2); color: var(--bk-text); }
-.sidebar-navigation .sidebar-link.active { background: var(--bk-accent-soft); color: var(--bk-accent); font-weight: 600; }
+.sidebar-navigation .sidebar-link.active { background: var(--bk-accent-soft); color: var(--bk-accent); font-weight: 500; }
 .sidebar-navigation .sidebar-link .chapter-number { color: var(--bk-faint); font-weight: 600; min-width: 1.1rem; }
 .sidebar-navigation .sidebar-link.active .chapter-number { color: var(--bk-accent); }
 
@@ -328,14 +328,15 @@ body.quarto-dark #quarto-sidebar { background: #22272e !important; }
 .sidebar-navigation .sidebar-item-section > .sidebar-item-container > .sidebar-item-toggle,
 .sidebar-navigation .sidebar-item-section > .sidebar-item-container > .sidebar-item-toggle .menu-text {
   font-size: .68rem !important; font-weight: 700 !important; letter-spacing: .08em; text-transform: uppercase;
-  color: var(--bk-faint) !important; background: none !important; padding: .15rem .65rem !important; cursor: default; }
+  color: var(--bk-faint) !important; background: none !important; padding: .15rem .65rem !important; cursor: default;
+  pointer-events: none !important; }
 .sidebar-navigation .sidebar-item-toggle .bi-chevron-right { display: none; }
 // the chapters under a part: normal text, not labels
 .sidebar-navigation .sidebar-section .sidebar-link, .sidebar-navigation .sidebar-section .sidebar-link .menu-text {
   text-transform: none !important; letter-spacing: 0 !important; font-size: .92rem !important; font-weight: 500 !important; }
 .sidebar-navigation .sidebar-section .sidebar-link { color: var(--bk-muted) !important; }
 .sidebar-navigation .sidebar-section .sidebar-link.active, .sidebar-navigation .sidebar-section .sidebar-link.active .menu-text {
-  color: var(--bk-text) !important; font-weight: 600 !important; }
+  color: var(--bk-text) !important; font-weight: 500 !important; }
 // the number badge of the open chapter: ink on yellow in both themes
 body .sidebar-navigation .sidebar-link.active .chapter-number, body.quarto-dark .sidebar-navigation .sidebar-link.active .chapter-number {
   background: #ffd43b !important; color: #17191f !important; }
@@ -423,6 +424,13 @@ body.quarto-dark div.sourceCode code { color: #9cdcfe !important; }
 #quarto-content.page-columns { max-width: 1490px; margin-left: auto; margin-right: auto; }
 // the sidebar over the page (a narrow window or a high zoom): it has the color of the page, not a clear background
 #quarto-sidebar { background: var(--bs-body-bg) !important; }
+@media (min-width: 992px) {
+  #quarto-sidebar, .sidebar {
+    top: 0 !important;
+    transition: none !important;
+    will-change: auto !important;
+  }
+}
 
 // code in the text (a fenced block, not a cell): the same look as a code cell, with the label of its language
 main div.sourceCode:not(.cell-code):has(> pre.python), main div.sourceCode:not(.cell-code):has(> pre.yaml) {
