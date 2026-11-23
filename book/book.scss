@@ -423,12 +423,6 @@ body.quarto-dark div.sourceCode code { color: #9cdcfe !important; }
 #quarto-content.page-columns { max-width: 1490px; margin-left: auto; margin-right: auto; }
 // the sidebar over the page (a narrow window or a high zoom): it has the color of the page, not a clear background
 #quarto-sidebar { background: var(--bs-body-bg) !important; }
-// a narrow window or a high zoom: first the table of contents at the right goes, and the text takes its place; the
-// sidebar goes only later (at the width where Quarto folds it)
-@media (max-width: 1250px) {
-  #quarto-margin-sidebar { display: none !important; }
-  main.content { grid-column: body-content-start / page-end !important; max-width: 820px; }
-}
 
 // code in the text (a fenced block, not a cell): the same look as a code cell, with the label of its language
 main div.sourceCode:not(.cell-code):has(> pre.python), main div.sourceCode:not(.cell-code):has(> pre.yaml) {
