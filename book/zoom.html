@@ -1,175 +1,277 @@
 <!-- Zoom of the output pictures. A click on a picture opens it in a popup (lightbox). There: a click zooms in where you click, a second click shows the whole picture again. The mouse
      wheel or two fingers zoom, a drag moves the picture, and the buttons +, - and Fit do the same. -->
-<script>window.__amd = window.define; window.define = undefined;</script>  <!-- require.js on the page: load Panzoom as a global -->
-<script src="panzoom.min.js"></script>  <!-- @panzoom/panzoom 4.5.1, MIT license -->
+<script>window.__amd = window.define; window.define = undefined;</script>
+<!-- require.js on the page: load Panzoom as a global -->
+<script src="panzoom.min.js"></script> <!-- @panzoom/panzoom 4.5.1, MIT license -->
 <script>window.define = window.__amd;</script>
 <style>
-  .rs-zoombar { position: fixed; left: 50%; top: 12px; transform: translateX(-50%); z-index: 999999; display: flex;
-    gap: 6px; align-items: center; padding: 6px 10px; border-radius: 8px; background: rgba(0, 0, 0, 0.7); color: #fff;
-    font: 14px/1.2 system-ui, sans-serif; }
-  .rs-zoombar button { min-width: 36px; height: 32px; border: 1px solid #888; border-radius: 6px; background: #222;
-    color: #fff; font-size: 16px; cursor: pointer; }
-  .rs-zoombar span { margin-left: 6px; opacity: 0.85; }
-  .gclose, .gnext, .gprev { z-index: 999999 !important; }
-  .gslide-image img { cursor: zoom-in; }
-  .cell-output-display a.lightbox img { cursor: zoom-in; max-height: 85vh; width: auto; max-width: 100%; }    /* the whole picture fits the screen */
-  .gslide-image img.rs-zoomed { cursor: grab; }
-  @media (max-width: 600px) { .rs-zoombar span { display: none; } }
-  .rs-zoomable { position: relative; display: inline-block; max-width: 100%; }
-  .rs-badge { position: absolute; top: 8px; right: 8px; display: flex; gap: 6px; align-items: center; padding: 5px 9px;
-    border-radius: 999px; background: rgba(0, 0, 0, 0.65); color: #fff; font: 13px/1 system-ui, sans-serif;
-    pointer-events: none; transition: background 0.15s; }
-  .rs-zoomable:hover .rs-badge { background: rgba(0, 0, 0, 0.85); }
-  .rs-zoomable:hover img { outline: 2px solid rgba(0, 0, 0, 0.25); }
+  .rs-zoombar {
+    position: fixed;
+    left: 50%;
+    top: 12px;
+    transform: translateX(-50%);
+    z-index: 999999;
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    padding: 6px 10px;
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.7);
+    color: #fff;
+    font: 14px/1.2 system-ui, sans-serif;
+  }
+
+  .rs-zoombar button {
+    min-width: 36px;
+    height: 32px;
+    border: 1px solid #888;
+    border-radius: 6px;
+    background: #222;
+    color: #fff;
+    font-size: 16px;
+    cursor: pointer;
+  }
+
+  .rs-zoombar span {
+    margin-left: 6px;
+    opacity: 0.85;
+  }
+
+  .gclose,
+  .gnext,
+  .gprev {
+    z-index: 999999 !important;
+  }
+
+  .gslide-image img {
+    cursor: zoom-in;
+  }
+
+  .cell-output-display a.lightbox img {
+    cursor: zoom-in;
+    max-height: 85vh;
+    width: auto;
+    max-width: 100%;
+  }
+
+  /* the whole picture fits the screen */
+  .gslide-image img.rs-zoomed {
+    cursor: grab;
+  }
+
+  @media (max-width: 600px) {
+    .rs-zoombar span {
+      display: none;
+    }
+  }
+
+  .rs-zoomable {
+    position: relative;
+    display: inline-block;
+    max-width: 100%;
+  }
+
+  .rs-badge {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    padding: 5px 9px;
+    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.65);
+    color: #fff;
+    font: 13px/1 system-ui, sans-serif;
+    pointer-events: none;
+    transition: background 0.15s;
+  }
+
+  .rs-zoomable:hover .rs-badge {
+    background: rgba(0, 0, 0, 0.85);
+  }
+
+  .rs-zoomable:hover img {
+    outline: 2px solid rgba(0, 0, 0, 0.25);
+  }
 </style>
 <script>
-window.addEventListener("load", () => {
-  if (typeof Panzoom === "undefined") return;
-  // In the page: a badge on each output picture, so that the reader sees that it can zoom. The zoom is in the popup.
-  const glass = '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="6.5" cy="6.5" r="5" ' +
-    'fill="none" stroke="currentColor" stroke-width="2"/><path d="M10.5 10.5 15 15M4.5 6.5h4M6.5 4.5v4" ' +
-    'stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
-  document.querySelectorAll(".cell-output-display a.lightbox").forEach((link) => {
-    link.classList.add("rs-zoomable");
-    const badge = document.createElement("span");
-    badge.className = "rs-badge";
-    badge.innerHTML = glass + "<span>Click to zoom</span>";
-    link.appendChild(badge);
-  });
-  if (typeof lightboxQuarto === "undefined") return;
-  const g = lightboxQuarto.settings;
-  g.draggable = false;          // a drag moves the picture, not to the next picture
-  g.touchNavigation = false;    // the same for a finger on a phone
-  g.zoomable = false;           // Panzoom zooms, not GLightbox
-  let bar = null, current = null;
-  function makeBar() {
-    bar = document.createElement("div");
-    bar.className = "rs-zoombar";
-    bar.innerHTML = '<button data-z="in" title="Zoom in">+</button><button data-z="out" title="Zoom out">&minus;</button>' +
-      '<button data-z="fit" title="The whole picture">Fit</button><span>Click, scroll or pinch to zoom. Drag to move.</span>';
-    bar.addEventListener("click", (e) => {
-      const z = e.target.dataset.z;
-      if (!current || !z) return;
-      if (z === "in") current.zoomIn(); else if (z === "out") current.zoomOut(); else current.reset();
+  window.addEventListener("load", () => {
+    if (typeof Panzoom === "undefined") return;
+    // In the page: a badge on each output picture, so that the reader sees that it can zoom. The zoom is in the popup.
+    const glass = '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="6.5" cy="6.5" r="5" ' +
+      'fill="none" stroke="currentColor" stroke-width="2"/><path d="M10.5 10.5 15 15M4.5 6.5h4M6.5 4.5v4" ' +
+      'stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+    document.querySelectorAll(".cell-output-display a.lightbox").forEach((link) => {
+      link.classList.add("rs-zoomable");
+      const badge = document.createElement("span");
+      badge.className = "rs-badge";
+      badge.innerHTML = glass + "<span>Click to zoom</span>";
+      link.appendChild(badge);
     });
-    document.body.appendChild(bar);
-  }
-  lightboxQuarto.on("open", () => { if (!bar) makeBar(); bar.style.display = "flex"; });
-  lightboxQuarto.on("close", () => { if (bar) bar.style.display = "none"; current = null; });
-  lightboxQuarto.on("slide_changed", ({ current: c }) => {
-    const img = c.slideNode.querySelector(".gslide-image img");
-    current = img && img._pz ? img._pz : current;
+    if (typeof lightboxQuarto === "undefined") return;
+    const g = lightboxQuarto.settings;
+    g.draggable = false;          // a drag moves the picture, not to the next picture
+    g.touchNavigation = false;    // the same for a finger on a phone
+    g.zoomable = false;           // Panzoom zooms, not GLightbox
+    let bar = null, current = null;
+    function makeBar() {
+      bar = document.createElement("div");
+      bar.className = "rs-zoombar";
+      bar.innerHTML = '<button data-z="in" title="Zoom in">+</button><button data-z="out" title="Zoom out">&minus;</button>' +
+        '<button data-z="fit" title="The whole picture">Fit</button><span>Click, scroll or pinch to zoom. Drag to move.</span>';
+      bar.addEventListener("click", (e) => {
+        const z = e.target.dataset.z;
+        if (!current || !z) return;
+        if (z === "in") current.zoomIn(); else if (z === "out") current.zoomOut(); else current.reset();
+      });
+      document.body.appendChild(bar);
+    }
+    lightboxQuarto.on("open", () => { if (!bar) makeBar(); bar.style.display = "flex"; });
+    lightboxQuarto.on("close", () => { if (bar) bar.style.display = "none"; current = null; });
+    lightboxQuarto.on("slide_changed", ({ current: c }) => {
+      const img = c.slideNode.querySelector(".gslide-image img");
+      current = img && img._pz ? img._pz : current;
+    });
+    lightboxQuarto.on("slide_after_load", ({ slideNode }) => {
+      const img = slideNode.querySelector(".gslide-image img");
+      if (!img || img._pz) return;
+      const vector = /\.svg($|\?)/.test(img.src);         // an SVG stays sharp: more zoom
+      const pz = Panzoom(img, { maxScale: vector ? 20 : 8, minScale: 1, contain: "outside" });
+      img._pz = pz; current = pz;
+      img.parentElement.style.touchAction = "none";
+      img.parentElement.style.overflow = "visible";      // the zoomed picture can fill the whole screen
+      img.parentElement.addEventListener("wheel", (e) => pz.zoomWithWheel(e));
+      img.addEventListener("panzoomchange", (e) => img.classList.toggle("rs-zoomed", e.detail.scale > 1.01));
+      img.classList.remove("zoomable");                  // not the click zoom of GLightbox
+      let down = null;
+      img.addEventListener("pointerdown", (e) => { down = [e.clientX, e.clientY]; });
+      img.parentElement.addEventListener("click", (e) => {    // first, before GLightbox sees the click
+        e.stopPropagation();
+        if (e.target !== img || !down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 5) return;    // a drag
+        if (pz.getScale() > 1.01) pz.reset(); else pz.zoomToPoint(3, e);    // zoom in there, or the whole picture again
+      }, true);
+    });
   });
-  lightboxQuarto.on("slide_after_load", ({ slideNode }) => {
-    const img = slideNode.querySelector(".gslide-image img");
-    if (!img || img._pz) return;
-    const vector = /\.svg($|\?)/.test(img.src);         // an SVG stays sharp: more zoom
-    const pz = Panzoom(img, { maxScale: vector ? 20 : 8, minScale: 1, contain: "outside" });
-    img._pz = pz; current = pz;
-    img.parentElement.style.touchAction = "none";
-    img.parentElement.style.overflow = "visible";      // the zoomed picture can fill the whole screen
-    img.parentElement.addEventListener("wheel", (e) => pz.zoomWithWheel(e));
-    img.addEventListener("panzoomchange", (e) => img.classList.toggle("rs-zoomed", e.detail.scale > 1.01));
-    img.classList.remove("zoomable");                  // not the click zoom of GLightbox
-    let down = null;
-    img.addEventListener("pointerdown", (e) => { down = [e.clientX, e.clientY]; });
-    img.parentElement.addEventListener("click", (e) => {    // first, before GLightbox sees the click
-      e.stopPropagation();
-      if (e.target !== img || !down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 5) return;    // a drag
-      if (pz.getScale() > 1.01) pz.reset(); else pz.zoomToPoint(3, e);    // zoom in there, or the whole picture again
-    }, true);
-  });
-});
 </script>
 <!-- Web maps follow the theme of the page: the folium maps show their dark Esri layer in the dark theme, and the
      lonboard frames load the dark page (lonboard_*_dark.html in place of lonboard_*_light.html). -->
 <script>
-(function () {
-  function dark() { return document.body.classList.contains("quarto-dark"); }
-  function folium(frame, isDark) {                   // a folium map: its tile layers are globals tile_layer_<id>
-    const w = frame.contentWindow;
-    if (!w || !w.L) return false;
-    const names = Object.keys(w).filter((k) => k.startsWith("tile_layer_"));
-    const map = Object.keys(w).filter((k) => k.startsWith("map_")).map((k) => w[k]).find((m) => m && m.addLayer);
-    if (!map || names.length < 2) return true;
-    names.forEach((k) => {
-      const layer = w[k], isDarkLayer = /Dark_Gray/.test(layer._url || "");
-      if (isDarkLayer === isDark) { if (!map.hasLayer(layer)) map.addLayer(layer); }
-      else if (map.hasLayer(layer)) map.removeLayer(layer);
+  (function () {
+    function dark() { return document.body.classList.contains("quarto-dark"); }
+    function folium(frame, isDark) {                   // a folium map: its tile layers are globals tile_layer_<id>
+      const w = frame.contentWindow;
+      if (!w || !w.L) return false;
+      const names = Object.keys(w).filter((k) => k.startsWith("tile_layer_"));
+      const map = Object.keys(w).filter((k) => k.startsWith("map_")).map((k) => w[k]).find((m) => m && m.addLayer);
+      if (!map || names.length < 2) return true;
+      names.forEach((k) => {
+        const layer = w[k], isDarkLayer = /Dark_Gray/.test(layer._url || "");
+        if (isDarkLayer === isDark) { if (!map.hasLayer(layer)) map.addLayer(layer); }
+        else if (map.hasLayer(layer)) map.removeLayer(layer);
+      });
+      return true;
+    }
+    function apply() {
+      const isDark = dark();
+      document.querySelectorAll(".cell-output-display iframe").forEach((frame) => {
+        const src = frame.getAttribute("src") || "";
+        if (/lonboard_.*_(light|dark)\.html/.test(src)) {
+          const want = src.replace(/_(light|dark)\.html/, isDark ? "_dark.html" : "_light.html");
+          if (want !== src) frame.setAttribute("src", want);
+        } else if (frame.hasAttribute("srcdoc") && !folium(frame, isDark)) {
+          frame.addEventListener("load", () => folium(frame, dark()), { once: true });    // not loaded yet
+        }
+      });
+    }
+    window.addEventListener("load", () => {
+      apply();
+      new MutationObserver(apply).observe(document.body, { attributes: true, attributeFilter: ["class"] });
     });
-    return true;
-  }
-  function apply() {
-    const isDark = dark();
-    document.querySelectorAll(".cell-output-display iframe").forEach((frame) => {
-      const src = frame.getAttribute("src") || "";
-      if (/lonboard_.*_(light|dark)\.html/.test(src)) {
-        const want = src.replace(/_(light|dark)\.html/, isDark ? "_dark.html" : "_light.html");
-        if (want !== src) frame.setAttribute("src", want);
-      } else if (frame.hasAttribute("srcdoc") && !folium(frame, isDark)) {
-        frame.addEventListener("load", () => folium(frame, dark()), { once: true });    // not loaded yet
-      }
-    });
-  }
-  window.addEventListener("load", () => {
-    apply();
-    new MutationObserver(apply).observe(document.body, { attributes: true, attributeFilter: ["class"] });
-  });
-})();
+  })();
 </script>
 <!-- Maintain sidebar scroll position across chapter navigation to avoid jumping -->
 <script>
 (function () {
   const KEY = "duckosm-book-sidebar-scroll";
-  function restoreScroll() {
+  const desc = Object.getOwnPropertyDescriptor(Element.prototype, "scrollTop");
+  if (!desc) return;
+
+  function initSidebar() {
     const sb = document.getElementById("quarto-sidebar");
-    if (!sb) return;
+    if (!sb || sb.__duckosm_init) return;
+    sb.__duckosm_init = true;
 
-    const activeItem = sb.querySelector("li.sidebar-item a.active");
-    const saved = sessionStorage.getItem(KEY);
+    // 1. Intercept Quarto's programmatic assignments to sb.scrollTop (from ResizeObserver)
+    Object.defineProperty(sb, "scrollTop", {
+      get() {
+        return desc.get.call(this);
+      },
+      set(val) {
+        // Silently block Quarto's ResizeObserver snap!
+        return;
+      },
+      configurable: true
+    });
 
-    if (saved !== null) {
-      const pos = parseInt(saved, 10);
-      sb.scrollTop = pos;
-      if (activeItem) {
-        const itemTop = activeItem.offsetTop;
-        const itemBottom = itemTop + activeItem.offsetHeight;
-        const viewTop = sb.scrollTop;
-        const viewBottom = viewTop + sb.clientHeight;
-        if (itemTop < viewTop || itemBottom > viewBottom) {
-          activeItem.scrollIntoView({ block: "nearest", inline: "nearest" });
-          sessionStorage.setItem(KEY, sb.scrollTop);
+    // 2. Restore saved position or gently reveal active item
+    function restore() {
+      const saved = sessionStorage.getItem(KEY);
+      const active = sb.querySelector("li.sidebar-item a.active");
+
+      if (saved !== null) {
+        const targetScroll = parseInt(saved, 10);
+        desc.set.call(sb, targetScroll);
+
+        // Check if active item is visible in restored view; if not, gently adjust
+        if (active) {
+          const itemRect = active.getBoundingClientRect();
+          const sbRect = sb.getBoundingClientRect();
+          if (itemRect.top < sbRect.top) {
+            desc.set.call(sb, desc.get.call(sb) + (itemRect.top - sbRect.top) - 15);
+            sessionStorage.setItem(KEY, desc.get.call(sb));
+          } else if (itemRect.bottom > sbRect.bottom) {
+            desc.set.call(sb, desc.get.call(sb) + (itemRect.bottom - sbRect.bottom) + 15);
+            sessionStorage.setItem(KEY, desc.get.call(sb));
+          }
         }
+      } else if (active) {
+        // First landing on this page: ensure active is in view without jumping to top
+        const itemRect = active.getBoundingClientRect();
+        const sbRect = sb.getBoundingClientRect();
+        if (itemRect.top < sbRect.top) {
+          desc.set.call(sb, desc.get.call(sb) + (itemRect.top - sbRect.top) - 15);
+        } else if (itemRect.bottom > sbRect.bottom) {
+          desc.set.call(sb, desc.get.call(sb) + (itemRect.bottom - sbRect.bottom) + 15);
+        }
+        sessionStorage.setItem(KEY, desc.get.call(sb));
       }
-    } else if (activeItem) {
-      activeItem.scrollIntoView({ block: "nearest", inline: "nearest" });
-      sessionStorage.setItem(KEY, sb.scrollTop);
     }
-  }
 
-  function setup() {
-    const sb = document.getElementById("quarto-sidebar");
-    if (!sb) return;
+    // Apply immediately during DOM parsing
+    restore();
 
-    restoreScroll();
-
+    // 3. Track user scrolling
     sb.addEventListener("scroll", () => {
-      sessionStorage.setItem(KEY, sb.scrollTop);
+      sessionStorage.setItem(KEY, desc.get.call(sb));
     }, { passive: true });
 
-    sb.querySelectorAll("a.sidebar-link").forEach((link) => {
-      link.addEventListener("click", () => {
-        sessionStorage.setItem(KEY, sb.scrollTop);
-      });
-    });
+    // 4. Capture click on any sidebar navigation link
+    sb.addEventListener("click", (e) => {
+      const link = e.target.closest("a.sidebar-link");
+      if (link) {
+        sessionStorage.setItem(KEY, desc.get.call(sb));
+      }
+    }, true);
+
+    // Re-verify after layout finishes
+    window.addEventListener("load", restore);
   }
 
+  // Run as early as possible
+  initSidebar();
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", setup);
-  } else {
-    setup();
+    document.addEventListener("DOMContentLoaded", initSidebar);
   }
-
-  window.addEventListener("load", restoreScroll);
 })();
 </script>
