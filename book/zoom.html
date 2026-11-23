@@ -96,19 +96,26 @@
   }
 </style>
 <script>
-  window.addEventListener("load", () => {
+  function initLightboxBadges() {
     if (typeof Panzoom === "undefined") return;
-    // In the page: a badge on each output picture, so that the reader sees that it can zoom. The zoom is in the popup.
     const glass = '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="6.5" cy="6.5" r="5" ' +
       'fill="none" stroke="currentColor" stroke-width="2"/><path d="M10.5 10.5 15 15M4.5 6.5h4M6.5 4.5v4" ' +
       'stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
-    document.querySelectorAll(".cell-output-display a.lightbox").forEach((link) => {
+    document.querySelectorAll(".cell-output-display a.lightbox:not(.rs-zoomable)").forEach((link) => {
       link.classList.add("rs-zoomable");
       const badge = document.createElement("span");
       badge.className = "rs-badge";
       badge.innerHTML = glass + "<span>Click to zoom</span>";
       link.appendChild(badge);
     });
+    if (typeof lightboxQuarto !== "undefined" && typeof lightboxQuarto.reload === "function") {
+      try { lightboxQuarto.reload(); } catch (e) {}
+    }
+  }
+
+  window.addEventListener("load", () => {
+    if (typeof Panzoom === "undefined") return;
+    initLightboxBadges();
     if (typeof lightboxQuarto === "undefined") return;
     const g = lightboxQuarto.settings;
     g.draggable = false;          // a drag moves the picture, not to the next picture
@@ -184,25 +191,30 @@
         }
       });
     }
+    window.__duckosm_applyMaps = apply;
+    window.__duckosm_reinit = function () {
+      if (typeof initLightboxBadges === "function") initLightboxBadges();
+      if (typeof window.__duckosm_applyMaps === "function") window.__duckosm_applyMaps();
+      try {
+        const spy = window.bootstrap?.ScrollSpy?.getInstance(document.body);
+        if (spy) spy.refresh();
+      } catch (e) {}
+    };
     window.addEventListener("load", () => {
       apply();
       new MutationObserver(apply).observe(document.body, { attributes: true, attributeFilter: ["class"] });
     });
   })();
 </script>
-<!-- Maintain sidebar scroll position across chapter navigation to avoid jumping -->
+<!-- Maintain sidebar scroll position and enable instant SPA chapter navigation (zero sidebar refresh) -->
 <script>
 (function () {
   const KEY = "duckosm-book-sidebar-scroll";
   const desc = Object.getOwnPropertyDescriptor(Element.prototype, "scrollTop");
-  if (!desc) return;
+  const sb = document.getElementById("quarto-sidebar");
 
-  function initSidebar() {
-    const sb = document.getElementById("quarto-sidebar");
-    if (!sb || sb.__duckosm_init) return;
-    sb.__duckosm_init = true;
-
-    // 1. Intercept Quarto's programmatic assignments to sb.scrollTop (from ResizeObserver)
+  if (sb && desc) {
+    // 1. Intercept Quarto's ResizeObserver from snapping or changing sb.scrollTop
     Object.defineProperty(sb, "scrollTop", {
       get() {
         return desc.get.call(this);
@@ -214,64 +226,150 @@
       configurable: true
     });
 
-    // 2. Restore saved position or gently reveal active item
-    function restore() {
-      const saved = sessionStorage.getItem(KEY);
-      const active = sb.querySelector("li.sidebar-item a.active");
-
-      if (saved !== null) {
-        const targetScroll = parseInt(saved, 10);
-        desc.set.call(sb, targetScroll);
-
-        // Check if active item is visible in restored view; if not, gently adjust
-        if (active) {
-          const itemRect = active.getBoundingClientRect();
-          const sbRect = sb.getBoundingClientRect();
-          if (itemRect.top < sbRect.top) {
-            desc.set.call(sb, desc.get.call(sb) + (itemRect.top - sbRect.top) - 15);
-            sessionStorage.setItem(KEY, desc.get.call(sb));
-          } else if (itemRect.bottom > sbRect.bottom) {
-            desc.set.call(sb, desc.get.call(sb) + (itemRect.bottom - sbRect.bottom) + 15);
-            sessionStorage.setItem(KEY, desc.get.call(sb));
-          }
-        }
-      } else if (active) {
-        // First landing on this page: ensure active is in view without jumping to top
-        const itemRect = active.getBoundingClientRect();
-        const sbRect = sb.getBoundingClientRect();
-        if (itemRect.top < sbRect.top) {
-          desc.set.call(sb, desc.get.call(sb) + (itemRect.top - sbRect.top) - 15);
-        } else if (itemRect.bottom > sbRect.bottom) {
-          desc.set.call(sb, desc.get.call(sb) + (itemRect.bottom - sbRect.bottom) + 15);
-        }
-        sessionStorage.setItem(KEY, desc.get.call(sb));
-      }
+    // 2. Restore saved scroll position
+    const saved = sessionStorage.getItem(KEY);
+    if (saved !== null) {
+      desc.set.call(sb, parseInt(saved, 10));
     }
 
-    // Apply immediately during DOM parsing
-    restore();
-
-    // 3. Track user scrolling
     sb.addEventListener("scroll", () => {
       sessionStorage.setItem(KEY, desc.get.call(sb));
     }, { passive: true });
+  }
 
-    // 4. Capture click on any sidebar navigation link
-    sb.addEventListener("click", (e) => {
-      const link = e.target.closest("a.sidebar-link");
-      if (link) {
-        sessionStorage.setItem(KEY, desc.get.call(sb));
+  function getFilename(href) {
+    if (!href) return "";
+    try {
+      const u = new URL(href, window.location.href);
+      return u.pathname.split("/").pop() || "index.html";
+    } catch (e) {
+      return href.split("/").pop() || "";
+    }
+  }
+
+  function updateSidebarActive(targetFile) {
+    const sidebar = document.getElementById("quarto-sidebar");
+    if (!sidebar) return;
+    sidebar.querySelectorAll("a.sidebar-link").forEach((link) => {
+      const linkFile = getFilename(link.getAttribute("href"));
+      const isActive = linkFile === targetFile;
+      link.classList.toggle("active", isActive);
+      if (isActive) {
+        const sec = link.closest(".sidebar-section");
+        if (sec && !sec.classList.contains("show")) {
+          sec.classList.add("show");
+        }
       }
-    }, true);
-
-    // Re-verify after layout finishes
-    window.addEventListener("load", restore);
+    });
   }
 
-  // Run as early as possible
-  initSidebar();
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", initSidebar);
+  let isNavigating = false;
+  async function navigateTo(url, pushState = true) {
+    if (isNavigating) return;
+    isNavigating = true;
+
+    try {
+      const res = await fetch(url);
+      if (!res.ok) {
+        window.location.href = url;
+        return;
+      }
+      const html = await res.text();
+      const doc = new DOMParser().parseFromString(html, "text/html");
+
+      // 1. Swap main article content
+      const newMain = doc.querySelector("#quarto-document-content");
+      const curMain = document.querySelector("#quarto-document-content");
+      if (newMain && curMain) {
+        curMain.replaceWith(newMain);
+      }
+
+      // 2. Swap right margin sidebar (TOC)
+      const newMargin = doc.querySelector("#quarto-margin-sidebar");
+      const curMargin = document.querySelector("#quarto-margin-sidebar");
+      if (newMargin && curMargin) {
+        curMargin.replaceWith(newMargin);
+      }
+
+      // 3. Swap bottom page navigation (prev/next)
+      const newPageNav = doc.querySelector("nav.page-navigation");
+      const curPageNav = document.querySelector("nav.page-navigation");
+      if (newPageNav && curPageNav) {
+        curPageNav.replaceWith(newPageNav);
+      } else if (newPageNav && !curPageNav) {
+        const parent = document.querySelector("#quarto-content");
+        if (parent) parent.appendChild(newPageNav);
+      } else if (!newPageNav && curPageNav) {
+        curPageNav.remove();
+      }
+
+      // 4. Update breadcrumbs
+      const newBreadcrumbs = doc.querySelectorAll(".quarto-page-breadcrumbs");
+      const curBreadcrumbs = document.querySelectorAll(".quarto-page-breadcrumbs");
+      curBreadcrumbs.forEach((bc, idx) => {
+        if (newBreadcrumbs[idx]) {
+          bc.innerHTML = newBreadcrumbs[idx].innerHTML;
+        }
+      });
+
+      // 5. Update left sidebar active indicator WITHOUT reloading or moving the sidebar
+      const targetFile = getFilename(url);
+      updateSidebarActive(targetFile);
+
+      // 6. Update document title & history
+      document.title = doc.title;
+      if (pushState) {
+        history.pushState({ url }, doc.title, url);
+      }
+
+      // 7. Scroll main window to top
+      window.scrollTo(0, 0);
+
+      // 8. Re-initialize interactive widgets on the newly injected content
+      if (window.__duckosm_reinit) {
+        window.__duckosm_reinit();
+      }
+    } catch (e) {
+      console.error("Instant navigation failed, falling back to full load:", e);
+      window.location.href = url;
+    } finally {
+      isNavigating = false;
+    }
   }
+
+  // Intercept clicks on internal book links (left sidebar, prev/next buttons, breadcrumbs)
+  document.addEventListener("click", (e) => {
+    const a = e.target.closest("a");
+    if (!a || !a.href) return;
+
+    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    if (a.target && a.target !== "_self") return;
+    if (a.hasAttribute("download")) return;
+
+    const targetUrl = new URL(a.href, window.location.href);
+    if (targetUrl.origin !== window.location.origin) return;
+
+    // Same-page anchor click -> let native smooth scrolling handle it
+    if (targetUrl.pathname === window.location.pathname && targetUrl.search === window.location.search) {
+      return;
+    }
+
+    // Only intercept links within /book/
+    if (!targetUrl.pathname.includes("/book/")) return;
+
+    const isSidebarLink = !!a.closest("#quarto-sidebar");
+    const isPaginationLink = !!a.closest("nav.page-navigation");
+    const isBreadcrumbLink = !!a.closest(".quarto-page-breadcrumbs");
+
+    if (isSidebarLink || isPaginationLink || isBreadcrumbLink) {
+      e.preventDefault();
+      navigateTo(a.href, true);
+    }
+  });
+
+  // Handle browser Back / Forward buttons
+  window.addEventListener("popstate", (e) => {
+    navigateTo(window.location.href, false);
+  });
 })();
 </script>
