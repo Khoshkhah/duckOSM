@@ -44,6 +44,8 @@ hdmap.to_lanelet2("monaco_hdmap.duckdb", "monaco.osm")
 | `--source PATH` | none | the Level 2 database: the ground of the area (`main.elevation_metadata`) and the heights of the edges |
 | `--crs CRS` | the UTM zone of the center of the area | the metric CRS of all geometry |
 | `--default-width M` | `3.25` | the width of a lane that has no width in the data |
+| `--bridge-grade G` | `0.05` | the grade that a bridge deck climbs from its landings ([Bridges and tunnels](#bridges-and-tunnels)) |
+| `--clearance M` | `5.0` | the free height between a bridge deck and the road under it, and between a tunnel road and the road over it |
 
 The step opens the GMNS database and the Level 2 database read-only. It does not change them.
 
@@ -416,11 +418,42 @@ OSM has no signal timing. `duckosm-gmns` writes no rows in these two tables.
 | `island` | none | |
 | `crossing` | the GMNS `crossing` and `lane_crossing` tables | `observed` |
 | `signal` | GMNS `location` with `loc_type` `traffic_signals`, `stop`, `give_way`, and the `ctrl_type` of the movements. `speed_limit` signs: none | `observed` or `inferred` |
-| `elevation_profile` | two rows for each carriageway: the `z_from` and `z_to` of its edge (Level 2), at stations 0 and `length_m`. None on a bridge or in a tunnel | `observed` |
+| `elevation_profile` | on the ground: two rows for each carriageway, the `z_from` and `z_to` of its edge (Level 2), at stations 0 and `length_m`, method `dem_node`. On a bridge or in a tunnel: the rows of [Bridges and tunnels](#bridges-and-tunnels), method `structure_line` | `derived`; `assumed` for `structure_line` |
 | `structure` | one row for each link with `bridge` or `tunnel`, over its whole length | `observed` |
 
-The Z of the borders and the paths: linear between the two heights of the carriageway. Empty heights give Z = 0 and
-`project.vertical_datum` empty.
+The Z of the borders and the paths: linear between the `elevation_profile` rows of the carriageway. A movement takes
+the Z of the end of its lane in and of the start of its lane out, linear between them. Without heights (no `--source`,
+or no `duckosm elevation`), Z is 0, `project.vertical_datum` is empty, and `elevation_profile` has no rows.
+
+### Bridges and tunnels
+
+The ground (DTM) is not the road on a bridge or in a tunnel. Under a bridge it is the valley, and over a tunnel it is
+the hill. So `duckosm hdmap` does not use the ground there. It uses the rule of SimReady (`import-elevation`, step 3b,
+and the deck clearance of step 4), without the vertical curves:
+
+1. **Spans.** A span is a carriageway with `level <> 0` and a `bridge` or `tunnel` tag. It gets a `structure` row.
+2. **Chains.** Spans of one kind (bridge or tunnel) that share a node are one chain. A node where a span meets a
+   carriageway of level 0 is a **landing** (the end of a bridge, or the entrance of a tunnel).
+3. **Landings.** A landing takes the height of the ground at its node.
+4. **Nodes inside a chain.** Each node takes the mean of the heights of its neighbour nodes in the chain, with the
+   weight `1 / length` of the span between them. The step repeats this until no height moves by more than 1 µm, at
+   most 1000 times. The result is a straight line along the chain between the landings.
+5. **The crest of a bridge.** A bridge node takes the higher of its height from step 4 and the lowest of
+   `z_landing + bridge_grade × d` over the landings, `d` the distance along the chain. Where the two rises meet inside
+   a span, the span gets one more row at that station. A tunnel gets no crest.
+6. **Clearance.** Where a bridge span goes over a carriageway of a lower level, the deck there is at least
+   `z_road + clearance × (level difference)`. Where a tunnel span goes under a carriageway of a higher level, the
+   tunnel road there is at most `z_road − clearance × (level difference)`. The lower roads are done first. The deck
+   becomes the upper hull (a tunnel: the lower hull) of its ends and these points. A lift steeper than 8 % is not
+   made, and the check `span-clearance` fails there.
+7. **Rows.** Each height of steps 3 to 6 is an `elevation_profile` row with method `structure_line` and
+   `ev_status = assumed`. The span's ground rows are not written.
+
+A chain with no landing (a bridge whose ends are all outside the area) keeps the ground heights with
+`ev_review = needed`.
+
+A better height source (LiDAR, a survey, a measured bridge profile) is not in the GMNS data. The SimReady producer uses
+one when it has one, and the same tables hold it.
 
 ## What each format reads
 
@@ -521,7 +554,9 @@ The step stops with an error when a check fails. The tests run them on Monaco.
 | lanes meet movements | the end of the borders of the lane in, and the start of the borders of the movement, are less than 1 cm apart |
 | marks | the two lanes on one border have the same mark |
 | signals | each `traffic_light` has a `stop_line_id` |
-| heights | each row with `level <> 0` has no height from the ground |
+| heights | each span row of `elevation_profile` has method `structure_line`; no span row comes from the ground |
+| landings | each landing has one height, the ground at its node |
+| span clearance | each bridge deck is at least `clearance` over the road under it, and each tunnel road at least `clearance` under the road over it (a fail only where the 8 % limit stops the lift) |
 
 ## Limits of `duckosm hdmap`
 
@@ -532,4 +567,4 @@ The step stops with an error when a check fails. The tests run them on Monaco.
 | The junction paths come from netconvert | duckOSM has no junction geometry of its own |
 | No islands, no signal timing, few speed signs | not in OSM, or not in the GMNS data |
 | Road marks are mostly from a rule | OSM has few road mark tags |
-| No heights on bridges and in tunnels | the ground is not the road there |
+| Bridge and tunnel heights are a rule, not a measure | the straight line, the crest and the clearance of [Bridges and tunnels](#bridges-and-tunnels). No vertical curves |

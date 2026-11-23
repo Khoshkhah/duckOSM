@@ -154,10 +154,33 @@ The heights come from the area's one ground (`docs/concepts/ground-reference.md`
 
 | Producer | Heights |
 |---|---|
-| `duckosm-gmns` | two `elevation_profile` rows for each carriageway: `edges.z_from` and `z_to` of the Level 2 database (`--source`), at stations 0 and `length_m`. The Z of the borders and the paths is linear between them. None on a bridge or in a tunnel |
+| `duckosm-gmns` | on the ground: two `elevation_profile` rows for each carriageway, `edges.z_from` and `z_to` of the Level 2 database (`--source`), at stations 0 and `length_m`. On a bridge or in a tunnel: the chain rule below. The Z of the borders and the paths is linear between the rows |
 | SimReady | its `elevation_profile`: the conformed road heights, and the heights of the bridge decks |
 
 `project.ground_id` holds the `sha256` of the ground. Each exporter writes it into its file.
+
+### Bridges and tunnels (Kaveh, 2026-11-23)
+
+The ground is not the road on a span. I compared the two rules that exist:
+
+| | roadstyle `bridge_profile` | SimReady `import-elevation` |
+|---|---|---|
+| For | drawing a 3D page | a road model |
+| Heights | above the ground (a ground node is 0) | on the vertical datum |
+| Nodes inside a chain | default: one height from the length of the group (Granville: 22 m everywhere); rule `design`: the highest that the grade allows | the mean of the neighbours by `1 / length`, then a crest at a grade from the landings |
+| Clearance | a fixed estimate (5 m plus the deck depth) | over each road that the span crosses, by `level` |
+| Measured data | heights that a person gives | LiDAR, DSM, survey, bridge profile first |
+| Tunnels | no | yes |
+| Evidence | `source`, `method` | `ev_status = assumed` |
+
+The HD map database takes the SimReady rule (the reference page, "Bridges and tunnels"), without the vertical curves:
+real heights on the datum, clearance over the real roads, tunnels too, and `assumed` evidence. A straight line for
+each span is not enough: the Granville Bridge has 5 nodes inside the bridge, with no ground height.
+
+One risk is open. The roadstyle 3D page and the HD map database can show different heights for one bridge. A better
+place for the chain rule is the duckOSM step `duckosm elevation` (deck heights for each edge in the Level 2
+database), so that the HD map database, GMNS, OpenDRIVE and the roadstyle page read one set of heights. That move is a
+design of its own. Until then, the rule is in `duckosm hdmap`.
 
 ## How the exporters change
 
