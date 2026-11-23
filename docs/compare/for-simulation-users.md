@@ -25,7 +25,7 @@ duckosm matsim data/monaco.duckdb -o out/matsim/network.xml.gz
 
 In the standard SUMO workflow, `netconvert --osm-files` parses raw OSM ways, guessing lane allocation and creating internal micro-nodes at every pedestrian crossing. With duckOSM, network geometry, lanes, and turn bans are structured first, then passed to `netconvert`.
 
-| Your tool | duckOSM CLI / Python SDK | What duckOSM does |
+| Standard Tool (netconvert / SUMO) | duckOSM CLI / Python SDK | What duckOSM does |
 |---|---|---|
 | `netconvert --osm-files map.osm` | `duckosm sumo data/monaco.duckdb -o out/sumo/`<br/>`net.driving.to_sumo("out/sumo")` | Writes plain XML (`.edg.xml`, `.nod.xml`, `.con.xml`, `.tll.xml`) with traffic lights, stop signs, and bus stops, plus `network.netccfg` |
 | `osmWebWizard` (download and convert) | `duckosm.network("Monaco").driving.to_sumo("out/sumo", run_netconvert=True)` | Builds Level 2 DuckDB and generates `network.net.xml` in one call |

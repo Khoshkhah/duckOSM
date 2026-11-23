@@ -32,7 +32,7 @@ duckosm cut data/france.pbf -o monaco.osm.pbf -b 7.40,43.72,7.44,43.76
 
 ## OSM Features: OSMnx, QuackOSM, osmium
 
-| Your tool | duckOSM CLI / Python SDK | What duckOSM does |
+| Standard Tool (OSMnx / QuackOSM / osmium) | duckOSM CLI / Python SDK | What duckOSM does |
 |---|---|---|
 | `ox.features_from_place("Monaco", tags={"building": True})` | `duckosm.gis.features(duckosm.get("Monaco"), tags={"building": True})` | Queries local DuckDB cached extract instead of slow Overpass API |
 | `ox.features_from_bbox(bbox, tags)` | `duckosm.gis.features(duckosm.get(bbox=bbox), tags)` | Bounding box spatial filter over PBF features |
@@ -66,7 +66,7 @@ The `tags` dictionary adheres to OSMnx conventions:
 
 Exporting the Level 2 directed network with topology, edge IDs, and turn restrictions into GIS formats:
 
-| Your tool | duckOSM CLI / Python SDK | What duckOSM does |
+| Standard Tool (OSMnx / GDAL) | duckOSM CLI / Python SDK | What duckOSM does |
 |---|---|---|
 | `ox.save_graph_geopackage(G, "monaco.gpkg")` | `duckosm export-gis data/monaco.duckdb -o monaco.gpkg`<br/>`net.to_gis("monaco.gpkg")` | Writes directed edge and node layers to GeoPackage |
 | `ox.graph_to_gdfs(G)` | `net.edges()`, `net.nodes()` | Returns clean GeoDataFrames with stable `edge_id` |
@@ -76,7 +76,7 @@ Exporting the Level 2 directed network with topology, edge IDs, and turn restric
 
 ## Administrative Boundaries
 
-| Your tool | duckOSM Python SDK | What duckOSM does |
+| Standard Tool (OSMnx / osmium) | duckOSM Python SDK | What duckOSM does |
 |---|---|---|
 | `ox.geocode_to_gdf("Monaco")` | `duckosm.gis.admin_boundaries(net)` | Returns all administrative boundary levels with parent-child hierarchy |
 | `osmium tags-filter r/boundary=administrative` | `duckosm.gis.admin(net, area)` | Queries `admin_boundaries` table directly from DuckDB |
