@@ -9,7 +9,8 @@ use duckdb::Connection;
 use std::path::Path;
 
 /// Write `gmns_driving.chains` into the GMNS db `gmns` from the duckOSM db `source`. Gives the number of chains; None when
-/// there is nothing to do (no `gmns_driving.link`, or no `driving.chains` in the source).
+/// there is no `gmns_driving.link`. A source with no `driving.chains` (an old build, or `--no-chains`): each link is a chain
+/// of one link, so `--merge` still works and changes nothing.
 pub fn add_chains(source: &Path, gmns: &Path) -> Result<Option<usize>> {
     let con = Connection::open(gmns).map_err(|e| format!("{}: {e}", gmns.display()))?;
     let x = |sql: &str| con.execute_batch(sql).map_err(|e| format!("{e}\n{sql}"));
@@ -28,24 +29,26 @@ pub fn add_chains(source: &Path, gmns: &Path) -> Result<Option<usize>> {
     if !has(&me, "gmns_driving", "link")? {
         return Ok(None);
     }
-    if !has("s", "driving", "chains")? {
-        eprintln!("GMNS: the source db has no driving.chains (build it again with this duckOSM version): no gmns_driving.chains");
-        return Ok(None);
-    }
+    let source_chains = if has("s", "driving", "chains")? {
+        "SELECT chain_id, edge_ids FROM s.driving.chains"
+    } else {
+        eprintln!("GMNS: the source db has no driving.chains (build it again with this duckOSM version): each link is a chain of one link");
+        "SELECT NULL::BIGINT AS chain_id, NULL::BIGINT[] AS edge_ids WHERE false"
+    };
     // the lanes of each link, left to right: a chain is cut where they change
     x("CREATE OR REPLACE TEMP TABLE _lane_sig AS SELECT link_id, string_agg(lane_num::VARCHAR || ':' || coalesce(allowed_uses, '') || ':' \
        || coalesce(round(width, 2)::VARCHAR, ''), '|' ORDER BY lane_num) AS sig FROM gmns_driving.lane GROUP BY link_id")?;
     // the links of each chain, in order; `seg`: the part of the chain after each cut. A link that GMNS does not have cuts
     // the chain too. The links in no chain (bus-only) are chains of one link.
-    x("CREATE OR REPLACE TABLE main._chain_links AS
-       WITH u AS (SELECT c.chain_id AS old, m.e AS link_id, m.i FROM s.driving.chains c, unnest(c.edge_ids) WITH ORDINALITY AS m(e, i)
+    x(&format!("CREATE OR REPLACE TABLE main._chain_links AS
+       WITH u AS (SELECT c.chain_id AS old, m.e AS link_id, m.i FROM ({source_chains}) c, unnest(c.edge_ids) WITH ORDINALITY AS m(e, i)
                   WHERE m.e IN (SELECT link_id FROM gmns_driving.link)),
        f AS (SELECT u.*, CASE WHEN lag(u.i) OVER w IS NULL OR lag(u.i) OVER w <> u.i - 1 OR g.sig IS DISTINCT FROM lag(g.sig) OVER w
                               THEN 1 ELSE 0 END AS brk
              FROM u LEFT JOIN _lane_sig g USING (link_id) WINDOW w AS (PARTITION BY u.old ORDER BY u.i))
        SELECT old, sum(brk) OVER (PARTITION BY old ORDER BY i) AS seg, link_id, i FROM f
        UNION ALL
-       SELECT link_id, 1, link_id, 1 FROM gmns_driving.link WHERE link_id NOT IN (SELECT link_id FROM u)")?;
+       SELECT link_id, 1, link_id, 1 FROM gmns_driving.link WHERE link_id NOT IN (SELECT link_id FROM u)"))?;
     // the id of each chain: duckosm_core's chain_id of its links (the Level 2 chain_id when the chain is not cut)
     x("CREATE OR REPLACE TABLE main._chain_ids(old BIGINT, seg BIGINT, chain_id BIGINT)")?;
     {

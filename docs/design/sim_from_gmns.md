@@ -137,7 +137,7 @@ Two changes from `driving.chains`:
    links of one Level 2 chain can have different GMNS lanes. The chain is cut where the lane list (`lane_num`,
    `allowed_uses`, `width`) changes.
 2. **Each GMNS driving link is in one chain.** A bus-only link is not a Level 2 edge, so it is in no Level 2 chain. It is a
-   chain of one link.
+   chain of one link. A source db with no `driving.chains` gives one chain for each link, so the table is always there.
 
 ### MATSim `--merge`
 

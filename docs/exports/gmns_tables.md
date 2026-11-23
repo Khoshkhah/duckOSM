@@ -269,7 +269,8 @@ end of each footway to the nearest road lane, where they meet at a node.
 Driving only. One row for each chain: the links of one road between two real junctions, joined again over the footway
 crossings. It comes from the Level 2 [`driving.chains`](../reference/database.md#chains), with two changes: a chain is cut
 where the GMNS lanes change (a merged SUMO edge has the lanes of its last link), and a link in no Level 2 chain (a bus-only
-link) is a chain of one link. Each driving link is in one chain. `duckosm sumo --merge` and `duckosm matsim --merge` read it.
+link) is a chain of one link. Each driving link is in one chain. A source db with no `driving.chains` (an old build, or
+`--no-chains`) gives one chain for each link, so `--merge` changes nothing. `duckosm sumo --merge` and `duckosm matsim --merge` read it.
 
 | Column | Type | Holds |
 |---|---|---|
