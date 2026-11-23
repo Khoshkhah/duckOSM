@@ -87,7 +87,7 @@ Edit roads, turns and buildings on a map: your fixes go into one YAML file and a
 <td valign="top">
 
 **GMNS in DuckDB**<br>
-The open standard (General Modeling Network Specification) in DuckDB: links, lanes, movements and zones for simulation and Graph AI
+The open standard (General Modeling Network Specification) in DuckDB: links, lanes, and turning movements for simulation and Graph AI
 ([GMNS network](https://khoshkhah.github.io/duckOSM/exports/gmns-network/)).
 
 </td>

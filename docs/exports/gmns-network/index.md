@@ -1,6 +1,6 @@
 # 3. GMNS network
 
-The multi-resolution network in the GMNS standard, from macro (links) to micro (lanes, movements, and zones), powering simulation and Graph Neural Networks.
+The multi-resolution network in the GMNS standard, from macro (links) to micro (lanes, movements, and cells), powering simulation and Graph Neural Networks.
 
 ```mermaid
 flowchart LR
