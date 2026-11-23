@@ -3,6 +3,9 @@
 Status: design, waits for sign-off (2026-11-23). No code yet. Changed on 2026-11-23: a database of its own, not a
 schema in the GMNS database (Kaveh).
 
+The full specification of each table, column and rule: [`docs/reference/hdmap-database.md`](../reference/hdmap-database.md).
+This design gives the reasons.
+
 ## The problem
 
 Level 4 (HD map) has four outputs today. Each output reads the GMNS database and makes its own lane geometry:
