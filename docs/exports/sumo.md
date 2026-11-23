@@ -35,7 +35,7 @@ duckosm sumo monaco.duckdb --netconvert --join-junctions    # merges nearby comp
 
 Coordinates are projected to UTM metres. In OSM, traffic signals and stop signs are often mapped on approach roads before an intersection; duckOSM automatically attaches them to the junction node and groups adjacent signals into a single coordinated traffic light.
 
-### Fewer edges (`--merge`)
+### Fewer edges (`--merge`) { #fewer-edges-merge }
 
 Multimodal routing splits roads at path crossings and cycleways so pedestrian and cycling networks can cross and connect. SUMO does not need these splits for single-mode driving simulations. `--merge` (`to_sumo(..., merge=True)`) combines continuous road segments into single edges using [`driving.chains`](../reference/database.md#chains):
 
@@ -61,7 +61,7 @@ The generated `.netccfg` file configures netconvert. Customize options in text o
 | `geometry.remove` | `false` | Keep `false` to preserve `edge_id`s (use `--merge` instead) |
 | `numerical-ids` | `false` | Keep `false` to preserve duckOSM IDs |
 
-## Visualizing lanes
+## Visualizing lanes { #see-it }
 
 `duckosm sumo-map sumo/monaco.net.xml` renders each compiled SUMO lane at its physical width:
 
