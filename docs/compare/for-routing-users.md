@@ -1,55 +1,65 @@
 # duckOSM for routing users
 
-This page is for users of openrouteservice (ORS), OSRM, r5py, pandana and OSMnx. It gives the duckOSM call for each of
-their calls. All duckOSM calls are in [`duckosm.routing`](../reference/sdk/routing.md) and run on your computer, on a
-file that you build once:
+This page is for users of openrouteservice (ORS), OSRM, r5py, pandana, and OSMnx. It gives the direct duckOSM equivalent for every standard routing operation. All routing functions are in the core SDK (`duckosm.routing` — [reference](../reference/sdk/routing.md)) and execute via an embedded, multi-threaded Rust routing engine directly inside Python. The notebook [8. Advanced routing](https://khoshkhah.github.io/duckOSM/book/08_routing_advanced.html) runs these workflows on Monaco.
+
+```bash
+pip install "duckosm[viz]"      # lonboard, mapclassify (for interactive route maps)
+```
 
 ```python
 import duckosm
 
-net = duckosm.network("Monaco")      # get the OSM data and build the network
-car, walk = net.driving, net.walking  # one view for each mode
+net = duckosm.network("Monaco")
+car, walk, bike = net.driving, net.walking, net.cycling
 ```
 
-## Calls
+## Routing Operations
 
-| Task | Their call | duckOSM call |
-|---|---|---|
-| One route | ORS `directions`, OSRM `route`, OSMnx `shortest_path` | `car.route(a, b)` |
-| The route as edges | OSMnx `route_to_gdf` | `car.route(a, b).edges` |
-| The shortest route, not the fastest | OSMnx `shortest_path(weight="length")` | `car.route(a, b, weight="length")` |
-| Turn-by-turn steps | ORS and OSRM `steps=true` | `car.route(a, b).directions()` |
-| Many routes | OSMnx `shortest_path(G, origs, dests)` | `car.routes(origins, destinations)` |
-| Other good routes | OSMnx `k_shortest_paths`, OSRM `alternatives=true` | `car.k_shortest_paths(a, b, k=3)` |
-| A travel time matrix | ORS `matrix`, OSRM `table`, r5py `TravelTimeMatrix` | `car.matrix(origins, destinations)` |
-| A distance matrix | ORS `matrix(metrics=["distance"])` | `car.matrix(origins, destinations, weight="length")` |
-| Isochrones | ORS `isochrones`, r5py `Isochrones` | `walk.isochrones(origins, minutes=[5, 10, 15])` |
-| Targets within a time, the nearest target | pandana `aggregate`, `nearest_pois` | `walk.accessibility(origins, targets, minutes=[5, 10])` |
-| Nearest edge of a point | OSMnx `nearest_edges` | a point is a place: each call snaps it to its nearest edge |
-| A place name to a point | ORS `geocode`, OSMnx `geocode` | `duckosm.routing.geocode(car, "Boulevard Albert 1er")` |
-| A route across modes | r5py with `transport_modes` | `net.route_multimodal_points(a, b)` |
-| The graph for your own algorithm | OSMnx `graph_from_place` | `car.to_networkx()`, `car.to_rustworkx()` |
+| Task | Standard tool call | duckOSM call | What duckOSM does |
+|---|---|---|---|
+| **Fastest route** | ORS `directions`, OSRM `route`, OSMnx `shortest_path` | `car.route(a, b)` | Multi-threaded Rust Dijkstra/CH search adhering to OSM turn restrictions |
+| **Shortest route** | OSMnx `shortest_path(weight="length")` | `car.route(a, b, weight="length")` | Minimizes physical distance in metres |
+| **Route edges** | OSMnx `route_to_gdf` | `car.route(a, b).edges` | Returns list of stable `edge_id`s directly queryable in DuckDB |
+| **Turn-by-turn guidance** | ORS / OSRM `steps=true` | `car.route(a, b).directions()` | Generates street names, maneuver icons, turn angles, and segment lengths |
+| **Multi-origin / destination** | OSMnx `shortest_path(G, origs, dests)` | `car.routes(origins, destinations)` | Vectorized parallel routing across coordinate or edge lists |
+| **Alternative routes (KSP)** | OSMnx `k_shortest_paths`, OSRM `alternatives` | `car.k_shortest_paths(a, b, k=3)` | Returns distinct viable detour paths |
+| **Travel time matrix (OD)** | ORS `matrix`, OSRM `table`, r5py `TravelTimeMatrix` | `car.matrix(origins, destinations)` | Parallel single-source searches computing full OD impedance matrix in seconds |
+| **Distance matrix** | ORS `matrix(metrics=["distance"])` | `car.matrix(origins, destinations, weight="length")` | Full OD distance table in metres |
+| **Isochrones** | ORS `isochrones`, r5py `Isochrones` | `walk.isochrones(origins, minutes=[5, 10, 15])` | Generates buffered reachable road polygons (`buffer_m=25`) |
+| **Cumulative accessibility** | pandana `aggregate`, `nearest_pois` | `walk.accessibility(homes, shops, minutes=[5, 10])` | Counts reachable destinations within time thresholds for every origin |
+| **Nearest edge snapping** | OSMnx `nearest_edges` | Built-in: pass `(lon, lat)` points | Coordinates snap automatically to the nearest legal road edge |
+| **Geocoding** | ORS `geocode`, OSMnx `geocode` | `duckosm.routing.geocode(car, "Boulevard Albert 1er")` | Local fuzzy place and street name search without external web APIs |
+| **Multimodal route** | r5py with `transport_modes` | `net.route_multimodal_points(a, b)` | Seamless walk-drive-bike journey across co-located transfer nodes |
+| **Custom graph algorithm** | OSMnx `graph_from_place` | `car.to_networkx()`, `car.to_rustworkx()` | Zero-copy export to NetworkX or Rustworkx graph structures |
 
-## Differences
+## Architectural Differences
 
-| Subject | Their tools | duckOSM |
-|---|---|---|
-| Server | ORS and OSRM: a server (or the public server with a quota) | no server: a `.duckdb` file and a Rust module in Python |
-| Turns | OSMnx: a node graph, no turn restrictions | an edge graph: a route obeys the OSM turn restrictions |
-| A place | a coordinate, or a node id (OSMnx) | an edge id, a `(lon, lat)` point or a place name |
-| Matrix | OSMnx: one route for each cell | one Dijkstra search for each origin, the origins in parallel |
-| Isochrone polygon | ORS: a concave hull of the reached points | the union of the reached edges, each with a buffer of 25 m (`buffer_m`) |
-| Public transport | r5py: GTFS timetables | no timetables; the multimodal graph walks, cycles and drives |
-| IDs | node ids that change at each download | `edge_id`, a stable hash: you can join your data to it after a rebuild |
+| Dimension | External Routing Engines (ORS, OSRM) | NetworkX / OSMnx | duckOSM Routing |
+|---|---|---|---|
+| **Architecture** | Requires dedicated HTTP server, daemon processes, and GBs of RAM | In-memory Python interpreter (slow single-thread traversal) | Embedded in-process Rust engine; zero server setup, zero HTTP latency |
+| **Turn restrictions** | Enforced by pre-compiled graphs | Ignored (routes may execute illegal U-turns or banned turns) | Edge-based graph strictly obeying all OSM turn relations and conditional restrictions |
+| **Input location** | Requires latitude/longitude | Node integer ID | Flexible: `edge_id`, `(lon, lat)` tuple, or street name string |
+| **OD matrix scale** | Rate limited or memory-constrained | Loops over individual shortest path calls ($O(N \times M)$) | Multi-core parallel single-source Dijkstra ($O(N)$ tree searches) |
+| **Isochrone accuracy** | Often rough concave hulls connecting point clouds | Point buffers along network | Buffer around exact reached road centerline geometries |
+| **ID persistence** | Internal graph vertex IDs change every build | Ephemeral `(u, v, key)` changes every run | Persistent 64-bit `edge_id` hash; results join directly back to DuckDB |
 
-## Example: the shops within 10 minutes on foot
+## Example: 10-Minute Walk Accessibility to Amenities
 
 ```python
-homes = walk.edges(where="highway = 'residential'").edge_id.tolist()[:200]   # origins: residential streets
-shops = [(7.4246, 43.7384), (7.4200, 43.7310)]                              # targets: points
-acc = walk.accessibility(homes, shops, minutes=[5, 10])                      # a row for each home street
-net.map("walking", color_by=acc["n_10min"], cmap="viridis")                  # color each street by its count
-```
+import duckosm
 
-The notebook [8. Advanced routing](https://khoshkhah.github.io/duckOSM/book/08_routing_advanced.html) runs each call on Monaco, with a map or a chart
-for each one.
+net = duckosm.network("Monaco")
+walk = net.walking
+
+# 1. Select residential streets as origins
+homes = walk.edges(where="highway = 'residential'").edge_id.tolist()[:200]
+
+# 2. Define amenity destination coordinates (shops, clinics, transit stops)
+amenities = [(7.4246, 43.7384), (7.4200, 43.7310), (7.4280, 43.7420)]
+
+# 3. Calculate accessibility within 5 and 10 minutes
+acc = walk.accessibility(homes, amenities, minutes=[5, 10])
+
+# 4. Color residential streets by reachable count on an interactive map
+net.map("walking", color_by=acc["n_10min"], cmap="viridis")
+```

@@ -1,75 +1,90 @@
 # duckOSM for GIS users
 
-This page is for users of OSMnx's features, QuackOSM, osmium and ogr2ogr. Each table gives the call of your tool and
-the duckOSM call that does the same work. The module is `duckosm.gis`
-([reference](../reference/sdk/gis.md)). The notebook
-[10. OSM data for GIS](https://khoshkhah.github.io/duckOSM/book/10_gis.html) runs each call on Monaco.
+This page is for users of OSMnx's features, QuackOSM, osmium, GDAL (`ogr2ogr`), Tilemaker, and osm2pgsql. Each section compares standard GIS toolchains with the duckOSM equivalent. The Python module is `duckosm.gis` ([reference](../reference/sdk/gis.md)), and CLI commands include `duckosm quack`, `duckosm export-gis`, and `duckosm cut`. The notebook [10. OSM data for GIS](https://khoshkhah.github.io/duckOSM/book/10_gis.html) runs each workflow on Monaco.
 
 ```bash
-pip install "duckosm[gis]"      # geopandas
+pip install "duckosm[gis]"      # geopandas, pyarrow, shapely
 ```
 
-## OSM features
+## Command Line Interface (CLI)
 
-| Your tool | duckOSM |
-|---|---|
-| `ox.features_from_place("Monaco", tags={"building": True})` | `duckosm.gis.features(duckosm.get("Monaco"), tags={"building": True})` |
-| `ox.features_from_bbox(bbox, tags)` | `duckosm.gis.features(duckosm.get(bbox=bbox), tags)` |
-| `ox.features_from_point(point, tags, dist=500)` | `duckosm.gis.features(duckosm.get(point=point, dist_m=500), tags)` |
-| `ox.features_from_xml("file.osm", tags)` | `duckosm.gis.features("file.osm.pbf", tags)` |
-| `quackosm.convert_pbf_to_geodataframe(pbf, tags_filter=tags)` | `duckosm.gis.features(pbf, tags)` |
-| `quackosm.convert_pbf_to_parquet(pbf)` | `duckosm.gis.quack(pbf, formats=["geoparquet"])` |
-| `osmium tags-filter` then `ogr2ogr` | `duckosm.gis.features(pbf, tags)`, or `duckosm.gis.quack(pbf, gdal=True)` for GDAL's five layers |
+duckOSM provides direct command-line equivalents for common GIS pipelines that traditionally required multiple distinct tools:
 
-`tags` has the rules of OSMnx:
+```bash
+# 1. Extract OSM features table (QuackOSM equivalent)
+duckosm quack data/monaco.pbf -o out/features.parquet
 
-| `tags` | Features |
-|---|---|
-| `{"building": True}` | each feature with the tag `building` |
-| `{"amenity": "cafe"}` | the features with `amenity=cafe` |
-| `{"amenity": ["cafe", "bar"]}` | the features with one of the values |
-| `{"amenity": "cafe", "shop": True}` | the features of one key or of the other (OR) |
+# 2. Extract Geofabrik's 20 standard GIS layers (shp or GeoParquet)
+duckosm quack data/monaco.pbf --geofabrik -o out/geofabrik/
 
-| Column | Content |
-|---|---|
-| `feature_id` | `node/…`, `way/…` or `relation/…`, as in QuackOSM |
-| one column for each key of `tags` | the value of the tag |
-| `tags` | all tags of the feature, as a dict |
-| `geometry` | point, line, polygon or multipolygon, EPSG:4326 |
+# 3. Extract GDAL's 5 standard OSM layers (ogr2ogr equivalent, 4x faster)
+duckosm quack data/monaco.pbf --gdal -o out/gdal/
 
-Differences:
+# 4. Generate PMTiles vector tiles (Tilemaker / Planetiler equivalent)
+duckosm quack data/monaco.pbf --pmtiles -o monaco.pmtiles
 
-| | OSMnx | duckOSM |
+# 5. Export routable network to GIS formats (GeoPackage, GeoParquet, Shapefile)
+duckosm export-gis data/monaco.duckdb -o out/gis/ --format geoparquet
+
+# 6. Spatially cut large PBF files (osmium extract equivalent)
+duckosm cut data/france.pbf -o monaco.osm.pbf -b 7.40,43.72,7.44,43.76
+```
+
+## OSM Features: OSMnx, QuackOSM, osmium
+
+| Your tool | duckOSM CLI / Python SDK | What duckOSM does |
 |---|---|---|
-| Source of the data | the Overpass API, at each call | the Geofabrik extract, in a cache |
-| Rows | OSMnx's rules for polygons | the rows of QuackOSM |
-| OSM fixes | no | `fixes="osm_fixes.yaml"` applies your fixes first |
+| `ox.features_from_place("Monaco", tags={"building": True})` | `duckosm.gis.features(duckosm.get("Monaco"), tags={"building": True})` | Queries local DuckDB cached extract instead of slow Overpass API |
+| `ox.features_from_bbox(bbox, tags)` | `duckosm.gis.features(duckosm.get(bbox=bbox), tags)` | Bounding box spatial filter over PBF features |
+| `ox.features_from_point(point, tags, dist=500)` | `duckosm.gis.features(duckosm.get(point=point, dist_m=500), tags)` | Buffer query in metres around coordinate |
+| `ox.features_from_xml("file.osm", tags)` | `duckosm.gis.features("file.osm.pbf", tags)` | Fast zero-copy parsing of PBF rather than heavy XML |
+| `quackosm.convert_pbf_to_geodataframe(pbf, tags_filter=tags)` | `duckosm.gis.features(pbf, tags)`<br/>`duckosm quack pbf -o out.parquet` | 3 to 7 times faster than QuackOSM, with 2 to 5 times less memory |
+| `quackosm.convert_pbf_to_parquet(pbf)` | `duckosm.gis.quack(pbf, formats=["geoparquet"])` | Streamed GeoParquet output using DuckDB spatial |
+| `osmium tags-filter` then `ogr2ogr` | `duckosm.gis.features(pbf, tags)`<br/>`duckosm quack pbf --gdal` | Generates GDAL's 5 layers (`points`, `lines`, `multilinestrings`, `multipolygons`, `other_relations`) 4x faster than ogr2ogr |
 
-## The network as GIS files
+### Filter Tags
 
-| Your tool | duckOSM |
+The `tags` dictionary adheres to OSMnx conventions:
+
+| `tags` argument | Matched features |
 |---|---|
-| `ox.save_graph_geopackage(G, "monaco.gpkg")` | `net.to_gis("monaco.gpkg")` |
-| `ox.graph_to_gdfs(G)` | `net.edges()`, `net.nodes()` |
-| `ox.save_graph_xml(G, "monaco.osm")` | `duckosm.gis.to_osm_xml(net.driving, "monaco.osm")` |
-| `gdf.to_parquet(...)` | `net.to_gis("out", fmt="geoparquet")` |
-| `ogr2ogr -f "ESRI Shapefile"` | `net.to_gis("out", fmt="shp")` |
+| `{"building": True}` | Any feature with the `building` tag present |
+| `{"amenity": "cafe"}` | Features with `amenity=cafe` |
+| `{"amenity": ["cafe", "bar"]}` | Features with any matching value (`amenity IN ('cafe', 'bar')`) |
+| `{"amenity": "cafe", "shop": True}` | Union of tags (OR logic) |
 
-`to_osm_xml` writes one `<way>` for each road. Its id is the `edge_id` of the forward edge. A two-way road is one way,
-with `oneway=no` and the lanes of each direction (`lanes:forward`, `lanes:backward`). The tags `duckosm:osm_id` and
-`duckosm:edge_id` give the OSM way and the edge.
+### Feature Comparison: OSMnx vs duckOSM
 
-## Administrative areas
+| Capability | OSMnx `features_*` | duckOSM `features()` |
+|---|---|---|
+| **Data source** | Overpass API server (throttled, rate limits, network timeouts) | Local Geofabrik `.osm.pbf` extracts cached on disk |
+| **Parsing speed** | Minutes for medium cities | Seconds (processed via Rust/DuckDB SIMD routines) |
+| **Fixes support** | None | Applies `osm_fixes.yaml` before feature materialization |
+| **Browser native** | No (requires Python & C libraries) | Yes (runs in WebAssembly via DuckDB-Wasm) |
 
-| Your tool | duckOSM |
-|---|---|
-| `ox.geocode_to_gdf("Monaco")` | `duckosm.gis.admin_boundaries(net)`: all levels of the area, each with its parent |
-| `osmium tags-filter r/boundary=administrative` | `duckosm.gis.admin(net, area)`: the table `admin_boundaries` in the database |
+## The Network as GIS Files
 
-## Base maps and tiles
+Exporting the Level 2 directed network with topology, edge IDs, and turn restrictions into GIS formats:
 
-| Your tool | duckOSM |
-|---|---|
-| Geofabrik's shapefiles (`gis_osm_*_free`) | `duckosm quack --geofabrik` ([Geofabrik layers](../exports/geofabrik.md)) |
-| Tilemaker, Planetiler | `duckosm quack --pmtiles` ([Vector tiles](../exports/pmtiles.md)) |
-| osm2pgsql | `duckosm quack --osm2pgsql` ([osm2pgsql tables](../exports/osm2pgsql.md)) |
+| Your tool | duckOSM CLI / Python SDK | What duckOSM does |
+|---|---|---|
+| `ox.save_graph_geopackage(G, "monaco.gpkg")` | `duckosm export-gis data/monaco.duckdb -o monaco.gpkg`<br/>`net.to_gis("monaco.gpkg")` | Writes directed edge and node layers to GeoPackage |
+| `ox.graph_to_gdfs(G)` | `net.edges()`, `net.nodes()` | Returns clean GeoDataFrames with stable `edge_id` |
+| `ox.save_graph_xml(G, "monaco.osm")` | `duckosm.gis.to_osm_xml(net.driving, "monaco.osm")` | Exports valid OSM XML with `lanes:forward`/`lanes:backward` and `duckosm:edge_id` |
+| `gdf.to_parquet("monaco.parquet")` | `net.to_gis("out", fmt="geoparquet")` | Streamed GeoParquet with native DuckDB geometry encoding |
+| `ogr2ogr -f "ESRI Shapefile"` | `net.to_gis("out", fmt="shp")` | ESRI Shapefiles per layer |
+
+## Administrative Boundaries
+
+| Your tool | duckOSM Python SDK | What duckOSM does |
+|---|---|---|
+| `ox.geocode_to_gdf("Monaco")` | `duckosm.gis.admin_boundaries(net)` | Returns all administrative boundary levels with parent-child hierarchy |
+| `osmium tags-filter r/boundary=administrative` | `duckosm.gis.admin(net, area)` | Queries `admin_boundaries` table directly from DuckDB |
+
+## Base Maps, Tiles, and Database Tables
+
+| Standard tool | duckOSM CLI equivalent | Output description |
+|---|---|---|
+| **Geofabrik shapefiles** (`gis_osm_*_free`) | `duckosm quack pbf --geofabrik` | The exact 20 standard GIS layers, available for any custom area, in Shapefile or GeoParquet |
+| **Tilemaker / Planetiler** | `duckosm quack pbf --pmtiles` | Single-file PMTiles vector archive (Shortbread schema) |
+| **osm2pgsql into PostGIS** | `duckosm quack pbf --osm2pgsql` | The 4 osm2pgsql schema tables (`point`, `line`, `polygon`, `roads`) inside DuckDB or PostGIS (1.7x faster on Kentucky) |

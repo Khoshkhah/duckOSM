@@ -1,20 +1,56 @@
 # Compare
 
-How duckOSM compares with the tools that people use for the same job, on the same input file. Each tool has its own
-page with the details.
+How duckOSM compares with the specialized tools that engineers and researchers use for road networks, GIS, simulation, planning, and graph machine learning. Each category has its own dedicated comparison guide.
 
-| Other tool | Job | duckOSM | Page |
+```mermaid
+flowchart LR
+  subgraph Inputs ["Input Source"]
+    PBF["OpenStreetMap (.osm.pbf)"]
+  end
+
+  subgraph Legacy ["Fragmented Legacy Tools"]
+    L1["OSMnx / QuackOSM<br/>(Slow Overpass queries, transient IDs)"]
+    L2["SUMO netconvert / MATSim<br/>(Heuristic cuts, dropped signals)"]
+    L3["osm2gmns<br/>(Loose CSVs, broken footway links)"]
+    L4["CommonRoad / Lanelet2<br/>(Manual drawing, isolated IDs)"]
+  end
+
+  subgraph Unified ["duckOSM Unified Pipeline"]
+    U1["Level 2 Routable DuckDB<br/>Stable 64-bit edge_id · Turn bans · Multimodal parity"]
+    U2["Level 3 GMNS DuckDB<br/>Macro · Meso · Micro schemas · Chains"]
+    U3["Level 4 HD Maps & ML<br/>OpenDRIVE · CommonRoad · PyG HeteroData"]
+  end
+
+  PBF --> Legacy
+  PBF --> Unified
+```
+
+## Master Tool Comparison
+
+| Other Tool | Job / Domain | duckOSM Advantage | Guide |
 |---|---|---|---|
-| [OSMnx](https://osmnx.readthedocs.io/) | a road network from OSM | directed, with turn restrictions, one `edge_id` for each direction, and your OSM fixes | [duckOSM and OSMnx](../concepts/osmnx.md) |
-| [QuackOSM](https://github.com/kraina-ai/quackosm) | the OSM features table | 3 to 7 times faster, 2 to 5 times less memory | [QuackOSM table](../concepts/quackosm.md) |
-| [GDAL](https://gdal.org/drivers/vector/osm.html) (`ogr2ogr`) | the five OSM layers of GDAL | about 4 times faster on France | [GDAL's OSM layers](../concepts/gdal.md) |
-| [osm2pgsql](https://osm2pgsql.org) | the four tables of osm2pgsql in PostGIS | the same tables, with your OSM fixes. Into PostGIS 1.7 times faster on Kentucky (7.3 s against 12.3 s), with 1.35 times the memory | [osm2pgsql tables](../exports/osm2pgsql.md) |
-| [Tilemaker](https://tilemaker.org) | Shortbread vector tiles | Kentucky: about the same time (5.5 s against 5.0 s), 2.6 times less memory. France: 236 s against 212 s, 3 times the memory | [Vector tiles (PMTiles)](../exports/pmtiles.md) |
-| [Geofabrik's free files](https://download.geofabrik.de/) | the 20 GIS layers (`gis_osm_*_free`) | the same rows, for any area, with your OSM fixes, also GeoParquet and in the browser | [Geofabrik layers](../exports/geofabrik.md) |
-| OSMnx `features_from_*`, QuackOSM, osmium (Python) | OSM features as GeoDataFrames, OSM XML | the same calls in `duckosm.gis` | [duckOSM for GIS users](for-gis-users.md) |
-| OSMnx (the analysis functions) | statistics, bearings, nearest nodes and edges, components, clip | the same calls in `duckosm.analysis` | [duckOSM for OSMnx users](for-osmnx-users.md) |
-| SUMO (netconvert, sumolib), MATSim | GMNS and simulation networks, and the results joined back | the same ids as duckOSM (`edge_id`), `duckosm.sim` | [duckOSM for traffic simulation users](for-simulation-users.md) |
-| osm2gmns, path4gmns, AequilibraE | a planning network (GMNS, an AequilibraE project) | GMNS with lanes and movements, `duckosm.planning` | [duckOSM for transport planning users](for-planning-users.md) |
-| CommonRoad Scenario Designer, Lanelet2, scenariogeneration | lane maps for automated driving | CommonRoad, Lanelet2 and OpenDRIVE from one network, `duckosm.hdmap` | [duckOSM for automated driving users](for-hdmap-users.md) |
-| PyTorch Geometric, DGL, city2graph | road graphs as tensors & multi-relational graphs | junction & turn graphs with `edge_id`, and Level 3 GMNS `HeteroData`, `duckosm.ml` | [duckOSM for graph machine learning users](for-ml-users.md) |
-| all of them | time and memory on France | | [Speed on France](speed.md) |
+| **[OSMnx](https://osmnx.readthedocs.io/)** | Road network from OSM | Directed edges, OSM turn restrictions, persistent `edge_id`, and 10x-50x faster local PBF extraction | [duckOSM for OSMnx users](for-osmnx-users.md) |
+| **[QuackOSM](https://github.com/kraina-ai/quackosm)** | OSM features table | 3 to 7 times faster, 2 to 5 times less memory, zero-copy DuckDB tables | [duckOSM for GIS users](for-gis-users.md) |
+| **[GDAL](https://gdal.org/drivers/vector/osm.html)** (`ogr2ogr`) | 5 standard OSM layers | ~4 times faster on France (3m37s vs 14m18s); native GeoParquet output | [duckOSM for GIS users](for-gis-users.md) |
+| **[osm2pgsql](https://osm2pgsql.org)** | Relational tables in PostGIS | Same 4 schemas directly in DuckDB or PostGIS (1.7x faster on Kentucky); survives updates | [osm2pgsql tables](../exports/osm2pgsql.md) |
+| **[Tilemaker](https://tilemaker.org)** | PMTiles vector tiles | Same speed, 2.6x less memory; single-command CLI (`duckosm quack --pmtiles`) | [Vector tiles (PMTiles)](../exports/pmtiles.md) |
+| **[Geofabrik shapefiles](https://download.geofabrik.de/)** | 20 standard GIS layers | Available for any custom bounding box, with OSM fixes applied, in Shapefile or GeoParquet | [Geofabrik layers](../exports/geofabrik.md) |
+| **ORS, OSRM, r5py, pandana** | Routing, OD matrices, accessibility | In-process multi-threaded Rust engine; turn restrictions, zero server setup, instant OD matrices | [duckOSM for routing users](for-routing-users.md) |
+| **SUMO netconvert, MATSim** | Traffic simulation networks | Streamed export with `--merge` (continuous chains using `chain_id`), signals, and results joinable via `edge_id` | [duckOSM for simulation users](for-simulation-users.md) |
+| **osm2gmns, path4gmns, AequilibraE** | Transport planning networks | Multi-resolution GMNS DuckDB schemas (`gmns_*`, `meso_*`, `micro_*`); multimodal parity; CSV export | [duckOSM for planning users](for-planning-users.md) |
+| **CommonRoad, Lanelet2, scenariogeneration** | Lane maps for automated driving | Automated derivation from GMNS physical lanes; OpenDRIVE 1.4 (`.xodr`), CommonRoad XML, Lanelet2 | [duckOSM for HD map users](for-hdmap-users.md) |
+| **PyTorch Geometric, DGL, city2graph** | Road graphs for Machine Learning | Homogenous turn & junction graphs with `edge_id`, plus Level 3 GMNS 3-tier `HeteroData` graphs | [duckOSM for ML users](for-ml-users.md) |
+| **All Tools** | Country-scale speed & memory | Detailed benchmarks on France (5.1 GB) and Kentucky (282 MB) | [Speed and Benchmarks](speed.md) |
+
+## Why a Single Unified Network?
+
+In traditional geospatial pipelines, each domain re-parses raw OSM data with its own assumptions:
+- GIS tools drop road directionality and turn restrictions.
+- Simulators cut roads at every crossing, creating artificial degree-2 bottlenecks.
+- Planning tools discard pedestrian crossings, breaking walk-to-transit connections.
+- Autonomous driving tools re-draw lanelets from scratch in JOSM with isolated identifiers.
+
+duckOSM replaces this fragmentation with a **5-level pipeline** anchored in DuckDB:
+1. Every level derives from the same verified topological base.
+2. Every link, lanelet, and tensor arc retains its connection to the 64-bit `edge_id`.
+3. Simulation and ML predictions join back directly to the original network with standard SQL.
