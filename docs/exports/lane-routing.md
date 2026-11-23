@@ -41,11 +41,11 @@ Both are networks of lanes, from the same GMNS lanes and turns. They differ in t
 
 ## Speed and memory
 
-| Area (source .osm.pbf) | Time | Memory |
+| Area (input GMNS DuckDB) | Time | Memory |
 |---|---|---|
-| Monaco (0.7 MB) | 0.04 s | 25 MB |
-| Kentucky (148 MB) | not run: `duckosm gmns` stops on Kentucky | |
-| France (5.1 GB) | not run | |
+| Monaco (8.4 MB) | 0.04 s | 25 MB |
+| Kentucky (5.8 GB) | not run | |
+| France (~150 GB) | not run | |
 
 ## Limits
 

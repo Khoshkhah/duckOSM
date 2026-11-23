@@ -46,11 +46,11 @@ The `<node id>` is the OSM node id, so you can find each item in OSM.
 
 Mac mini (Apple M6, 12 cores, 16 GB).
 
-| Area (source .osm.pbf) | Time | Memory | Output |
+| Area (input DuckDB) | Time | Memory | Output |
 |---|---|---|---|
-| Monaco (0.7 MB) | 0.03 s | 18.6 MB | 0.1 MB |
-| Kentucky (148 MB) | 0.22 s | 394 MB | 4.8 MB |
-| France (5.1 GB) | not run: the build with the raw tables needs more disk than the Mac mini has free | | |
+| Monaco (38 MB) | 0.03 s | 18.6 MB | 0.1 MB |
+| Kentucky (~1.2 GB) | 0.22 s | 394 MB | 4.8 MB |
+| France (~35 GB) | not run: the build with the raw tables needs more disk than the Mac mini has free | | |
 
 ## Limits
 

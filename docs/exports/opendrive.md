@@ -34,14 +34,14 @@ Without `--junctions`, the roads do not link: you can look at them, but a vehicl
 The file is written while DuckDB reads the rows. The memory stays near DuckDB's limit of 2 GB and does not grow with
 the area.
 
-| Area (source file) | Machine | Command | Time | Memory | Output |
+| Area (input DuckDB) | Machine | Command | Time | Memory | Output |
 |---|---|---|---|---|---|
-| Monaco (0.7 MB `.osm.pbf`) | Mac mini (M6, 16 GB) | `--junctions` | 0.06 s | 50.5 MB | 6.0 MB |
-| Kentucky (148 MB `.osm.pbf`) | WSL (20 cores, 23 GB) | roads only | 21 s | 0.52 GB | 2.3 GB |
-| Kentucky (148 MB `.osm.pbf`) | WSL (20 cores, 23 GB) | `--junctions` ¹ | 1 min 18 s | 2.1 GB | 8.5 GB |
+| Monaco (38 MB `.duckdb`) | Mac mini (M6, 16 GB) | `--junctions` | 0.06 s | 50.5 MB | 6.0 MB |
+| Kentucky (~1.2 GB `.duckdb`) | WSL (20 cores, 23 GB) | roads only | 21 s | 0.52 GB | 2.3 GB |
+| Kentucky (~1.2 GB `.duckdb`) | WSL (20 cores, 23 GB) | `--junctions` ¹ | 1 min 18 s | 2.1 GB | 8.5 GB |
 | Île-de-France (2.2 GB `.duckdb`) ² | WSL (20 cores, 23 GB) | roads only | 8.4 s | 0.26 GB | 1.2 GB |
 | Île-de-France (2.2 GB `.duckdb`) ² | WSL (20 cores, 23 GB) | `--junctions`, GMNS with netconvert | 32 s | 2.1 GB | 5.1 GB |
-| France (5.1 GB `.osm.pbf`) | | | not run: its GMNS db does not fit on the disk | | |
+| France (~35 GB `.duckdb`) | | | not run: its GMNS db does not fit on the disk | | |
 
 ¹ On a GMNS db made without netconvert: one movement for each turn. With netconvert, a turn can have one movement for
 each run of lanes, so the file has more connecting roads.

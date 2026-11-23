@@ -39,11 +39,11 @@ Routing needs the turn graph, because only it knows the turn restrictions.
 
 Mac mini (Apple M6, 12 cores, 16 GB).
 
-| Area (source .osm.pbf) | Output | Time | Memory | Output size |
+| Area (input DuckDB) | Output | Time | Memory | Output size |
 |---|---|---|---|---|
-| Kentucky (148 MB) | `export-graph` (GraphML) | 13 s | 2.9 GB | 1.9 GB |
+| Kentucky (~1.2 GB) | `export-graph` (GraphML) | 13 s | 2.9 GB | 1.9 GB |
 | | `to_networkx()` | 16 s | 5.6 GB | |
-| France (5.1 GB) | both | not run: the Mac mini has too little free disk | | |
+| France (~35 GB) | both | not run: the Mac mini has too little free disk | | |
 
 `export-graph` writes the GraphML file while DuckDB reads the rows, so its memory stays near DuckDB's limit of 2 GB. Before
 this change, Kentucky needed 9.3 GB. The file has the same bytes.

@@ -118,10 +118,10 @@ lane that buses can use (`<edge_id>_<index>`), and 15 m long. `lines` has the re
 
 Mac mini (Apple M6, 12 cores, 16 GB). The plain XML only (`--no-netconvert`).
 
-| Area (source .osm.pbf) | Time | Memory | Output |
+| Area (input DuckDB) | Time | Memory | Output |
 |---|---|---|---|
-| Kentucky (148 MB) | 11 s | 2.6 GB | 1.4 GB |
-| France (5.1 GB) | not run: the Mac mini has too little free disk | | |
+| Kentucky (~1.2 GB) | 11 s | 2.6 GB | 1.4 GB |
+| France (~35 GB) | not run: the Mac mini has too little free disk | | |
 
 The files are written while DuckDB reads the rows. Before this change, Kentucky needed 5.0 GB. The files have the same
 bytes.

@@ -51,11 +51,11 @@ duckosm matsim-lanes monaco_gmns.duckdb        # -> lanes.xml and the signal fil
 
 Mac mini (Apple M6, 12 cores, 16 GB). France is the driving network only.
 
-| Area (source .osm.pbf) | Time | Memory | Output |
+| Area (input DuckDB) | Time | Memory | Output |
 |---|---|---|---|
-| Monaco (0.7 MB) | 0.04 s | 18.6 MB | 0.1 MB |
-| Kentucky (148 MB) | 3.4 s | 853 MB | 84.1 MB |
-| France (5.1 GB) | 46 s | 10.0 GB | 923 MB |
+| Monaco (38 MB) | 0.04 s | 18.6 MB | 0.1 MB |
+| Kentucky (~1.2 GB) | 3.4 s | 853 MB | 84.1 MB |
+| France (~35 GB) | 46 s | 10.0 GB | 923 MB |
 
 `freespeed` and `capacity` come from the defaults of the road class where OSM has no speed limit or lane count. The
 demand, the plans and `config.xml` are your scenario. All options: [Command line](../reference/cli.md#matsim).

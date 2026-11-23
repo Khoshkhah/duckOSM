@@ -98,14 +98,14 @@ it turns red, and the lanes that its turns lead into turn green.
 
 ## Speed and memory
 
-Driving network, with netconvert:
+Driving network, with netconvert. Input is the Level 2 routable database (`<area>.duckdb`):
 
-| Area (source file) | Machine | Time | Memory | Output |
+| Area (input DuckDB) | Machine | Time | Memory | Output GMNS DuckDB |
 |---|---|---|---|---|
-| Monaco (0.7 MB `.osm.pbf`) | Mac mini (M6, 16 GB) | 0.8 s | 145 MB | 8.4 MB |
-| Kentucky (148 MB `.osm.pbf`), 49 tiles | WSL (20 cores, 23 GB) | 23 min | 5.0 GB | 5.9 GB |
+| Monaco (38 MB `.duckdb`) | Mac mini (M6, 16 GB) | 0.8 s | 145 MB | 8.4 MB |
+| Kentucky (~1.2 GB `.duckdb`), 49 tiles | WSL (20 cores, 23 GB) | 23 min | 5.0 GB | 5.9 GB |
 | Île-de-France (2.2 GB `.duckdb`), 15 tiles | WSL (20 cores, 23 GB) | 23 min | 8.5 GB | 2.6 GB |
-| France (5.1 GB `.osm.pbf`) | | not run | (estimated ~150 GB) | |
+| France (~35 GB `.duckdb`) | | not run | (estimated ~150 GB) | |
 
 Large areas run tile-by-tile (`--tile-zoom 9`), keeping peak memory bounded by the tile rather than the whole region. For benchmarks and tile architecture details, see [GMNS by tiles](../design/gmns_by_tiles.md).
 
