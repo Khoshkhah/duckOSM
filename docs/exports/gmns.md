@@ -45,6 +45,16 @@ duckosm gmns-viz monaco_gmns.duckdb                        # draws the meso and 
 
 In `<area>_gmns.duckdb`, **every table belongs to a network schema** (the default `main` schema is empty). GMNS is dedicated purely to transport networks, unlike Level 2 (`<area>.duckdb`) which also stores GIS layers (`features`) and raw OSM tags (`raw`).
 
+### Multimodal integrity and continuous road chains
+
+In duckOSM, roads are cut at pedestrian crossings and cycle paths so that walking and cycling networks connect directly to vehicular roadways at exact, shared `node_id`s.
+
+To preserve complete multimodal routing and allow `gmns_all` to seamlessly union all modes on shared IDs:
+
+* **Unmerged links by default (`link_id = edge_id`):** `gmns_<mode>.link` maintains 1:1 parity with Level 2 `edge_id`. Every crossing node remains present across modes, ensuring park-and-ride, walk-to-car, and transit transfers never lose their physical connection points.
+* **`chain_id` column on `link`:** Each vehicular link carries its `chain_id` to indicate which continuous roadway corridor it belongs to.
+* **`gmns_driving.chains` table:** Contains the consolidated road corridors between true intersections (mirroring Level 2's `driving.chains`). Single-mode vehicular simulators (such as SUMO with `--merge`) and macro traffic assignment models can read this table directly to eliminate artificial mid-block crossing delays without sacrificing the multimodal graph.
+
 ### Macro schemas (`duckosm gmns`)
 
 * **`gmns_driving` (16 tables):** The vehicular road network for cars, trucks, and buses. Models lanes (`lane`), lane-level turns with restrictions (`movement`), signals (`signal_controller`), on-street parking (`curb_seg`), crosswalks spanning road lanes (`crossing`, `lane_crossing`), and smooth intersection curves (`lane_connector`).

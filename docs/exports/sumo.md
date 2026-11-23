@@ -37,10 +37,11 @@ Coordinates are projected to UTM metres. In OSM, traffic signals and stop signs 
 
 ### Fewer edges (`--merge`)
 
-Multimodal routing splits roads at path crossings and cycleways. SUMO does not need these splits. `--merge` (`to_sumo(..., merge=True)`) combines continuous road segments into single edges using [`driving.chains`](../reference/database.md#chains):
+Multimodal routing splits roads at path crossings and cycleways so pedestrian and cycling networks can cross and connect. SUMO does not need these splits for single-mode driving simulations. `--merge` (`to_sumo(..., merge=True)`) combines continuous road segments into single edges using [`driving.chains`](../reference/database.md#chains):
 
 * **Edge IDs:** Merged edges receive a `chain_id`. Original duckOSM edge IDs are preserved in `<param key="edge_ids">` (and mapped in `duckosm.sim.edge_map`). Unmerged edges retain their `edge_id`.
 * **Rules preserved:** Chains never cross traffic signals, stop signs, or turn restrictions.
+* **Multimodal preservation:** While SUMO merges driving corridors for simulation performance, GMNS preserves the underlying 1:1 `edge_id` links in `gmns_all` so walking, cycling, and driving continue to share exact physical crossing nodes.
 * **Scope:** Driving network only (not compatible with `--join-junctions`).
 
 ### Signal timing and bus stops
