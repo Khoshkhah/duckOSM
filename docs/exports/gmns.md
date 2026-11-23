@@ -41,25 +41,50 @@ duckosm gmns monaco.duckdb -o out/gmns.duckdb --meso      # writes to custom out
 duckosm gmns-viz monaco_gmns.duckdb                        # draws the meso and micro networks in an interactive HTML viewer
 ```
 
-## The tables
+## The four network schemas: all, driving, walking, cycling
 
-The GMNS database (`<area>_gmns.duckdb`) organizes tables by mode: `gmns_driving`, `gmns_walking`, and `gmns_cycling`.
+In the GMNS database (`<area>_gmns.duckdb`), **every table belongs to a network schema**. There are **no tables outside of schemas** (the default `main` schema is empty). GMNS is dedicated purely to transport networks, unlike Level 2 (`<area>.duckdb`) which also stores GIS base-map layers (`features`) and raw OSM tags (`raw`).
 
-* **In DuckDB (`.duckdb`):** Stores all GMNS tables with native spatial geometries (`geom`) for fast spatial SQL queries and map rendering, plus extension tables like `lane_connector` and `crossing`.
+### Why schemas? Mode-specific vs. combined networks
+
+In OpenStreetMap, a street used by cars, cyclists, and pedestrians shares the same physical geometry and duckOSM `edge_id`. If all modes were placed into a single unmerged table, `link_id` would collide across modes, and vehicle turning rules would conflict with pedestrian routing.
+
+duckOSM solves this with two complementary models in the same DuckDB file:
+
+1. **Mode-specific networks (`gmns_driving`, `gmns_walking`, `gmns_cycling`):** Default. Each mode has its own clean, isolated topology with its own nodes, links, lanes, and turning movements. Downstream tools like DTALite, Path4GMNS, SUMO, and MATSim load the specific mode they simulate.
+2. **Combined multimodal network (`gmns_all`):** Opt-in via `--combined`. A single unified network where shared physical streets are merged into **one link** with unioned `allowed_uses = 'auto,bike,walk'`. Ideal for regional multimodal assignment and macro transport planning.
+
+### The four schemas in detail
+
+* **`gmns_driving` (Driving Network — 16 tables):** The vehicular road network for cars, trucks, and buses. Models physical roadway lanes (`lane`), lane-level turning movements with turn restrictions (`movement`), traffic signal controllers (`signal_controller`), on-street parking (`curb_seg`), and duckOSM extensions: smooth 3D intersection turn curves (`lane_connector`) and crosswalks spanning vehicular lanes (`crossing`, `lane_crossing`).
+* **`gmns_walking` (Pedestrian Network — 14 tables):** The pedestrian network for sidewalks, footpaths, stairs, pedestrian plazas, and crosswalks. Models pedestrian paths and crossings, links each sidewalk to its parallel roadway via `link_along` (with offset distance and overlap length), and joins sidewalk ends to road crossings via `lane_connector`.
+* **`gmns_cycling` (Bicycle Network — 13 tables):** The bicycle network for cycleways, protected bike paths, shared lanes, and bikeable roads. Models bikeable paths and turning movements, and links each cycle track to its parallel roadway via `link_along`.
+* **`gmns_all` (Unified Multimodal Network — 5 tables, via `--combined`):** The combined macro network. Merges shared physical streets across driving, walking, and cycling into a single link (`link_id` = `edge_id`). Contains only the top-level network topology tables (`link`, `node`, `config`, `use_definition`, `use_group`). Detailed lane and turn modeling stays in the mode-specific schemas.
+
+### Table matrix by schema
+
+| Table | Standard | `gmns_all` | `gmns_driving` | `gmns_walking` | `gmns_cycling` | Description |
+|---|:---:|:---:|:---:|:---:|:---:|---|
+| [`link`](gmns_tables.md#link) | Required | ✅ *(merged)* | ✅ | ✅ | ✅ | Directed road or path segments with `length`, `speed`, `lanes`, `capacity` |
+| [`node`](gmns_tables.md#node) | Required | ✅ *(merged)* | ✅ | ✅ | ✅ | Intersections and vertices (`x_coord`, `y_coord`, `ctrl_type`) |
+| [`config`](gmns_tables.md#config) | Optional | ✅ | ✅ | ✅ | ✅ | Dataset metadata: units (metres, km/h) and CRS (EPSG:4326) |
+| [`use_definition`](gmns_tables.md#use_definition) | Optional | ✅ | ✅ | ✅ | ✅ | Mode definitions (`auto`, `bus`, `bike`, `walk`) |
+| [`use_group`](gmns_tables.md#use_group) | Optional | ✅ | ✅ | ✅ | ✅ | Mode groupings |
+| [`geometry`](gmns_tables.md#geometry) | Optional | — *(in link)* | ✅ | ✅ | ✅ | Spatial line geometry for each link |
+| [`lane`](gmns_tables.md#lane) | Optional | — | ✅ | ✅ | ✅ | Physical lanes: lane numbers, width, allowed uses, turn markings |
+| [`movement`](gmns_tables.md#movement) | Optional | — | ✅ | ✅ | ✅ | Legal turns from inbound lanes to outbound lanes with turn restrictions |
+| [`location`](gmns_tables.md#location) | Optional | — | ✅ | ✅ | ✅ | Points on links: signals, stop signs, crosswalks, transit stops |
+| [`signal_controller`](gmns_tables.md#signal_controller) | Optional | — | ✅ | ✅ | ✅ | Traffic signal controllers at intersections |
+| [`zone`](gmns_tables.md#zone) | Optional | — | ✅ | ✅ | ✅ | Boundary polygon of the study area |
+| [`curb_seg`](gmns_tables.md#curb_seg) | Optional | — | ✅ | ✅ | ✅ | On-street parking and curb segments |
+| [`lane_connector`](gmns_tables.md#lane_connector) | ➕ duckOSM | — | ✅ | ✅ | — | Smooth intersection turn curves (driving) or footway joins (walking) |
+| [`crossing`](gmns_tables.md#crossing) | ➕ duckOSM | — | ✅ | — | — | Pedestrian crosswalk geometry drawn across vehicular roadways |
+| [`lane_crossing`](gmns_tables.md#lane_crossing) | ➕ duckOSM | — | ✅ | — | — | Specific road lanes crossed by each pedestrian crosswalk |
+| [`link_along`](gmns_tables.md#link_along) | ➕ duckOSM | — | ✅ *(ref)* | ✅ | ✅ | Sidewalks or cycle tracks running parallel alongside a roadway |
+| [`lane_check`](gmns_tables.md#lane_check) | ➕ duckOSM | — | optional | — | — | Diagnostics: unmapped lane arrows or disconnected turns |
+
+* **In DuckDB (`.duckdb`):** Stores all tables above with native DuckDB spatial geometries (`geom`) for fast spatial SQL queries and map rendering.
 * **In CSV (`--to-csv`):** Exports the standard specification tables with WKT text geometries (`geometry`), ready for DTALite and Path4GMNS.
-
-| Table | Holds |
-|---|---|
-| [`node`](gmns_tables.md#node) | the junctions. `ctrl_type = 'signal'` at traffic lights |
-| [`link`](gmns_tables.md#link) | one row for each direction of a road: length, speed, lanes, capacity, `facility_type` (the OSM `highway`), name |
-| [`geometry`](gmns_tables.md#geometry) | the shape of each link |
-| [`lane`](gmns_tables.md#lane) | one row for each lane: its use, width and turns |
-| [`movement`](gmns_tables.md#movement) | the legal turns, and the lanes that each turn starts from and ends in |
-| [`location`](gmns_tables.md#location) | OSM points on a link: crossings, stop signs, signals, parking entrances |
-| [`signal_controller`](gmns_tables.md#signal_controller), [`curb_seg`](gmns_tables.md#curb_seg), [`zone`](gmns_tables.md#zone), [`config`](gmns_tables.md#config), [`use_definition`](gmns_tables.md#use_definition), [`use_group`](gmns_tables.md#use_group) | the signals, parking, the area, the units and the modes |
-| [`lane_connector`](gmns_tables.md#lane_connector), [`crossing`](gmns_tables.md#crossing), [`lane_crossing`](gmns_tables.md#lane_crossing), [`link_along`](gmns_tables.md#link_along), [`lane_check`](gmns_tables.md#lane_check) | duckOSM tables: the paths through a junction, the pedestrian crossings, and the lanes that got no connection |
-
-Click a table for its columns, in the Reference: [GMNS tables](gmns_tables.md).
 
 ![One junction in GMNS: a node, a link with two lanes, and the movements each lane can take](../images/gmns_junction.svg)
 
