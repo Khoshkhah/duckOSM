@@ -12,7 +12,12 @@ id is the duckOSM `edge_id`.
 ```bash
 duckosm matsim monaco.duckdb                   # -> monaco_network.xml.gz, driving
 duckosm matsim monaco.duckdb -m all            # all modes in one network
+duckosm matsim monaco_gmns.duckdb              # from the GMNS db: the same links as the lanes file
 ```
+
+The input is a Level 2 db or a GMNS db. From a GMNS db, the links are the GMNS `link` rows (`link_id` = `edge_id`), with
+the GMNS `capacity` and `free_speed`, and the bus-only links are in the network with the mode `bus`. Then `network.xml`
+and `lanes.xml` come from one database and have the same links.
 
 ## The links
 
@@ -35,10 +40,11 @@ The node coordinates are in metres, in the UTM zone of the data (`--crs` gives a
 ## Lanes and signals
 
 `network.xml` alone has no turns: MATSim lets a car take each link at a junction, banned turns too. For the legal turns,
-make the lanes and signals files from the GMNS db (`<area>_gmns.duckdb`). `network.xml` comes from the Level 2 db:
+make the lanes and signals files from the GMNS db (`<area>_gmns.duckdb`), and make `network.xml` from the same db:
 
 ```bash
 duckosm gmns monaco.duckdb                     # creates monaco_gmns.duckdb with lanes and turns
+duckosm matsim monaco_gmns.duckdb              # -> monaco_gmns_network.xml.gz
 duckosm matsim-lanes monaco_gmns.duckdb        # -> lanes.xml and the signal files
 ```
 

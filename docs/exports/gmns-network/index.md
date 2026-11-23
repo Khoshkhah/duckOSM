@@ -5,9 +5,8 @@ The multi-resolution network in the GMNS standard, from macro (links) to micro (
 ```mermaid
 flowchart LR
   l2[("<area>.duckdb (Level 2)")] --> gmns[("<area>_gmns.duckdb (GMNS)")]
-  l2 --> sumo["SUMO"]
-  l2 --> matsim["MATSim network.xml"]
-  gmns --> lanes["MATSim lanes and signals"]
+  gmns --> sumo["SUMO"]
+  gmns --> matsim["MATSim network, lanes and signals"]
   gmns --> dta["DTALite & Path4GMNS"]
   gmns --> hd["HD map: Lanelet2, CommonRoad"]
 ```
@@ -16,9 +15,9 @@ flowchart LR
 |---|---|---|---|
 | DTALite, Path4GMNS | [GMNS](../gmns.md): macro tables ([all GMNS tables](../gmns_tables.md)) | Level 2 db | `duckosm gmns` |
 | Mesoscopic and microscopic simulators | [GMNS meso and micro](../gmns.md#meso-and-micro-networks): road sections and lane cells | Level 2 db | `duckosm gmns --meso --micro` |
-| MATSim, BEAM, eqasim | [MATSim](../matsim.md): `network.xml` | Level 2 db | `duckosm matsim` |
+| MATSim, BEAM, eqasim | [MATSim](../matsim.md): `network.xml` | GMNS db (or Level 2 db) | `duckosm matsim` |
 | MATSim | [MATSim](../matsim.md#lanes-and-signals): lanes and signals | GMNS db | `duckosm matsim-lanes` |
-| SUMO | [SUMO](../sumo.md): plain XML and `.netccfg` (netconvert makes the `.net.xml`) | Level 2 db | `duckosm sumo` |
+| SUMO | [SUMO](../sumo.md): plain XML and `.netccfg` (netconvert makes the `.net.xml`) | GMNS db (or Level 2 db) | `duckosm sumo` |
 
 ## Multi-resolution model
 
@@ -32,10 +31,10 @@ GMNS has three scales:
 
 ## Which export reads which database
 
-Only some exports read the GMNS db. The others read the Level 2 db:
+SUMO and MATSim read the GMNS db or the Level 2 db:
 
-* **SUMO** reads the Level 2 db. The direction is the opposite: `duckosm gmns` runs the SUMO export and netconvert to get the lane connectors of `gmns_driving`.
-* **MATSim:** `network.xml` comes from the Level 2 db. The lanes and signals files (`matsim-lanes`) come from the GMNS `movement`, `link` and `node` tables.
+* **SUMO:** from the GMNS db, the lanes and the lane-to-lane connections of GMNS. From the Level 2 db (faster, for large areas), netconvert selects the lanes. [SUMO](../sumo.md#what-goes-in).
+* **MATSim:** `network.xml` and the lanes and signals files (`matsim-lanes`) come from one GMNS db, with the same links. `network.xml` can also come from the Level 2 db.
 * **HD map exports** (Lanelet2, CommonRoad, the lane graph) read the GMNS db.
 * **Same ids:** each GMNS link, SUMO edge and MATSim link has the duckOSM **`edge_id`** as its id. Thus you can join simulation results to the OSM roads.
 

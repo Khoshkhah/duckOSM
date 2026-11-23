@@ -15,11 +15,22 @@ netconvert -c sumo/monaco.netccfg                           # -> sumo/monaco.net
 duckosm sumo monaco.duckdb --netconvert                     # runs netconvert automatically: builds .net.xml and .tll.xml
 duckosm sumo monaco.duckdb --netconvert --merge             # consolidates continuous road chains into single edges
 duckosm sumo monaco.duckdb --netconvert --join-junctions    # merges nearby complex intersections
+duckosm sumo monaco_gmns.duckdb --netconvert                # from the GMNS db: its lanes and lane connections
 ```
 
 ## What goes in
 
-`duckosm sumo` reads the Level 2 network (`<area>.duckdb`), not the GMNS db. The direction is the opposite: `duckosm gmns` runs this export and netconvert to get the lane connectors of `gmns_driving`.
+`duckosm sumo` reads a Level 2 db (`<area>.duckdb`) or a GMNS db (`<area>_gmns.duckdb`). It looks at the file and selects the source:
+
+| Input | Lanes and connections | Use it for |
+|---|---|---|
+| Level 2 db | `lane_profile` and `edge_graph`; netconvert selects the lanes of each turn | large areas: Kentucky in 11 s, 2.6 GB |
+| GMNS db | the `lane` and `lane_connector` tables: each turn goes lane to lane, as in GMNS | the same lanes as MATSim lanes and the HD map, and lane fixes made in GMNS |
+
+`duckosm gmns` runs the Level 2 export and netconvert one time to get its lane connectors. After that, the GMNS db is the
+source: the export from GMNS writes those lane connections, and netconvert does not select them again. From a GMNS db, the
+bus-only links are SUMO edges with `allow="bus"`. The GMNS input has no bus stops (`.add.xml`), each signal node is its own
+traffic light, and `--merge` and `--join-junctions` stop with an error. Design: `docs/design/sim_from_gmns.md`.
 
 | SUMO item | From duckOSM |
 |---|---|

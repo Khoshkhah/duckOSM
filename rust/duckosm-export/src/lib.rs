@@ -25,6 +25,7 @@ pub mod shapely;
 pub mod stream;
 pub mod sumo;
 pub mod sumo_compare;
+pub mod sumo_gmns;
 pub mod sumo_merge;
 
 use duckdb::{AccessMode, Config, Connection};
