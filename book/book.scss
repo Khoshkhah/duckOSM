@@ -656,10 +656,32 @@ h3 .header-section-number {
 }
 
 #TOC .nav-link.active,
-nav[role=doc-toc] .nav-link.active {
+#TOC .nav-link.active:hover,
+nav[role=doc-toc] .nav-link.active,
+nav[role=doc-toc] .nav-link.active:hover {
   color: var(--bk-accent) !important;
   border-left: 2px solid #ffd43b !important;
   font-weight: 500 !important;
+}
+
+body.quarto-dark #TOC .nav-link.active,
+body.quarto-dark #TOC .nav-link.active:hover,
+body.quarto-dark nav[role=doc-toc] .nav-link.active,
+body.quarto-dark nav[role=doc-toc] .nav-link.active:hover {
+  color: #ffd43b !important;
+  border-left: 2px solid #ffd43b !important;
+  font-weight: 500 !important;
+}
+
+#TOC .nav-link.active .header-section-number,
+#TOC .nav-link.active:hover .header-section-number,
+nav[role=doc-toc] .nav-link.active .header-section-number,
+nav[role=doc-toc] .nav-link.active:hover .header-section-number,
+#TOC .nav-link.active code,
+#TOC .nav-link.active:hover code,
+nav[role=doc-toc] .nav-link.active code,
+nav[role=doc-toc] .nav-link.active:hover code {
+  color: inherit !important;
 }
 
 body.quarto-dark .sidebar-navigation .sidebar-link.active .chapter-number {
@@ -667,8 +689,8 @@ body.quarto-dark .sidebar-navigation .sidebar-link.active .chapter-number {
 }
 
 // ---- no color of the base themes: the hover color of darkly is green, of cosmo is blue ----
-#TOC .nav-link:hover,
-nav[role=doc-toc] .nav-link:hover {
+#TOC .nav-link:hover:not(.active),
+nav[role=doc-toc] .nav-link:hover:not(.active) {
   color: var(--bk-text) !important;
 }
 
