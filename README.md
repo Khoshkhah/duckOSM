@@ -3,24 +3,28 @@
 </p>
 
 <p align="center">
-  <b>Turn OpenStreetMap into routable networks, GMNS models, and GIS layers.<br>
-  One Rust engine powered by DuckDB, for your computer and your browser.</b>
+  <strong>Turn OpenStreetMap into routable networks, GMNS models, and GIS layers.</strong><br>
+  One Rust engine powered by DuckDB, for your computer and your browser.
 </p>
 
 <p align="center">
   <a href="https://pypi.org/project/duckosm/"><img alt="PyPI" src="https://img.shields.io/pypi/v/duckosm"></a>
   <a href="https://github.com/Khoshkhah/duckOSM/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Khoshkhah/duckOSM/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="https://khoshkhah.github.io/duckOSM/"><img alt="Docs" src="https://img.shields.io/badge/docs-khoshkhah.github.io%2FduckOSM-17191f"></a>
+  <a href="https://khoshkhah.github.io/duckOSM/"><img alt="Docs" src="https://img.shields.io/badge/docs-online-17191f"></a>
   <img alt="Python 3.10+" src="https://img.shields.io/badge/python-3.10%2B-3776AB">
-  <img alt="License MIT" src="https://img.shields.io/badge/license-MIT-blue">
+  <a href="LICENSE"><img alt="License MIT" src="https://img.shields.io/badge/license-MIT-blue"></a>
 </p>
 
 <p align="center">
-  <a href="https://khoshkhah.github.io/duckOSM/"><b>Documentation</b></a> ·
-  <a href="https://khoshkhah.github.io/duckOSM/book/"><b>The notebook manual</b></a> ·
-  <a href="https://khoshkhah.github.io/duckosm-studio/">duckOSM Studio (browser)</a> ·
-  <a href="https://khoshkhah.github.io/duckOSM/reference/python/">Python SDK</a> ·
-  <a href="https://khoshkhah.github.io/duckOSM/reference/cli/">Command line</a>
+  <a href="https://khoshkhah.github.io/duckOSM/"><b>Documentation</b></a>
+  &nbsp;•&nbsp;
+  <a href="https://khoshkhah.github.io/duckOSM/book/"><b>Notebook&nbsp;Manual</b></a>
+  &nbsp;•&nbsp;
+  <a href="https://khoshkhah.github.io/duckosm-studio/"><b>duckOSM&nbsp;Studio</b></a>
+  &nbsp;•&nbsp;
+  <a href="https://khoshkhah.github.io/duckOSM/reference/python/"><b>Python&nbsp;SDK</b></a>
+  &nbsp;•&nbsp;
+  <a href="https://khoshkhah.github.io/duckOSM/reference/cli/"><b>CLI&nbsp;Reference</b></a>
 </p>
 
 ---
