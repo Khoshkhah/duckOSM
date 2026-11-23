@@ -167,7 +167,7 @@ nav:
           - The turn graph: exports/turn-graph.md
           - GeoPackage / shapefile: exports/gis.md
           - networkx: exports/networkx.md
-      - 3. Simulation network:
+      - 3. GMNS network:
           - exports/simulation/index.md
           - GMNS: exports/gmns.md
           - GMNS meso and micro: exports/gmns-meso-micro.md

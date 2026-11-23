@@ -1,9 +1,8 @@
 # duckOSM
 
-**Turn OpenStreetMap into routable networks, map layers and GIS files. One Rust engine, for your computer and your browser.**
+**Turn OpenStreetMap into routable networks, GMNS models, and GIS layers. One Rust engine powered by DuckDB, for your computer and your browser.**
 
-duckOSM reads an `.osm.pbf` file and makes the routable network of an area, its map layers, and files for GIS,
-traffic simulation and routing. Fix the OSM data once, on a map. Your fixes go into one file, `osm_fixes.yaml`, and every step of duckOSM reads it: the OSM file, the OSM data tables, the network and every export. So all outputs show the same corrected data.
+duckOSM reads an `.osm.pbf` file and builds the complete transport network of an area—from GIS layers and turn-by-turn routing to multi-scale GMNS models, traffic simulations, and Graph Neural Networks. It processes areas tile by tile, keeping memory low and speeds fast even for an entire country. Fix the OSM data once on a map: your fixes go into one YAML file and apply at build time, so every downstream table, network layer, and export inherits the same corrected data.
 
 <div class="hero-actions" markdown>
 
@@ -19,6 +18,20 @@ traffic simulation and routing. Fix the OSM data once, on a map. Your fixes go i
   ![duckOSM Studio: the Build card in the panel, and the road network of Monaco on the map](images/tour-studio.png)
   <figcaption>duckOSM Studio in the browser: choose an area, build its network, edit the OSM data and export.</figcaption>
 </figure>
+
+## What duckOSM makes
+
+All outputs come from one `.osm.pbf` file, in five levels, and all take your OSM fixes. Each output is checked against a reference tool ([how](concepts/checks.md)).
+
+<div class="dk-levels">
+<a class="lv" href="exports/osm-file/"><span class="n">0</span><b>OSM file</b><span class="db-tag">.osm.pbf</span><span class="desc">Exact boundary cut with your fixes</span><span class="tools">pbfcut</span></a>
+<a class="lv" href="exports/osm-data/"><span class="n">1</span><b>OSM data</b><span class="db-tag">from .osm.pbf</span><span class="desc">Flat tables of all OSM objects</span><span class="tools">QuackOSM · GDAL · Geofabrik · PMTiles</span></a>
+<a class="lv" href="exports/network/"><span class="n">2</span><b>Routable network</b><span class="db-tag">DuckDB</span><span class="desc">Drive, walk, bike<br>Edges, edge_id, turns</span><span class="tools">GeoPackage · networkx</span></a>
+<a class="lv" href="exports/simulation/"><span class="n">3</span><b>GMNS network</b><span class="db-tag">GMNS DuckDB</span><span class="desc">Multi-scale: links, lanes, zones</span><span class="tools">GMNS · GNNs · MATSim · SUMO</span></a>
+<a class="lv" href="exports/lanes/"><span class="n">4</span><b>HD map</b><span class="db-tag">3D geometry</span><span class="desc">Lane shape in 3D (experimental)</span><span class="tools">Lanelet2 · OpenDRIVE</span></a>
+</div>
+
+All outputs, by level: [Export](exports/index.md). Speed against other tools: [Compare](compare/index.md).
 
 ## Highlights
 
@@ -52,12 +65,20 @@ traffic simulation and routing. Fix the OSM data once, on a map. Your fixes go i
     One id for each road **and each direction**, the same after a rebuild, a cut and an export.
     [Stable edge ids](concepts/edge-ids.md)
 
+-   :material-hub:{ .lg .middle } **GMNS in DuckDB**
+
+    ---
+
+    The open standard (General Modeling Network Specification) for links, lanes, turning movements
+    and zones. The universal bridge from OSM to simulation models and Graph Neural Networks.
+    [GMNS tables](exports/gmns.md)
+
 -   :material-car-multiple:{ .lg .middle } **Traffic simulation**
 
     ---
 
-    SUMO, MATSim and GMNS (macro, meso, micro), checked with each tool's own validator. SUMO with one edge
-    for each chain of roads (`--merge`), and every `edge_id` kept.
+    SUMO, MATSim, and DTALite exports with automated validation. Simplifies continuous roads for
+    faster simulation while preserving stable `edge_id`s.
     [Exports](exports/index.md)
 
 -   :material-layers-triple:{ .lg .middle } **GIS layers**
@@ -116,7 +137,7 @@ traffic simulation and routing. Fix the OSM data once, on a map. Your fixes go i
 
 <figure markdown="span">
   [![The lanes of one Monaco junction from the GMNS export: each lane at its width, with its turn arrows](images/tour-lanes-gmns.png)](exports/gmns.md)
-  <figcaption>GMNS lanes of one Monaco junction: each lane at its width, with its turns. <a href="exports/sumo/">Against SUMO</a> <a href="exports/gmns/">GMNS →</a></figcaption>
+  <figcaption>GMNS lane-level geometry: each lane at its physical width with its turning movements. <a href="exports/gmns/">GMNS export →</a></figcaption>
 </figure>
 
 <figure markdown="span">
@@ -125,20 +146,6 @@ traffic simulation and routing. Fix the OSM data once, on a map. Your fixes go i
 </figure>
 
 </div>
-
-## What duckOSM makes
-
-All outputs come from one `.osm.pbf` file, in five levels, and all take your OSM fixes. Each output is checked against a reference tool ([how](concepts/checks.md)).
-
-<div class="dk-levels">
-<a class="lv" href="exports/osm-file/"><span class="n">0</span><b>OSM file</b><span class="s">.osm.pbf, cut to your area</span><code>pbfcut</code></a>
-<a class="lv" href="exports/osm-data/"><span class="n">1</span><b>OSM data</b><span class="s">no network</span><code>QuackOSM · GDAL</code></a>
-<a class="lv" href="exports/network/"><span class="n">2</span><b>Routable network</b><span class="s">edges, edge_id, turns</span><code>GeoPackage · networkx</code></a>
-<a class="lv" href="exports/simulation/"><span class="n">3</span><b>Simulation network</b><span class="s">macro, meso and micro: links, lanes, turns</span><code>GMNS · MATSim · SUMO</code></a>
-<a class="lv" href="exports/lanes/"><span class="n">4</span><b>HD map</b><span class="s">the exact shape of each lane, in 3D (experimental)</span><code>Lanelet2 · OpenDRIVE</code></a>
-</div>
-
-All outputs, by level: [Export](exports/index.md). Speed against other tools: [Compare](compare/index.md).
 
 ## Use it
 
@@ -167,6 +174,14 @@ All outputs, by level: [Export](exports/index.md). Speed against other tools: [C
     The crates `duckosm-core`, `duckosm-build` and others: the same engine in your own Rust program.
 
     [Rust SDK](reference/rust.md)
+
+-   :material-view-dashboard:{ .lg .middle } **Dashboards & Studio**
+
+    ---
+
+    duckOSM Studio in the browser, or `net.dashboard()` in Python: live maps, road cards, and 3D layers. Save as offline HTML files that open anywhere without a server.
+
+    [duckOSM Studio](guides/studio.md) · [Draw a map](guides/draw-map.md)
 
 </div>
 

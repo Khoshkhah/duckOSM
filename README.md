@@ -3,8 +3,8 @@
 </p>
 
 <p align="center">
-  <b>Turn OpenStreetMap into routable networks, map layers and GIS files.<br>
-  One Rust engine, for your computer and your browser.</b>
+  <b>Turn OpenStreetMap into routable networks, GMNS models, and GIS layers.<br>
+  One Rust engine powered by DuckDB, for your computer and your browser.</b>
 </p>
 
 <p align="center">
@@ -27,9 +27,13 @@
 
 ## What duckOSM is
 
-duckOSM reads an OpenStreetMap `.osm.pbf` file and makes the routable road network of an area, its map layers, and
-files for GIS, routing and traffic simulation. One Rust engine runs it all: the command line, the Python SDK and the
-browser.
+duckOSM reads an OpenStreetMap `.osm.pbf` file and builds the complete transport network of an area—from GIS layers
+and turn-by-turn routing to multi-scale GMNS models, traffic simulations, and Graph Neural Networks. One Rust engine
+powered by DuckDB runs it all: the command line, the Python SDK and the browser.
+
+It processes areas tile by tile, keeping memory low and speeds fast even for an entire country. Fix the OSM data once on
+a map: your fixes go into one YAML file and apply at build time, so every downstream table, network layer, and export
+inherits the same corrected data.
 
 <table>
 <tr>
@@ -74,8 +78,24 @@ and gives the same rows.
 <td valign="top">
 
 **Fix the OSM data once**<br>
-Edit roads, turns and buildings on a map, and every output uses your fixes
+Edit roads, turns and buildings on a map: your fixes go into one YAML file and apply at build time
 ([Edit OSM data](https://khoshkhah.github.io/duckOSM/guides/edit-osm-data/)).
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+**GMNS in DuckDB**<br>
+The open standard (General Modeling Network Specification) in DuckDB: links, lanes, movements and zones for simulation and Graph AI
+([GMNS tables](https://khoshkhah.github.io/duckOSM/exports/gmns/)).
+
+</td>
+<td valign="top">
+
+**Traffic simulation**<br>
+SUMO, MATSim and DTALite exports with automated validation and segment merging (`--merge`)
+([Exports](https://khoshkhah.github.io/duckOSM/exports/)).
 
 </td>
 </tr>
@@ -83,22 +103,22 @@ Edit roads, turns and buildings on a map, and every output uses your fixes
 
 ## What duckOSM makes
 
-All outputs come from one `.osm.pbf` file, in five levels. Each level keeps the `edge_id` of the routable network.
+All outputs come from one `.osm.pbf` file, in five levels, and all take your OSM fixes. Each level keeps the `edge_id` of the routable network.
 
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/images/levels-dark.svg">
-    <img src="https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/images/levels-light.svg" alt="The five levels of duckOSM's outputs: 0 OSM file (pbfcut), 1 OSM data with no network (QuackOSM, GDAL), 2 routable network with edges, edge_id and turns (GeoPackage, networkx), 3 simulation network, macro, meso and micro (GMNS, MATSim, SUMO), 4 HD map, each lane's shape in 3D, experimental (Lanelet2, OpenDRIVE)" width="900">
+    <img src="https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/images/levels-light.svg" alt="The five levels of duckOSM's outputs: 0 OSM file (pbfcut), 1 OSM data from .osm.pbf (QuackOSM, GDAL, Geofabrik, PMTiles), 2 routable network in DuckDB (GeoPackage, networkx), 3 GMNS network in GMNS DuckDB (GMNS, GNNs, MATSim, SUMO), 4 HD map with 3D lane geometry, experimental (Lanelet2, OpenDRIVE)" width="900">
   </picture>
 </p>
 
-| Level | Command |
-|---|---|
-| 0. OSM file | `duckosm get` |
-| 1. OSM data | `duckosm quack` |
-| 2. Routable network | `duckosm build`, `export-gis`, `export-graph` |
-| 3. Simulation network | `duckosm sumo`, `matsim`, `gmns` |
-| 4. HD map (experimental) | `duckosm lanelet2`, `opendrive` |
+| Level | Database / Reference | Outputs / Command |
+|---|---|---|
+| 0. OSM file | `.osm.pbf` (cut by `pbfcut`) | `duckosm get`, `duckosm cut` |
+| 1. OSM data | `.osm.pbf` (tables) | `duckosm quack` (QuackOSM, GDAL, Geofabrik, osm2pgsql, PMTiles) |
+| 2. Routable network | `DuckDB` | `duckosm build`, `export-gis`, `export-graph` |
+| 3. GMNS network | `GMNS DuckDB` | `duckosm gmns`, `sumo`, `matsim` |
+| 4. HD map (experimental) | 3D lane geometry | `duckosm lanelet2`, `opendrive` |
 
 ## Quick start
 

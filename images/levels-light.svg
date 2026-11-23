@@ -1,42 +1,65 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="250" viewBox="0 0 1080 250" font-family="Inter, -apple-system, Segoe UI, Helvetica, Arial, sans-serif">
-<rect width="1080" height="250" fill="#ffffff"/>
-<rect x="12" y="12" width="180" height="226" rx="16" fill="none" stroke="#f0d35b" stroke-width="3"/>
-<circle cx="48" cy="50" r="22" fill="#f0d35b"/><text x="48" y="58" font-size="22" font-weight="700" text-anchor="middle" fill="#17191f">0</text>
-<text x="30" y="102" font-size="21" font-weight="700" fill="#17191f">OSM file</text>
-<text x="30" y="131" font-size="14.5" fill="#5f6670">.osm.pbf, cut to</text>
-<text x="30" y="150" font-size="14.5" fill="#5f6670">your area</text>
-<text x="30" y="177" font-size="14" font-family="SFMono-Regular, Menlo, Consolas, monospace" fill="#9a7b12">pbfcut</text>
-<path d="M198 125.0 h21" stroke="#5f6670" stroke-width="2" fill="none"/><path d="M219 120.0 l7 5 l-7 5" stroke="#5f6670" stroke-width="2" fill="none"/>
-<rect x="231" y="12" width="180" height="226" rx="16" fill="none" stroke="#f0d35b" stroke-width="3"/>
-<circle cx="267" cy="50" r="22" fill="#f0d35b"/><text x="267" y="58" font-size="22" font-weight="700" text-anchor="middle" fill="#17191f">1</text>
-<text x="249" y="102" font-size="21" font-weight="700" fill="#17191f">OSM data</text>
-<text x="249" y="131" font-size="14.5" fill="#5f6670">no network</text>
-<text x="249" y="158" font-size="14" font-family="SFMono-Regular, Menlo, Consolas, monospace" fill="#9a7b12">QuackOSM ·</text>
-<text x="249" y="176" font-size="14" font-family="SFMono-Regular, Menlo, Consolas, monospace" fill="#9a7b12">GDAL</text>
-<path d="M417 125.0 h21" stroke="#5f6670" stroke-width="2" fill="none"/><path d="M438 120.0 l7 5 l-7 5" stroke="#5f6670" stroke-width="2" fill="none"/>
-<rect x="450" y="12" width="180" height="226" rx="16" fill="none" stroke="#f0d35b" stroke-width="3"/>
-<circle cx="486" cy="50" r="22" fill="#f0d35b"/><text x="486" y="58" font-size="22" font-weight="700" text-anchor="middle" fill="#17191f">2</text>
-<text x="468" y="102" font-size="21" font-weight="700" fill="#17191f">Routable</text>
-<text x="468" y="127" font-size="21" font-weight="700" fill="#17191f">network</text>
-<text x="468" y="156" font-size="14.5" fill="#5f6670">edges, edge_id,</text>
-<text x="468" y="175" font-size="14.5" fill="#5f6670">turns</text>
-<text x="468" y="202" font-size="14" font-family="SFMono-Regular, Menlo, Consolas, monospace" fill="#9a7b12">GeoPackage ·</text>
-<text x="468" y="220" font-size="14" font-family="SFMono-Regular, Menlo, Consolas, monospace" fill="#9a7b12">networkx</text>
-<path d="M636 125.0 h21" stroke="#5f6670" stroke-width="2" fill="none"/><path d="M657 120.0 l7 5 l-7 5" stroke="#5f6670" stroke-width="2" fill="none"/>
-<rect x="669" y="12" width="180" height="226" rx="16" fill="none" stroke="#f0d35b" stroke-width="3"/>
-<circle cx="705" cy="50" r="22" fill="#f0d35b"/><text x="705" y="58" font-size="22" font-weight="700" text-anchor="middle" fill="#17191f">3</text>
-<text x="687" y="102" font-size="21" font-weight="700" fill="#17191f">Simulation</text>
-<text x="687" y="127" font-size="21" font-weight="700" fill="#17191f">network</text>
-<text x="687" y="156" font-size="14.5" fill="#5f6670">macro, meso, micro:</text>
-<text x="687" y="175" font-size="14.5" fill="#5f6670">links, lanes, turns</text>
-<text x="687" y="202" font-size="14" font-family="SFMono-Regular, Menlo, Consolas, monospace" fill="#9a7b12">GMNS · MATSim ·</text>
-<text x="687" y="220" font-size="14" font-family="SFMono-Regular, Menlo, Consolas, monospace" fill="#9a7b12">SUMO</text>
-<path d="M855 125.0 h21" stroke="#5f6670" stroke-width="2" fill="none"/><path d="M876 120.0 l7 5 l-7 5" stroke="#5f6670" stroke-width="2" fill="none"/>
-<rect x="888" y="12" width="180" height="226" rx="16" fill="none" stroke="#f0d35b" stroke-width="3"/>
-<circle cx="924" cy="50" r="22" fill="#f0d35b"/><text x="924" y="58" font-size="22" font-weight="700" text-anchor="middle" fill="#17191f">4</text>
-<text x="906" y="102" font-size="21" font-weight="700" fill="#17191f">HD map</text>
-<text x="906" y="131" font-size="14.5" fill="#5f6670">each lane's shape,</text>
-<text x="906" y="150" font-size="14.5" fill="#5f6670">in 3D (experimental)</text>
-<text x="906" y="177" font-size="14" font-family="SFMono-Regular, Menlo, Consolas, monospace" fill="#9a7b12">Lanelet2 ·</text>
-<text x="906" y="195" font-size="14" font-family="SFMono-Regular, Menlo, Consolas, monospace" fill="#9a7b12">OpenDRIVE</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="260" viewBox="0 0 1080 260" font-family="Inter, -apple-system, Segoe UI, Helvetica, Arial, sans-serif">
+<rect width="1080" height="260" fill="#ffffff"/>
+<!-- Card 0 -->
+<rect x="12" y="12" width="180" height="236" rx="16" fill="none" stroke="#f0d35b" stroke-width="3"/>
+<circle cx="38" cy="38" r="16" fill="#f0d35b"/><text x="38" y="44" font-size="16" font-weight="700" text-anchor="middle" fill="#17191f">0</text>
+<text x="24" y="80" font-size="17" font-weight="700" fill="#17191f">OSM file</text>
+<rect x="24" y="96" width="156" height="26" rx="5" fill="#ffd43b30" stroke="#f0d35b" stroke-width="1.5"/>
+<text x="102" y="113" font-size="13" font-weight="700" font-family="SFMono-Regular, Menlo, Consolas, monospace" text-anchor="middle" fill="#17191f">.osm.pbf</text>
+<text x="24" y="146" font-size="12.5" fill="#5f6670">Exact boundary cut</text>
+<text x="24" y="163" font-size="12.5" fill="#5f6670">with your fixes</text>
+<line x1="24" y1="184" x2="180" y2="184" stroke="#e5e7eb" stroke-dasharray="3,3"/>
+<text x="24" y="208" font-size="13" font-family="SFMono-Regular, Menlo, Consolas, monospace" fill="#9a7b12">pbfcut</text>
+<path d="M198 130.0 h21" stroke="#5f6670" stroke-width="2" fill="none"/><path d="M219 125.0 l7 5 l-7 5" stroke="#5f6670" stroke-width="2" fill="none"/>
+
+<!-- Card 1 -->
+<rect x="231" y="12" width="180" height="236" rx="16" fill="none" stroke="#f0d35b" stroke-width="3"/>
+<circle cx="257" cy="38" r="16" fill="#f0d35b"/><text x="257" y="44" font-size="16" font-weight="700" text-anchor="middle" fill="#17191f">1</text>
+<text x="243" y="80" font-size="17" font-weight="700" fill="#17191f">OSM data</text>
+<rect x="243" y="96" width="156" height="26" rx="5" fill="#ffd43b30" stroke="#f0d35b" stroke-width="1.5"/>
+<text x="321" y="113" font-size="12.5" font-weight="700" font-family="SFMono-Regular, Menlo, Consolas, monospace" text-anchor="middle" fill="#17191f">from .osm.pbf</text>
+<text x="243" y="146" font-size="12.5" fill="#5f6670">Flat tables of all</text>
+<text x="243" y="163" font-size="12.5" fill="#5f6670">OSM objects</text>
+<line x1="243" y1="184" x2="399" y2="184" stroke="#e5e7eb" stroke-dasharray="3,3"/>
+<text x="243" y="206" font-size="11" font-family="SFMono-Regular, Menlo, Consolas, monospace" fill="#9a7b12">QuackOSM · GDAL</text>
+<text x="243" y="223" font-size="11" font-family="SFMono-Regular, Menlo, Consolas, monospace" fill="#9a7b12">Geofabrik · PMTiles</text>
+<path d="M417 130.0 h21" stroke="#5f6670" stroke-width="2" fill="none"/><path d="M438 125.0 l7 5 l-7 5" stroke="#5f6670" stroke-width="2" fill="none"/>
+
+<!-- Card 2 -->
+<rect x="450" y="12" width="180" height="236" rx="16" fill="none" stroke="#f0d35b" stroke-width="3"/>
+<circle cx="476" cy="38" r="16" fill="#f0d35b"/><text x="476" y="44" font-size="16" font-weight="700" text-anchor="middle" fill="#17191f">2</text>
+<text x="462" y="80" font-size="15.5" font-weight="700" fill="#17191f">Routable network</text>
+<rect x="462" y="96" width="156" height="26" rx="5" fill="#ffd43b30" stroke="#f0d35b" stroke-width="1.5"/>
+<text x="540" y="113" font-size="13" font-weight="700" font-family="SFMono-Regular, Menlo, Consolas, monospace" text-anchor="middle" fill="#17191f">DuckDB</text>
+<text x="462" y="146" font-size="12.5" fill="#5f6670">Drive, walk, bike</text>
+<text x="462" y="163" font-size="12.5" fill="#5f6670">Edges, edge_id, turns</text>
+<line x1="462" y1="184" x2="618" y2="184" stroke="#e5e7eb" stroke-dasharray="3,3"/>
+<text x="462" y="206" font-size="11.5" font-family="SFMono-Regular, Menlo, Consolas, monospace" fill="#9a7b12">GeoPackage ·</text>
+<text x="462" y="223" font-size="11.5" font-family="SFMono-Regular, Menlo, Consolas, monospace" fill="#9a7b12">networkx</text>
+<path d="M636 130.0 h21" stroke="#5f6670" stroke-width="2" fill="none"/><path d="M657 125.0 l7 5 l-7 5" stroke="#5f6670" stroke-width="2" fill="none"/>
+
+<!-- Card 3 -->
+<rect x="669" y="12" width="180" height="236" rx="16" fill="none" stroke="#f0d35b" stroke-width="3"/>
+<circle cx="695" cy="38" r="16" fill="#f0d35b"/><text x="695" y="44" font-size="16" font-weight="700" text-anchor="middle" fill="#17191f">3</text>
+<text x="681" y="80" font-size="16" font-weight="700" fill="#17191f">GMNS network</text>
+<rect x="681" y="96" width="156" height="26" rx="5" fill="#ffd43b30" stroke="#f0d35b" stroke-width="1.5"/>
+<text x="759" y="113" font-size="12" font-weight="700" font-family="SFMono-Regular, Menlo, Consolas, monospace" text-anchor="middle" fill="#17191f">GMNS DuckDB</text>
+<text x="681" y="146" font-size="12.5" fill="#5f6670">Multi-scale:</text>
+<text x="681" y="163" font-size="12.5" fill="#5f6670">links, lanes, zones</text>
+<line x1="681" y1="184" x2="837" y2="184" stroke="#e5e7eb" stroke-dasharray="3,3"/>
+<text x="681" y="206" font-size="11" font-family="SFMono-Regular, Menlo, Consolas, monospace" fill="#9a7b12">GMNS · GNNs ·</text>
+<text x="681" y="223" font-size="11" font-family="SFMono-Regular, Menlo, Consolas, monospace" fill="#9a7b12">MATSim · SUMO</text>
+<path d="M855 130.0 h21" stroke="#5f6670" stroke-width="2" fill="none"/><path d="M876 125.0 l7 5 l-7 5" stroke="#5f6670" stroke-width="2" fill="none"/>
+
+<!-- Card 4 -->
+<rect x="888" y="12" width="180" height="236" rx="16" fill="none" stroke="#f0d35b" stroke-width="3"/>
+<circle cx="914" cy="38" r="16" fill="#f0d35b"/><text x="914" y="44" font-size="16" font-weight="700" text-anchor="middle" fill="#17191f">4</text>
+<text x="900" y="80" font-size="17" font-weight="700" fill="#17191f">HD map</text>
+<rect x="900" y="96" width="156" height="26" rx="5" fill="#ffd43b30" stroke="#f0d35b" stroke-width="1.5"/>
+<text x="978" y="113" font-size="12" font-weight="700" font-family="SFMono-Regular, Menlo, Consolas, monospace" text-anchor="middle" fill="#17191f">3D geometry</text>
+<text x="900" y="146" font-size="12.5" fill="#5f6670">Lane shape in 3D</text>
+<text x="900" y="163" font-size="12.5" fill="#5f6670">(experimental)</text>
+<line x1="900" y1="184" x2="1056" y2="184" stroke="#e5e7eb" stroke-dasharray="3,3"/>
+<text x="900" y="206" font-size="11.5" font-family="SFMono-Regular, Menlo, Consolas, monospace" fill="#9a7b12">Lanelet2 ·</text>
+<text x="900" y="223" font-size="11.5" font-family="SFMono-Regular, Menlo, Consolas, monospace" fill="#9a7b12">OpenDRIVE</text>
 </svg>
