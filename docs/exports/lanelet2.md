@@ -32,9 +32,9 @@ Mac mini (Apple M6, 12 cores, 16 GB).
 
 | Area (input GMNS DuckDB) | Time | Memory | Output |
 |---|---|---|---|
-| Monaco (8.4 MB) | 0.11 s | 63.6 MB | 10.6 MB |
-| Kentucky (5.8 GB) ¹ | 1 min 24 s | 10.2 GB | 9.8 GB |
-| France (~150 GB) | not run | | |
+| Monaco (8.4 MB `.duckdb`) | 0.11 s | 63.6 MB | 10.6 MB |
+| Kentucky (5.8 GB `.duckdb`) ¹ | 1 min 24 s | 10.2 GB | 9.8 GB |
+| France (~150 GB `.duckdb`) | not run | | |
 
 ¹ On the GMNS database made by tiles (`duckosm gmns`, zoom 10). lanelet2 reads the whole database, so its memory does not
 go down with the tiles. France can need more than 16 GB.

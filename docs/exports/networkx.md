@@ -41,9 +41,9 @@ Mac mini (Apple M6, 12 cores, 16 GB).
 
 | Area (input DuckDB) | Output | Time | Memory | Output size |
 |---|---|---|---|---|
-| Kentucky (~1.2 GB) | `export-graph` (GraphML) | 13 s | 2.9 GB | 1.9 GB |
+| Kentucky (~1.2 GB `.duckdb`) | `export-graph` (GraphML) | 13 s | 2.9 GB | 1.9 GB |
 | | `to_networkx()` | 16 s | 5.6 GB | |
-| France (~35 GB) | both | not run: the Mac mini has too little free disk | | |
+| France (~35 GB `.duckdb`) | both | not run: the Mac mini has too little free disk | | |
 
 `export-graph` writes the GraphML file while DuckDB reads the rows, so its memory stays near DuckDB's limit of 2 GB. Before
 this change, Kentucky needed 9.3 GB. The file has the same bytes.
