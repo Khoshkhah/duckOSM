@@ -44,13 +44,11 @@ flowchart LR
 
 ## Why a Single Unified Network?
 
-In traditional geospatial pipelines, each domain re-parses raw OSM data with its own assumptions:
-- GIS tools drop road directionality and turn restrictions.
-- Simulators cut roads at every crossing, creating artificial degree-2 bottlenecks.
-- Planning tools discard pedestrian crossings, breaking walk-to-transit connections.
-- Autonomous driving tools re-draw lanelets from scratch in JOSM with isolated identifiers.
+Traditional workflows re-parse raw OSM per domain with conflicting assumptions—dropping directionality in GIS, creating artificial bottlenecks in simulators, and isolating IDs in HD maps.
 
-duckOSM replaces this fragmentation with a **5-level pipeline** anchored in DuckDB:
-1. Every level derives from the same verified topological base.
-2. Every link, lanelet, and tensor arc retains its connection to the 64-bit `edge_id`.
-3. Simulation and ML predictions join back directly to the original network with standard SQL.
+duckOSM replaces this fragmentation with a unified **5-level pipeline** anchored in DuckDB:
+
+- **Shared topological base:** GIS, routing, simulation, and ML all derive from one verified network.
+- **Continuous corridors:** Contraction (`--merge`) avoids artificial bottleneck queues at crossings while preserving detail.
+- **Multimodal parity:** Pedestrian, cycling, and transit links maintain continuous alignment with road corridors.
+- **Deterministic 64-bit IDs:** Every link, lanelet, and tensor retains persistent `edge_id`s, so simulation outputs and model predictions join back with standard SQL.
