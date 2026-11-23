@@ -1,25 +1,35 @@
 # HD map database
 
 !!! warning "Planned"
-    This page is the specification of the HD map database. The code does not exist yet. The design and the reasons
-    for each decision are in
-    [`docs/design/hdmap_duckdb.md`](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/hdmap_duckdb.md).
+    This page is the specification of the HD map database. The code does not exist yet. The reasons for each decision
+    are in [`docs/design/hdmap_duckdb.md`](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/hdmap_duckdb.md).
 
-The HD map database (`<area>_hdmap.duckdb`) is the lane map of an area for automated driving: each lane as a lanelet
-with its left and right border, the next lanelets, the lanes on each side, the junctions, the stop lines, the
-crosswalks and the traffic rules. `duckosm hdmap` makes it from a [GMNS database](../exports/gmns_tables.md). The
-Lanelet2, CommonRoad and OpenDRIVE exporters, the lane graph and `surfaces` read it.
+The HD map database (`<area>_hdmap.duckdb`) is the lane-level road model of an area: the roads with their reference
+lines, the lane sections, the lanes with their borders in 3D, the paths through each junction, the junction areas,
+the stop lines, the crosswalks, the signals and the signs. Each value has its evidence: from the data, computed, or a
+default.
+
+One database gives each HD map format: Lanelet2, ASAM OpenDRIVE, CommonRoad, SUMO and glTF. Each exporter reads only
+this database.
+
+The model is the core of the SimReady road model (`sim` schema, decision D7 for the ids), with a small number of
+additions for the formats. Two programs can write it:
+
+| Producer | Input | Quality |
+|---|---|---|
+| `duckosm hdmap` | a [GMNS database](../exports/gmns_tables.md) | OSM center lines offset by the lane widths, junction paths from SUMO's netconvert, heights at the nodes |
+| SimReady | its own build | measured kerbs, lane tapers, its own junction paths and areas, heights along the road |
 
 ```bash
-duckosm build --config config/sample_monaco.yaml       # Level 2: monaco.duckdb
-duckosm gmns monaco.duckdb                             # Level 3: monaco_gmns.duckdb (the lanes)
+duckosm build --config config/sample_monaco.yaml          # Level 2: monaco.duckdb
+duckosm gmns monaco.duckdb                                # Level 3: monaco_gmns.duckdb (the lanes)
 duckosm hdmap monaco_gmns.duckdb --source monaco.duckdb   # Level 4: monaco_hdmap.duckdb
-duckosm lanelet2 monaco_hdmap.duckdb                   # a file from it
+duckosm lanelet2 monaco_hdmap.duckdb                      # a format from it
 ```
 
 ```python
 from duckosm import hdmap
-hdmap.build("monaco_gmns.duckdb", source="monaco.duckdb")      # -> monaco_hdmap.duckdb
+hdmap.build("monaco_gmns.duckdb", source="monaco.duckdb")     # -> monaco_hdmap.duckdb
 hdmap.to_lanelet2("monaco_hdmap.duckdb", "monaco.osm")
 ```
 
@@ -29,10 +39,11 @@ hdmap.to_lanelet2("monaco_hdmap.duckdb", "monaco.osm")
 
 | Option | Default | Effect |
 |---|---|---|
-| `--out PATH` | `<gmns name without _gmns>_hdmap.duckdb`, next to the GMNS database | the HD map database. A run writes the whole file again |
-| `--mode NAME` | `driving` | a mode of the GMNS database. Give it more than one time for more modes. Only `driving` has lane connectors |
-| `--source PATH` | none | the Level 2 database. The step reads the ground of the area from its `main.elevation_metadata`. Without it, `meta.ground_id` is empty |
-| `--default-width M` | `3.25` | the width of a lane or a connector that has no width |
+| `--out PATH` | `<area>_hdmap.duckdb`, next to the GMNS database | the HD map database. A run writes the whole file again |
+| `--mode NAME` | `driving` | a mode of the GMNS database. Give it more than one time for more modes. Only `driving` has junction paths |
+| `--source PATH` | none | the Level 2 database: the ground of the area (`main.elevation_metadata`) and the heights of the edges |
+| `--crs CRS` | the UTM zone of the center of the area | the metric CRS of all geometry |
+| `--default-width M` | `3.25` | the width of a lane that has no width in the data |
 
 The step opens the GMNS database and the Level 2 database read-only. It does not change them.
 
@@ -40,361 +51,461 @@ The step opens the GMNS database and the Level 2 database read-only. It does not
 
 | Rule | |
 |---|---|
-| File | one DuckDB file, complete without the GMNS database. Each row holds its own line, width and speed |
-| Schemas | one for each mode, with the name of the mode: `driving.lanelet`, `driving.boundary`, … |
-| Text ids | from the GMNS keys: `lane_id` = `<edge_id>_<lane_num>`, `connector_id` = `<from_lane_id>><to_lane_id>`. Two builds of the same GMNS database give the same ids |
-| Integer ids | `num_id = (hash(<text id>) >> 1)::BIGINT`, the formula of the duckOSM `edge_id`. For the formats that need integers (Lanelet2, CommonRoad). A build stops with an error if two rows of one table get the same `num_id` |
-| No sequences | no id comes from a row number or a sequence |
-| Coordinates | longitude and latitude, EPSG:4326, as in the GMNS database. `meta.utm_crs` is the metric CRS that each exporter and each length use |
-| Units | metres, km/h |
-| Direction | each line goes in the direction of travel |
-| Lane numbers | lane 1 is the leftmost lane in the direction of travel. A bike lane on the left of a one-way road is lane -1 |
-| Left and right | in the direction of travel |
+| File | one DuckDB file, complete without the other databases |
+| Schema | all tables are in the schema `hdmap`. A row of `carriageway` has its `mode` |
+| Coordinates | metres, in `project.crs` (a UTM zone). The exporters to longitude and latitude (Lanelet2) transform the points |
+| Heights | metres on `project.vertical_datum`, from the [ground of the area](../concepts/ground-reference.md) |
+| Units in the names | `_m` metres, `_m2` square metres, `_s` seconds, `_kmh` km/h. No suffix: no unit |
+| Ids | `BIGINT`, `(hash(<text>) >> 1)::BIGINT` of the content keys, the formula of the duckOSM `edge_id`. A key of several values is joined by `\|`; a list by `,`. No sequence and no row number. Exception: `node_id` is the OSM node id |
+| Stable ids | the same input gives the same ids, on each machine. Ids from two producers are not the same: join them on `carriageway.edge_ids` |
+| Stations | metres along the reference line of a carriageway, from its start |
+| Left and right | in the direction of travel of the carriageway |
+| Lane numbers | lane 1 is the leftmost lane; the numbers go up to the right. Parking and bike lanes are lanes of the cross-section and have numbers |
+| Lists, enums | DuckDB lists (`BIGINT[]`, `VARCHAR[]`). An enum is a `VARCHAR` with a `CHECK` of its values |
+| Geometry | DuckDB `GEOMETRY`. The type (POINT, LINESTRING Z, POLYGON) is in the column description |
+
+### Evidence
+
+Each row of a table marked "ev" has five evidence columns. They apply to the values that the producer computed for the
+row.
+
+| Column | Type | Holds |
+|---|---|---|
+| `ev_status` | VARCHAR | `observed`: in the source data (an OSM tag, a survey). `derived`: computed from observed values with no choice (a length from a line). `inferred`: chosen by a rule among options; `ev_confidence` has a value. `assumed`: a default for a value that is not in the data (a lane width of 3.25 m). `unknown`: no value. `conflict`: two sources do not agree |
+| `ev_method` | VARCHAR | the rule or the step that made the value, for example `osm_tag`, `default_width`, `netconvert`, `offset` |
+| `ev_confidence` | DOUBLE | 0 to 1, for `inferred` and `conflict` only |
+| `ev_source_ids` | VARCHAR[] | `"{source_id}:{object}"`, for example `osm-2026-11-20:w6110234` |
+| `ev_review` | VARCHAR | `none`, `needed`, `accepted`, `rejected` |
+
+An exporter does not show an `assumed` value as an `observed` value. Where the format has a place for it, the exporter
+writes the status (Lanelet2: a tag `ev_status`; OpenDRIVE: `userData`).
 
 ## The tables
 
-| Table | One row is | Rows on Monaco (`driving`) |
-|---|---|---|
-| [`meta`](#meta) | the database: source, CRS, ground | 1 |
-| [`lanelet`](#lanelet) | a lane of a link, or a lane connector through a junction | 7117 (3176 lanes, 3941 connectors) |
-| [`boundary`](#boundary) | one border line. Two lanes side by side share it | about 13 841 (5959 lane borders, 7882 connector borders) ¹ |
-| [`lanelet_relation`](#lanelet_relation) | a next lanelet, or a lanelet on the left or on the right | |
-| [`junction`](#junction) | a node with lane connectors | 1678 |
-| [`marking`](#marking) | a stop line, or a crosswalk | crosswalks: 494 |
-| [`regulatory`](#regulatory) | a traffic rule: a traffic light, a stop sign, a yield sign | |
-| [`regulatory_member`](#regulatory_member) | a lanelet or a line that a rule applies to | |
+The column "SimReady" says how the table differs from the SimReady model; the design lists each change.
 
-¹ Each link has one border more than its lanes (3176 lanes on 2783 links: 5959), and each connector has two (2 × 3941).
-Turn pockets add a few rows.
+| Table | One row is | ev | SimReady |
+|---|---|---|---|
+| [`project`](#project) | the database: area, CRS, ground, producer | | yes, changed |
+| [`source`](#source) | a data source: an OSM extract, a DEM, a survey | | yes |
+| [`node`](#node) | an OSM node where roads meet or end | ev | yes |
+| [`carriageway`](#carriageway) | one direction of travel of a road, with its reference line | ev | yes, changed |
+| [`lane_section`](#lane_section) | a part of a carriageway with a fixed set of lanes | ev | yes, changed |
+| [`lane`](#lane) | one lane of a section, with its two borders | ev | yes, changed |
+| [`junction`](#junction) | one junction: one node or a group of nodes | ev | yes, changed |
+| [`turn_rule`](#turn_rule) | a turn from one carriageway to another at a junction | ev | yes |
+| [`movement`](#movement) | a path from one lane to another through a junction | ev | yes, changed |
+| [`stop_line`](#stop_line) | the line where the lanes of a carriageway end at a junction | ev | yes, changed |
+| [`island`](#island) | a traffic island in a junction | ev | yes, changed |
+| [`crossing`](#crossing) | a pedestrian crossing on the road | ev | **new** |
+| [`signal`](#signal) | a traffic light, or a traffic sign, at its position | ev | **new** |
+| [`signal_plan`](#signal_plan), [`signal_phase`](#signal_phase) | the timing of the traffic lights of a junction | ev | yes |
+| [`elevation_profile`](#elevation_profile) | a height at a station of a carriageway | ev | yes |
+| [`structure`](#structure) | a bridge or a tunnel on a carriageway | ev | yes, changed |
 
 ```mermaid
 erDiagram
-    lanelet ||--|| boundary : "left_bound, right_bound"
-    lanelet ||--o{ lanelet_relation : "from_id, to_id"
-    lanelet }o--o| junction : "junction_id (connectors)"
-    marking }o--|| lanelet : "edge_id"
-    regulatory ||--|{ regulatory_member : "reg_id"
-    regulatory_member }o--|| lanelet : "member_id (refers, yield, right_of_way)"
-    regulatory_member }o--o| marking : "member_id (ref_line)"
-    regulatory }o--o| junction : "junction_id"
+    carriageway ||--o{ lane_section : "divided into"
+    lane_section ||--o{ lane : holds
+    lane ||--o| lane : succeeds
+    carriageway ||--o{ elevation_profile : "heights"
+    carriageway ||--o{ structure : carries
+    carriageway ||--o{ stop_line : "ends at"
+    junction ||--o{ stop_line : bounds
+    junction ||--o{ turn_rule : decides
+    turn_rule ||--o{ movement : allows
+    movement }o--|| lane : from
+    movement }o--|| lane : to
+    junction ||--o{ island : holds
+    junction ||--o| signal_plan : "controlled by"
+    signal_plan ||--o{ signal_phase : has
+    signal_phase }o--o{ movement : serves
+    signal }o--o| stop_line : controls
+    crossing }o--o| junction : "near"
+    node }o--o| junction : "belongs to"
 ```
 
-The columns below have a "From" column: the GMNS table and column, or **new** for a value that this step makes.
-
-## meta
+## project
 
 One row.
 
-| Column | Type | Null | From | Holds |
-|---|---|---|---|---|
-| `mode` | VARCHAR | no | | the mode of the schema, for example `driving` |
-| `gmns_db` | VARCHAR | no | | the path of the GMNS database |
-| `gmns_version` | VARCHAR | yes | `config.version_number` | the GMNS version, for example `0.97` |
-| `utm_crs` | VARCHAR | no | new | the UTM zone of the center of the area, for example `EPSG:32632` for Monaco |
-| `default_width` | DOUBLE | no | | the `--default-width`, 3.25 |
-| `ground_id` | VARCHAR | yes | Level 2 `elevation_metadata.sha256` | the [ground](../concepts/ground-reference.md) of the area. Empty without `--source`, or when the area has no ground |
-| `ground_product` | VARCHAR | yes | `elevation_metadata.product` | `DTM` or `DSM` |
-| `vertical_datum` | VARCHAR | yes | `elevation_metadata.vertical_datum` | for example `EGM2008` |
-| `z_source` | VARCHAR | yes | new | `node` when the heights come from `node.z_coord`; empty when the GMNS nodes have no heights |
-| `duckosm_version` | VARCHAR | no | | the duckOSM version that made the file |
-| `built_at` | VARCHAR | no | | the UTC time, ISO 8601 |
-
-## lanelet
-
-One row for each GMNS lane (`kind = 'lane'`) and each lane connector (`kind = 'connector'`).
-
-| Column | Type | Null | Key | From | Holds |
-|---|---|---|---|---|---|
-| `lanelet_id` | VARCHAR | no | primary | `lane.lane_id`, `lane_connector.connector_id` | |
-| `num_id` | BIGINT | no | unique | new | the hash of `lanelet_id` |
-| `kind` | VARCHAR | no | | new | `lane` or `connector` |
-| `edge_id` | BIGINT | no | | `lane.link_id`; for a connector the link of `from_lane_id` | the duckOSM `edge_id` |
-| `to_edge_id` | BIGINT | yes | | the link of `to_lane_id` | connectors only |
-| `lane_num` | INTEGER | yes | | `lane.lane_num` | lanes only |
-| `from_lanelet`, `to_lanelet` | VARCHAR | yes | → `lanelet` | `lane_connector.from_lane_id`, `to_lane_id` | connectors only: the lane in and the lane out |
-| `mvmt_id` | VARCHAR | yes | | `lane_connector.mvmt_id` | connectors only: the GMNS movement |
-| `junction_id` | BIGINT | yes | → `junction` | `movement.node_id` | connectors only |
-| `turn` | VARCHAR | yes | | lanes: `lane.turn` (the `turn:lanes` value); connectors: `movement.type` | for example `left;through`; `left`, `thru`, `right`, `uturn`, `merge`, `diverge` |
-| `allowed_uses` | VARCHAR | no | | `lane.allowed_uses`; a connector takes the uses of its lane in | `auto`, `bus`, `bike`, `bus,bike`, `walk` |
-| `subtype` | VARCHAR | no | | new, from `allowed_uses` | see [subtype](#subtype) |
-| `width` | DOUBLE | no | | `lane.width`, `lane_connector.width`; else `meta.default_width` | metres |
-| `speed_limit` | DOUBLE | yes | | `link.free_speed` of `edge_id` | km/h |
-| `name` | VARCHAR | yes | | `link.name` | the street name |
-| `level` | INTEGER | no | | `link.layer`, else `bridge` 1, `tunnel` -1, else 0 | the vertical level, as `_level` in `gmns.py` |
-| `left_bound`, `right_bound` | VARCHAR | no | → `boundary` | new | the two borders |
-| `length` | DOUBLE | no | | new | metres: the length of `geom` in `meta.utm_crs` |
-| `z_start`, `z_end` | DOUBLE | yes | | new | see [Heights](#heights) |
-| `geom` | GEOMETRY | no | | lanes: `lane.geom_cut`, else `lane.geom`; connectors: `lane_connector.geom` | the center line, `LINESTRING` |
-
-A lane line ends at the edge of the junction (`geom_cut`), where its connectors start. So the lanes and the
-connectors of a junction do not overlap.
-
-### subtype
-
-The Lanelet2 words. The first use in `allowed_uses` decides.
-
-| `allowed_uses` starts with | `subtype` | CommonRoad `laneletType` | OpenDRIVE lane `type` |
-|---|---|---|---|
-| `auto` | `road` | `urban` | `driving` |
-| `bus` | `bus_lane` | `busLane` | `bus` |
-| `bike` | `bicycle_lane` | `bicycleLane` | `biking` |
-| `walk` | `walkway` | `sidewalk` | `sidewalk` |
-
-## boundary
-
-One row for each border line. Two lanes side by side of one link use the same row.
-
-| Column | Type | Null | Key | Holds |
-|---|---|---|---|---|
-| `bound_id` | VARCHAR | no | primary | see [Border ids](#border-ids) |
-| `num_id` | BIGINT | no | unique | the hash of `bound_id` |
-| `kind` | VARCHAR | no | | `lane` or `connector` |
-| `edge_id` | BIGINT | no | | the link; for a connector, the link in |
-| `line_type` | VARCHAR | no | | `line_thin`, `curbstone`, `virtual` |
-| `line_subtype` | VARCHAR | no | | `solid` or `dashed` |
-| `color` | VARCHAR | no | | `white` |
-| `lane_change` | BOOLEAN | no | | true when a vehicle can go across the line |
-| `z_start`, `z_end` | DOUBLE | yes | | as in `lanelet` |
-| `geom` | GEOMETRY | no | | the line, `LINESTRING`, in the direction of travel |
-
-### Border ids
-
-| Border | `bound_id` | Example (Monaco) |
+| Column | Type | Holds |
 |---|---|---|
-| left border of the leftmost lane of a link | `<edge_id>_b0` | `117961209473327056_b0` |
-| border between lane `k` and the lane on its right | `<edge_id>_b<k>` | `117961209473327056_b1`: between lanes 1 and 2 |
-| right border of the rightmost lane (`k` = the number of the last lane) | `<edge_id>_b<k>` | `117961209473327056_b3` on a link with 3 lanes |
-| left border of a lane connector | `<connector_id>_l` | `8660669654026136811_1>6865949183698550743_1_l` |
-| right border of a lane connector | `<connector_id>_r` | |
+| `project_id` | BIGINT | `hash("{area_name}")` |
+| `area_name` | VARCHAR | for example `monaco` |
+| `crs` | VARCHAR | the metric CRS, for example `EPSG:32632` |
+| `vertical_datum` | VARCHAR | for example `EGM2008`. Empty when the area has no heights |
+| `ground_id` | VARCHAR | **new.** The `sha256` of the ground (`main.elevation_metadata` of the Level 2 database) |
+| `ground_product` | VARCHAR | **new.** `DTM` or `DSM` |
+| `producer` | VARCHAR | **new.** `duckosm-gmns` or `simready` |
+| `boundary` | GEOMETRY | POLYGON. The area |
+| `built_at` | TIMESTAMP | |
+| `duckosm_db` | VARCHAR | the path of the Level 2 database |
+| `duckosm_version` | VARCHAR | |
+| `simready_version` | VARCHAR | empty for `duckosm-gmns` |
+| `jurisdiction` | VARCHAR | the country code of the traffic rules and signs, for example `MC`, `SE`. From the boundary |
+| `driving_side` | VARCHAR | `right` or `left` |
+| `osm_timestamp` | TIMESTAMP | the date of the OSM data |
 
-On a link with a bike lane on the left (lane -1), the borders start at `b-1`: `<edge_id>_b-1` is its left border, and
-`<edge_id>_b0` is the border between the bike lane and lane 1.
+## source
 
-### How a border is made
-
-1. The step takes the lanes of a link in the order of `lane_num`, from left to right.
-2. The left border of the first lane is its center line, offset to the left by half its width.
-3. The border on the right of lane `k` is the center line of lane `k`, offset to the right by half its width.
-4. The lane on the right of lane `k` uses this row as its left border. It does not get a line of its own.
-5. When the two lanes do not have the same length (a turn pocket), the shared border is cut to the shorter lane. The
-   longer lane gets a second row for the rest of its length, `<bound_id>x`, with the `line_type` of an outer border.
-6. A connector border is its center line, offset by half its width. The step then sets its first point to the end
-   point of the same border of the lane in, and its last point to the start point of the same border of the lane out.
-   So each lanelet touches the next lanelet at both borders.
-
-The offsets are made in `meta.utm_crs` with shapely `offset_curve` (one call for all lines), then go back to EPSG:4326.
-DuckDB `spatial` has no offset function.
-
-### Line types
-
-The first row that applies:
-
-| Border | `line_type` | `line_subtype` | `lane_change` |
-|---|---|---|---|
-| a connector border | `virtual` | `solid` | false |
-| the right border of the rightmost lane | `curbstone` | `solid` | false |
-| the left border of the leftmost lane, on a link that has a link in the other direction (the center line) | `line_thin` | `solid` | false |
-| the left border of the leftmost lane of a one-way road | `curbstone` | `solid` | false |
-| between two lanes with different `allowed_uses` | `line_thin` | `solid` | false |
-| between two lanes with the same `allowed_uses` | `line_thin` | `dashed` | true |
-
-OSM has few tags for road marks. These values are the default, not a survey.
-
-## lanelet_relation
-
-One row for each pair of lanelets that touch.
-
-| Column | Type | Null | Key | Holds |
-|---|---|---|---|---|
-| `from_id` | VARCHAR | no | primary, with `to_id` and `relation` | a `lanelet_id` |
-| `to_id` | VARCHAR | no | primary | a `lanelet_id` |
-| `relation` | VARCHAR | no | primary | `successor`, `left`, `right` |
-| `lane_change` | BOOLEAN | yes | | `left` and `right` only: the `lane_change` of the shared border |
-
-| `relation` | Rows from | Rule |
+| Column | Type | Holds |
 |---|---|---|
-| `successor` | `lane_connector` | two rows for each connector: lane in → connector, connector → lane out |
-| `successor` | two lanes that continue with no junction between them | a lane that ends at a node with one link out and no connector: the lane with the same `lane_num` on the next link |
-| `left` | lanes of one link | lane `k + 1` → lane `k` (from the right lane, the lane on its left) |
-| `right` | lanes of one link | lane `k` → lane `k + 1` |
+| `source_id` | VARCHAR | a short name, for example `osm-2026-11-20`, `fabdem-v1-2` |
+| `kind` | VARCHAR | `osm`, `dem`, `netconvert`, `survey`, `lidar`, `city`, `editor` |
+| `uri` | VARCHAR | the file or the address |
+| `license` | VARCHAR | for example `ODbL-1.0` |
+| `retrieved_at` | TIMESTAMP | |
 
-`left` and `right` rows are only for lanes of the same link in the same direction. The lanes of the other direction
-are not neighbours in this table.
+## node
+
+| Column | Type | Holds |
+|---|---|---|
+| `node_id` | BIGINT | the OSM node id, as in duckOSM. Negative for a virtual node |
+| `xy` | GEOMETRY | POINT |
+| `degree_in`, `degree_out` | INTEGER | the carriageways in and out |
+| `junction_id` | BIGINT | the junction of the node, or empty |
+| `highway_tag` | VARCHAR | the OSM `highway` value of the node (`traffic_signals`, `stop`, …) |
+| `level` | INTEGER | the vertical level: `layer`, else `bridge` 1, `tunnel` -1, else 0 |
+
+## carriageway
+
+One direction of travel of a road between two junctions or ends.
+
+| Column | Type | Holds |
+|---|---|---|
+| `carriageway_id` | BIGINT | `hash("{edge_ids joined by ','}")`, the edge ids in travel order |
+| `edge_ids` | BIGINT[] | the duckOSM `edge_id`s. `duckosm-gmns`: one edge. SimReady: one or more |
+| `mode` | VARCHAR | `driving`, `cycling`, `walking` |
+| `from_node_id`, `to_node_id` | BIGINT | |
+| `shared_line` | BOOLEAN | true when the two directions of one road share one reference line (OpenDRIVE: one road with left and right lanes) |
+| `twin_carriageway_id` | BIGINT | the other direction of the same road, or empty |
+| `highway` | VARCHAR | the OSM road class |
+| `name` | VARCHAR | the street name |
+| `oneway` | BOOLEAN | |
+| `inside_junction_id` | BIGINT | set when the carriageway lies inside a junction |
+| `posted_speed_kmh` | DOUBLE | the speed limit |
+| `reference_line` | GEOMETRY | LINESTRING. The line that the stations and the lane offsets are measured on |
+| `length_m` | DOUBLE | |
+| `level` | INTEGER | as on `node` |
+| `lane_order_convention` | VARCHAR | `left_to_right` (lane 1 is the leftmost) |
+
+## lane_section
+
+A part of a carriageway where the set of lanes does not change. The sections of a carriageway cover it from station 0 to
+`length_m` with no gap.
+
+| Column | Type | Holds |
+|---|---|---|
+| `lane_section_id` | BIGINT | `hash("{carriageway_id}\|{rank}")`, `rank` the section number from 1, in station order |
+| `carriageway_id` | BIGINT | |
+| `station_start_m`, `station_end_m`, `length_m` | DOUBLE | |
+| `lane_count_start`, `lane_count_end` | INTEGER | the driving lanes at the start and the end |
+| `level` | INTEGER | |
+| `structure_id` | BIGINT | the bridge or the tunnel of the section, or empty |
+
+## lane
+
+| Column | Type | Holds |
+|---|---|---|
+| `lane_id` | BIGINT | `hash("{lane_section_id}\|{lane_num}")` |
+| `lane_section_id`, `carriageway_id` | BIGINT | |
+| `lane_num` | INTEGER | 1 is the leftmost lane |
+| `role` | VARCHAR | `through`, `pocket` (a turn bay that opens), `merge` (a lane that ends), `parking`, `bike`, `bus`, `shoulder`, `median` |
+| `use` | VARCHAR[] | who can drive on it: `auto`, `bus`, `bike`, `hgv`, `taxi`. Empty for `parking`, `shoulder`, `median` |
+| `turn` | VARCHAR | the `turn:lanes` value at the end of the section (`left`, `through`, `left;through`, …) |
+| `width_shape` | VARCHAR | `constant`, `linear`, `smoothstep` |
+| `width_start_m`, `width_end_m` | DOUBLE | the width at the start and at the end of the section |
+| `taper_start_m`, `taper_length_m` | DOUBLE | where the width starts to change, and over which length. Empty for `constant` |
+| `boundary_left`, `boundary_right` | GEOMETRY | LINESTRING Z. The two borders, from the start (or `cut_start_m`) to the end (or `cut_end_m`) |
+| `mark_left`, `mark_right` | VARCHAR | **new.** The road mark on the border: `solid`, `dashed`, `solid_solid`, `solid_dashed`, `dashed_solid`, `curb`, `none` |
+| `mark_source` | VARCHAR | **new.** `osm` (from `change:lanes` or `lane_markings`) or `rule` (see [Road marks](#road-marks)) |
+| `predecessor_lane_id`, `successor_lane_id` | BIGINT | the lane of the section before and after, on the same carriageway. Empty at a junction |
+| `cut_start_m`, `cut_end_m` | DOUBLE | the station where the lane meets the junction area. Two lanes of one section can have different cuts |
+
+Views, not stored: `centerline` (the middle of the two borders, LINESTRING Z) and `area` (POLYGON Z, the lane between
+its borders).
+
+### Road marks
+
+The first rule that applies, when OSM has no mark:
+
+| Border | Mark |
+|---|---|
+| the right border of the rightmost lane | `curb` |
+| the left border of lane 1 when the carriageway has a twin (the center line of a two-way road) | `solid` |
+| the left border of lane 1 of a one-way road | `curb` |
+| between two lanes with a different `use` | `solid` |
+| between two lanes with the same `use` | `dashed` |
+
+The lane on the left and the lane on the right of one border have the same mark on it.
 
 ## junction
 
-One row for each node that has one or more lane connectors.
-
-| Column | Type | Null | Key | From | Holds |
-|---|---|---|---|---|---|
-| `junction_id` | BIGINT | no | primary | `node.node_id` | the OSM node id (negative for a virtual node) |
-| `num_id` | BIGINT | no | unique | new | the hash of `junction_id` as text |
-| `ctrl_type` | VARCHAR | yes | | `node.ctrl_type` | `signal`, `stop_4_way`, `stop`, `stop_2_way`, `yield` |
-| `node_type` | VARCHAR | yes | | `node.node_type` | `intersection`, `mini_roundabout`, … |
-| `connectors` | INTEGER | no | | new | the number of connectors |
-| `z` | DOUBLE | yes | | `node.z_coord` | metres |
-| `geom` | GEOMETRY | no | | `node.geom` | the point |
-
-The surface of a junction is not stored: `surfaces()` makes it from the connectors.
-
-## marking
-
-Road marks that are not lane borders.
-
-| Column | Type | Null | Key | Holds |
-|---|---|---|---|---|
-| `marking_id` | VARCHAR | no | primary | `<edge_id>_stop`, or the GMNS `crossing_id` (`w<osm_id>`, `n<osm_id>`) |
-| `num_id` | BIGINT | no | unique | the hash of `marking_id` |
-| `kind` | VARCHAR | no | | `stop_line` or `crosswalk` |
-| `edge_id` | BIGINT | yes | | the link of a stop line |
-| `painted` | BOOLEAN | no | | a stop line: true; a crosswalk: `crossing.painted` |
-| `crossing_type` | VARCHAR | yes | | a crosswalk: `crossing.crossing_type` |
-| `width` | DOUBLE | yes | | metres. A crosswalk: `crossing.width` |
-| `geom` | GEOMETRY | no | | a stop line: `LINESTRING`; a crosswalk: `POLYGON` (`crossing.geom`) |
-
-A stop line:
-
-- A link gets one when a [`regulatory`](#regulatory) row of kind `traffic_light` or `stop` is on it.
-- The line goes across all lanes of the link, from the start of `<edge_id>_b0` to its right border, at the end of the
-  lanes (the end of `geom_cut`).
-
-The lanes that a crosswalk covers are in the GMNS `lane_crossing` table. The HD map database does not copy them: an
-exporter finds them with `ST_Intersects(marking.geom, lanelet.geom)`.
-
-## regulatory
-
-A traffic rule. The model is the Lanelet2 regulatory element: CommonRoad and OpenDRIVE need less.
-
-| Column | Type | Null | Key | Holds |
-|---|---|---|---|---|
-| `reg_id` | VARCHAR | no | primary | `<kind>_<edge_id>`, for example `traffic_light_117961209473327056` |
-| `num_id` | BIGINT | no | unique | the hash of `reg_id` |
-| `kind` | VARCHAR | no | | `traffic_light`, `stop`, `yield` |
-| `edge_id` | BIGINT | no | | the link that the rule controls |
-| `junction_id` | BIGINT | yes | → `junction` | the junction at the end of the link |
-| `osm_id` | BIGINT | yes | | the OSM node of the light or the sign, when it is known |
-| `source` | VARCHAR | no | | `movement` or `location` |
-| `geom` | GEOMETRY | no | | the point of the light or the sign; else the end of the lane lines of the link |
-
-A link gets a rule from two sources. One row for each link and kind:
-
-| Source | Rule |
-|---|---|
-| `movement.ctrl_type` | `signal` → `traffic_light`, `stop` → `stop`, `yield` → `yield`, on the link in (`ib_link_id`) |
-| `location.loc_type` | `traffic_signals` → `traffic_light`, `stop` → `stop`, `give_way` → `yield`, on its `link_id`. `osm_id` and `geom` come from this row |
-
-On Monaco, `movement` has 4 signal, 8 stop and 59 yield rows, and `location` has 31 `traffic_signals`, 18 `stop` and
-99 `give_way` rows. When both sources give the same kind for a link, the step keeps one row, with `osm_id` and `geom`
-from `location`.
-
-## regulatory_member
-
-| Column | Type | Null | Key | Holds |
-|---|---|---|---|---|
-| `reg_id` | VARCHAR | no | primary, with `member_id` and `role` | → `regulatory` |
-| `member_id` | VARCHAR | no | primary | a `lanelet_id` or a `marking_id` |
-| `role` | VARCHAR | no | primary | see below |
-
-| `role` | Members | For the kinds |
+| Column | Type | Holds |
 |---|---|---|
-| `refers` | each lane of the link: the lanes that must obey the rule | all |
-| `ref_line` | the stop line of the link | `traffic_light`, `stop` |
-| `yield` | the connectors that start on the link | `stop`, `yield` |
-| `right_of_way` | the connectors of the same junction that start on a link with no rule | `stop`, `yield` |
+| `junction_id` | BIGINT | `hash("{node_ids sorted, joined by ','}")` |
+| `node_ids` | BIGINT[] | one node, or the nodes of a junction made of more than one node |
+| `control` | VARCHAR | `signal`, `stop_all`, `stop`, `yield`, `priority`, `none` |
+| `core` | GEOMETRY | POINT. The center |
+| `arm_count` | INTEGER | the carriageways that touch it |
+| `arm_order` | BIGINT[] | the carriageways, counter-clockwise |
+| `shape` | GEOMETRY | POLYGON. The outline that the stop lines lie on |
+| `area` | GEOMETRY | POLYGON. The road surface of the junction, without the islands |
+| `area_m2` | DOUBLE | |
+| `signal_plan_id` | BIGINT | or empty |
+| `level` | INTEGER | |
 
-OSM has no signal phases, so a traffic light has no phases and no times.
+## turn_rule
 
-## Heights
+One row for each pair of a carriageway in and a carriageway out at a junction.
 
-The heights come from the [ground of the area](../concepts/ground-reference.md) and no other source.
+| Column | Type | Holds |
+|---|---|---|
+| `turn_rule_id` | BIGINT | `hash("{from_carriageway_id}\|{to_carriageway_id}")` |
+| `junction_id`, `from_carriageway_id`, `to_carriageway_id` | BIGINT | |
+| `turn` | VARCHAR | `left`, `straight`, `right`, `u`, `slight_left`, `slight_right` |
+| `fork` | BOOLEAN | true for a merge or a diverge |
+| `allowed` | BOOLEAN | false when a turn restriction stops the turn |
+| `allowed_uses` | VARCHAR[] | |
+| `method` | VARCHAR | `osm_restriction`, `turn_lanes`, `geometry`, `uturn_rule` |
+| `source_ref` | VARCHAR | the OSM relation of a restriction |
 
-| Column | Value |
-|---|---|
-| `lanelet.z_start`, `z_end` of a lane | `node.z_coord` of the `from_node_id` and of the `to_node_id` of its link |
-| `lanelet.z_start`, `z_end` of a connector | `z_end` of its lane in and `z_start` of its lane out |
-| `boundary.z_start`, `z_end` | the values of the lanelet that has it as its left border; a border `b0` takes the values of lane 1 |
-| `junction.z` | `node.z_coord` |
-| any height on a link with `level <> 0` (a bridge, a tunnel) | empty: the ground is not the road there |
+## movement
 
-All heights are empty when the GMNS nodes have no heights (`duckosm elevation` did not run). The geometry is 2D. A
-height on each point comes when SimReady gives the road heights; then a column `geom_z` (`LINESTRING Z`) is added and
-the other columns do not change.
+A path from the end of one lane to the start of another, through a junction.
 
-## What each exporter reads
+| Column | Type | Holds |
+|---|---|---|
+| `movement_id` | BIGINT | `hash("{from_lane_id}\|{to_lane_id}")` |
+| `junction_id`, `turn_rule_id` | BIGINT | |
+| `from_lane_id`, `to_lane_id` | BIGINT | |
+| `from_carriageway_id`, `to_carriageway_id` | BIGINT | |
+| `turn` | VARCHAR | as in `turn_rule` |
+| `fork` | BOOLEAN | |
+| `priority` | VARCHAR | `major`, `minor`, `yield`, `stop`, `signal` |
+| `assignment_method` | VARCHAR | how the lane pair was chosen: `turn_lanes`, `connectivity_rule`, `netconvert` |
+| `path` | GEOMETRY | LINESTRING Z. From the center of the lane in at its cut to the center of the lane out at its cut |
+| `length_m`, `width_m` | DOUBLE | |
+| `area` | GEOMETRY | POLYGON. The path with its width, with flat ends on the two stop lines |
+| `curb_radius_m` | DOUBLE | the radius of a right turn |
+| `allowed_uses` | VARCHAR[] | |
+| `conflict_movement_ids` | BIGINT[] | the movements of the same junction whose area crosses this one |
+| `signal_phase_ids` | BIGINT[] | the phases that give this movement green |
+
+## stop_line
+
+| Column | Type | Holds |
+|---|---|---|
+| `stop_line_id` | BIGINT | `hash("{carriageway_id}\|{junction_id}\|{end}")` |
+| `carriageway_id`, `junction_id` | BIGINT | |
+| `end` | VARCHAR | `in`: the carriageway goes into the junction here. `out`: it comes out of the junction here |
+| `station_m` | DOUBLE | the mean of the cut stations of the lanes |
+| `geometry` | GEOMETRY | LINESTRING. From the left border of lane 1 to the right border of the last lane, through the cut of each lane |
+| `lane_cuts` | STRUCT(lane_id BIGINT, station_m DOUBLE, point GEOMETRY)[] | the cut of each lane, from left to right |
+| `painted` | BOOLEAN | **new.** True when a line is painted on the road (an `in` line at a `signal`, `stop` or `yield`). An `out` line is never painted |
+| `method` | VARCHAR | `lane_border`, `crossing`, `stop_node`, `measured`, `setback`, `netconvert` |
+| `source_ref` | VARCHAR | the object that placed the line |
+
+## island
+
+| Column | Type | Holds |
+|---|---|---|
+| `island_id` | BIGINT | `hash("{junction_id}\|{rank}")`, `rank` counter-clockwise from the core |
+| `junction_id` | BIGINT | |
+| `level` | INTEGER | |
+| `area` | GEOMETRY | POLYGON |
+| `area_m2` | DOUBLE | |
+| `source_ref` | VARCHAR | the OSM way of the island, when it is in OSM |
+
+## crossing
+
+**New.** A pedestrian crossing on the road.
+
+| Column | Type | Holds |
+|---|---|---|
+| `crossing_id` | BIGINT | `hash("{osm type}{osm_id}")`, for example `hash("w123")` |
+| `osm_id` | BIGINT | the OSM way or node |
+| `junction_id` | BIGINT | the junction that it is in or next to, or empty |
+| `carriageway_ids` | BIGINT[] | the carriageways that it goes across |
+| `lane_ids` | BIGINT[] | the lanes that it covers |
+| `kind` | VARCHAR | the OSM `crossing` value: `zebra`, `traffic_signals`, `uncontrolled`, `unmarked`, … |
+| `painted` | BOOLEAN | false for `unmarked` |
+| `width_m`, `length_m` | DOUBLE | along the road, and across the road |
+| `area` | GEOMETRY | POLYGON Z. The rectangle on the road |
+
+## signal
+
+**New.** A traffic light or a traffic sign as a thing at a position. The rules (who yields to whom) are in
+`movement.priority`; the timing is in `signal_plan`.
+
+| Column | Type | Holds |
+|---|---|---|
+| `signal_id` | BIGINT | `hash("{carriageway_id}\|{kind}\|{rank}")`, `rank` in station order |
+| `kind` | VARCHAR | `traffic_light`, `stop`, `yield`, `speed_limit`, `no_entry`, `crossing` |
+| `code` | VARCHAR | the sign code of the `project.jurisdiction` (for example the Vienna Convention code), when it is known |
+| `value` | DOUBLE | the number on the sign, for example 50 for `speed_limit` |
+| `carriageway_id` | BIGINT | the carriageway that it applies to |
+| `station_m` | DOUBLE | along the carriageway |
+| `side` | VARCHAR | `right`, `left`, `above` |
+| `stop_line_id` | BIGINT | the stop line that it controls, or empty |
+| `lane_ids` | BIGINT[] | the lanes that must obey it; empty: all lanes of the carriageway |
+| `osm_id` | BIGINT | the OSM node, when it is in OSM |
+| `position` | GEOMETRY | POINT Z |
+
+## signal_plan
+
+| Column | Type | Holds |
+|---|---|---|
+| `signal_plan_id` | BIGINT | `hash("{junction_id}\|{source_id}")` |
+| `junction_id` | BIGINT | |
+| `cycle_s`, `offset_s` | DOUBLE | |
+| `source_id` | VARCHAR | |
+| `method` | VARCHAR | `measured`, `city`, `default` |
+
+## signal_phase
+
+| Column | Type | Holds |
+|---|---|---|
+| `signal_phase_id` | BIGINT | `hash("{signal_plan_id}\|{phase_num}")` |
+| `signal_plan_id` | BIGINT | |
+| `phase_num` | INTEGER | |
+| `green_s`, `yellow_s`, `red_clearance_s` | DOUBLE | |
+| `movement_ids` | BIGINT[] | the movements with green in this phase |
+| `protected` | BOOLEAN | |
+| `ring` | INTEGER | |
+
+OSM has no signal timing. `duckosm-gmns` writes no rows in these two tables.
+
+## elevation_profile
+
+| Column | Type | Holds |
+|---|---|---|
+| `elevation_profile_id` | BIGINT | `hash("{carriageway_id}\|{source_id}\|{method}\|{rank}")` |
+| `carriageway_id` | BIGINT | |
+| `station_m` | DOUBLE | |
+| `z_m` | DOUBLE | the height of the road on `project.vertical_datum` |
+| `grade_pct` | DOUBLE | |
+| `source_id` | VARCHAR | the ground, or a bridge profile |
+| `outlier` | BOOLEAN | |
+
+## structure
+
+| Column | Type | Holds |
+|---|---|---|
+| `structure_id` | BIGINT | `hash("{carriageway_id}\|{rank}")` |
+| `carriageway_id` | BIGINT | |
+| `station_start_m`, `station_end_m` | DOUBLE | |
+| `kind` | VARCHAR | `bridge`, `viaduct`, `tunnel`, `building_passage`, `culvert`, … |
+| `level` | INTEGER | |
+| `clearance_m`, `width_m` | DOUBLE | |
+| `twin_structure_id` | BIGINT | the structure of the other direction |
+| `source_ref` | VARCHAR | the OSM way |
+
+## How `duckosm hdmap` fills the tables
+
+| Table | From the GMNS database | ev_status |
+|---|---|---|
+| `carriageway` | one row for each `link`. `edge_ids = [link_id]`. `reference_line`: `link.geom` in `project.crs`. `twin_carriageway_id`: the link with the same OSM way in the other direction. `shared_line`: false | `observed` |
+| `lane_section` | one section for each link, from 0 to its length | `derived` |
+| `lane` | one row for each `lane`. `role`: `bike`, `bus` from `allowed_uses`, `pocket` when the lane is shorter than its link, else `through`. `width_shape`: `constant`. Borders: the lane line (`geom_cut`, else `geom`) offset by half its width (shapely `offset_curve`, one call for all lanes). `cut_end_m`: the station of the end of `geom_cut` | width: `observed` (`width:lanes`) or `assumed`; borders: `derived` |
+| `junction` | one row for each node with lane connectors. `control`: from `node.ctrl_type`. `area`: the union of the movement areas | `derived` |
+| `turn_rule` | one row for each GMNS `movement` (all are allowed); `turn` from `movement.type` | `observed` (restrictions), `inferred` |
+| `movement` | one row for each `lane_connector`. `path`: `lane_connector.geom`. `priority`: from `movement.ctrl_type` and the road class. `conflict_movement_ids`: the movements of the junction whose areas cross | `inferred`, method `netconvert` |
+| `stop_line` | one `in` and one `out` row for each carriageway end at a junction, through the cuts of its lanes. `painted` from the `signal` rows | `derived`, method `netconvert` |
+| `island` | none | |
+| `crossing` | the GMNS `crossing` and `lane_crossing` tables | `observed` |
+| `signal` | GMNS `location` with `loc_type` `traffic_signals`, `stop`, `give_way`, and the `ctrl_type` of the movements. `speed_limit` signs: none | `observed` or `inferred` |
+| `elevation_profile` | two rows for each carriageway: the `z_from` and `z_to` of its edge (Level 2), at stations 0 and `length_m`. None on a bridge or in a tunnel | `observed` |
+| `structure` | one row for each link with `bridge` or `tunnel`, over its whole length | `observed` |
+
+The Z of the borders and the paths: linear between the two heights of the carriageway. Empty heights give Z = 0 and
+`project.vertical_datum` empty.
+
+## What each format reads
 
 ### Lanelet2
 
 | Lanelet2 | From |
 |---|---|
-| node | each point of each `boundary.geom`. Two borders with the same end point get the same node, so the router finds the next lanelet |
-| way, `type`, `subtype` | a `boundary` row: `type` = `line_type`, `subtype` = `line_subtype`, `color`. Id: `num_id` |
-| node tag `ele` | `z_start` to `z_end` along the border, when the heights are known |
-| relation `type=lanelet` | a `lanelet` row: members `left` and `right`, tags `subtype`, `location=urban`, `one_way=yes`, `speed_limit`, `duckosm:edge_id`, `duckosm:lanelet_id`. Id: `num_id` |
-| way `type=stop_line` | a `marking` of kind `stop_line` |
-| lanelet `subtype=crosswalk` | a `marking` of kind `crosswalk`: its two long sides are the borders |
-| relation `type=regulatory_element` | a `regulatory` row: `subtype` `traffic_light`, `traffic_sign` (stop, yield) or `right_of_way`; the members with their `role` |
-| map tag `duckosm:ground` | `meta.ground_id` |
+| node | each point of each border, in longitude and latitude, with `ele` from Z. Points within 1 cm are one node, so two lanes side by side share their border, and a lane and its movement share their end points |
+| way `line_thin` / `curbstone` / `virtual` | `lane.boundary_left/right` with `mark_*`: `solid`, `dashed` → `line_thin` with that `subtype`; `curb` → `curbstone`; `none` → `virtual`. The border of a movement → `virtual` |
+| relation `type=lanelet` | each `lane` (`subtype` from `role`, `speed_limit` from `posted_speed_kmh`) and each `movement` (`turn_direction` from `turn`) |
+| way `stop_line` | each `stop_line` with `painted` |
+| lanelet `subtype=crosswalk` | each `crossing` |
+| `regulatory_element` `traffic_light` | each `signal` of kind `traffic_light`: `refers` its position, `ref_line` its stop line, members the lanelets of `lane_ids` |
+| `regulatory_element` `right_of_way` | each junction with `yield` or `stop` movements: `right_of_way` the `major` movements, `yield` the others |
+| `regulatory_element` `speed_limit`, `traffic_sign` | `signal` of kind `speed_limit`, `stop`, `yield` |
+| map tag `duckosm:ground` | `project.ground_id` |
+
+### ASAM OpenDRIVE 1.7
+
+| OpenDRIVE | From |
+|---|---|
+| `road` | each `carriageway` (two twins with `shared_line` are one road). `id`: `carriageway_id` |
+| `planView` | `reference_line`, as `line` pieces |
+| `elevationProfile` | `elevation_profile` |
+| `laneSection` | each `lane_section`, at `station_start_m` |
+| `lane`, `width` | each `lane`, `id` -1, -2, … from `lane_num`. `width`: a cubic from `width_start_m`, `width_end_m`, `taper_*` |
+| `lane type` | from `role`: `driving`, `bus`, `biking`, `parking`, `shoulder`, `median` |
+| `roadMark` | `mark_right` |
+| `lane link` | `predecessor_lane_id`, `successor_lane_id` |
+| connecting road, `junction`, `laneLink` | each `movement`: one road with one lane, in the `junction` of its `junction_id` |
+| `signal`, `signalReference` | each `signal`: `s` = `station_m`, `country` from `jurisdiction`, `type` from `code` |
+| `controller` | `signal_plan` |
+| `object` crosswalk | each `crossing` |
+| `object` bridge, tunnel | `structure` |
+| `geoReference`, `userData` | `project.crs`, `project.ground_id` |
 
 ### CommonRoad
 
 | CommonRoad | From |
 |---|---|
-| `lanelet` | a `lanelet` row. `leftBound`, `rightBound`: the two `boundary` lines in `meta.utm_crs`, in metres from the center of the area, both resampled to the same number of points (a rule of the format). Id: `num_id` |
-| `lineMarking` of a border | `line_subtype`: `solid`, `dashed`; `virtual` → `no_marking` |
-| `predecessor`, `successor` | `lanelet_relation` `successor` |
-| `adjacentLeft`, `adjacentRight` (`sameDirection`) | `lanelet_relation` `left`, `right` |
-| `laneletType`, `userOneWay` | `subtype` |
-| `stopLine` | the `marking` of kind `stop_line` of the link of the lanelet |
-| `trafficLight`, `trafficSign` (stop 206, yield 205) | `regulatory` and its `refers` members |
-| `intersection`, `incoming` | a `junction`: one incoming for each link in; its successors left, straight and right from the `turn` of the connectors |
-| `location` | the center of the area in longitude and latitude |
+| `lanelet` | each `lane` and each `movement`. Left and right vertices: the two borders, resampled to the same number of points |
+| `lineMarking` | `mark_*`: `solid`, `dashed`; `curb`, `none` → `no_marking` |
+| `predecessor`, `successor` | `predecessor_lane_id`, `successor_lane_id`, and lane → movement → lane |
+| `adjacentLeft`, `adjacentRight` | lanes of one section with `lane_num` ± 1 |
+| `laneletType`, `userOneWay` | `role`, `use` |
+| `stopLine` | `stop_line` |
+| `trafficSign`, `trafficLight` | `signal` |
+| `intersection`, `incoming` | `junction`, `movement.turn` |
 
-### OpenDRIVE
+### SUMO
 
-| OpenDRIVE | From |
+| SUMO | From |
 |---|---|
-| `road` | the lanes of one link (`kind = 'lane'`, one `edge_id`). Id: `edge_id`. Reference line: the left border of the leftmost lane (`b0` or `b-1`), in `meta.utm_crs` |
-| `lane` (`id` -1, -2, …) | the lanes, in the order of `lane_num`. `width`: `lanelet.width`. `type`: from `subtype` |
-| `roadMark` | `boundary.line_subtype` of the right border of each lane; `curbstone` → `curb` |
-| `elevationProfile` | `z_start`, `z_end`, linear along the road |
-| connecting `road` | a `lanelet` of kind `connector`, one lane. Id: `num_id` |
-| `junction`, `connection`, `laneLink` | a `junction` row; one connection for each connector, with `laneLink` from the lane in to the connector lane |
-| `signal` | a `regulatory` row, at the end of the road: 1000001 (traffic light), 206 (stop), 205 (yield) |
-| `object` crosswalk | a `marking` of kind `crosswalk` |
-| `header`, `geoReference` | `meta.utm_crs`; `<userData code="ground">` from `meta.ground_id` |
+| `edge`, `lane` | `carriageway` (or `lane_section`) and `lane`. SUMO lane 0 is the rightmost: the exporter turns the order |
+| `junction`, `shape` | `junction.area` |
+| `connection`, internal lane | `movement`, with `path` |
+| `foes`, `response` | `conflict_movement_ids`, `priority` |
+| `tlLogic` | `signal_plan`, `signal_phase` |
+| crossing | `crossing` |
 
-OpenDRIVE without junctions keeps its read of the Level 2 database.
+### glTF (3D)
 
-### Lane graph, routes, surfaces
-
-| Function | Reads |
-|---|---|
-| `lane_graph` | `lanelet_relation`: `successor` rows are turns or straight on, `left` and `right` rows with `lane_change = true` are lane changes. It writes `lane_<mode>.lane_edges` into the HD map database |
-| `route_lanes` | the lane graph, and `lanelet.geom` for the route line |
-| `surfaces` | `lanelet.geom` and `width` for the lanes; the connectors of each `junction` for the junction surfaces |
+The road surface: `lane` areas, `movement` areas and `junction.area`, with Z. Islands: `island.area`. Marks:
+`mark_*` and `crossing`.
 
 ## Example queries
 
 ```sql
--- the lanelets of one road, with their borders
-SELECT l.lanelet_id, l.lane_num, l.width, lb.line_subtype AS left_line, rb.line_subtype AS right_line
-FROM driving.lanelet l
-JOIN driving.boundary lb ON lb.bound_id = l.left_bound
-JOIN driving.boundary rb ON rb.bound_id = l.right_bound
-WHERE l.edge_id = 117961209473327056
+-- the lanes of one OSM edge, with their marks
+SELECT l.lane_id, l.lane_num, l.role, l.width_start_m, l.mark_left, l.mark_right
+FROM hdmap.carriageway c JOIN hdmap.lane l USING (carriageway_id)
+WHERE list_contains(c.edge_ids, 117961209473327056)
 ORDER BY l.lane_num;
 
--- the lanes that a vehicle can change into, from one lane
-SELECT to_id, relation FROM driving.lanelet_relation
-WHERE from_id = '117961209473327056_2' AND relation IN ('left', 'right') AND lane_change;
+-- the lanes that a vehicle can go to from one lane, through a junction
+SELECT m.to_lane_id, m.turn, m.priority
+FROM hdmap.movement m JOIN hdmap.lane l ON l.lane_id = m.from_lane_id
+JOIN hdmap.carriageway c ON c.carriageway_id = l.carriageway_id
+WHERE list_contains(c.edge_ids, 117961209473327056) AND l.lane_num = 2;
 
--- the traffic lights and the lanes that obey them
-SELECT r.reg_id, m.member_id FROM driving.regulatory r
-JOIN driving.regulatory_member m USING (reg_id)
-WHERE r.kind = 'traffic_light' AND m.role = 'refers';
+-- the values that are defaults, not data
+SELECT ev_method, count(*) FROM hdmap.lane WHERE ev_status = 'assumed' GROUP BY ALL;
 
 -- one table to GeoParquet (DuckDB writes the GeoParquet metadata when spatial is loaded)
-COPY driving.lanelet TO 'monaco_lanelet.parquet' (FORMAT parquet);
+COPY hdmap.lane TO 'monaco_lane.parquet' (FORMAT parquet);
 ```
 
 ## Checks
@@ -403,23 +514,22 @@ The step stops with an error when a check fails. The tests run them on Monaco.
 
 | Check | Passes when |
 |---|---|
-| unique ids | each `num_id` is unique in its table |
-| stable ids | two builds of the same GMNS database give the same rows and ids |
-| borders exist | each `left_bound` and `right_bound` is a `boundary` row |
-| shared borders | the `right_bound` of lane `k` is the `left_bound` of the lane on its right |
-| lanelets meet | for each `successor` row, the end points of the two borders of `from_id` equal the start points of the borders of `to_id` |
-| connectors | each lane connector gives 2 `successor` rows |
-| rules | each `traffic_light` and `stop` row has one `ref_line` member and one or more `refers` members |
-| heights | no height on a link with `level <> 0` |
+| ids | each id is the hash of its content keys; each primary key is unique |
+| sections | the sections of each carriageway go from 0 to `length_m` with no gap and no overlap |
+| lane numbers | the lanes of each section are 1 to n, with no gap |
+| movements | `from_lane_id` ends at an `in` stop line of the junction; `to_lane_id` starts at an `out` stop line |
+| lanes meet movements | the end of the borders of the lane in, and the start of the borders of the movement, are less than 1 cm apart |
+| marks | the two lanes on one border have the same mark |
+| signals | each `traffic_light` has a `stop_line_id` |
+| heights | each row with `level <> 0` has no height from the ground |
 
-## Limits
+## Limits of `duckosm hdmap`
 
 | Limit | Why |
 |---|---|
-| Borders are correct to about 1 m, not to cm | they come from OSM center lines and lane widths, not from a survey |
-| Line types are a default (the [line type table](#line-types)) | OSM has few road mark tags |
-| A traffic light has no phases | OSM has no signal timing |
-| A `traffic_signals` node in the middle of a two-way road gives a rule for each direction | GMNS `location` has no `traffic_signals:direction` |
-| No heights on bridges and in tunnels | the ground is not the road there; SimReady makes the road heights |
-| Lane connectors only in `driving` | they come from SUMO's netconvert |
-| No turn arrows, no parking spaces, no road edges past the outer lane | not in the GMNS data |
+| Borders are correct to about 1 m | OSM center lines and lane widths, not a survey. SimReady uses measured kerbs |
+| One lane section for each edge; no tapers | the GMNS lanes have one width |
+| The junction paths come from netconvert | duckOSM has no junction geometry of its own |
+| No islands, no signal timing, few speed signs | not in OSM, or not in the GMNS data |
+| Road marks are mostly from a rule | OSM has few road mark tags |
+| No heights on bridges and in tunnels | the ground is not the road there |
