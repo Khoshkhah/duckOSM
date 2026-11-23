@@ -8,16 +8,20 @@ module is `duckosm.ml` ([reference](../reference/sdk/ml.md)). The notebook
 pip install "duckosm[ml]"      # torch and torch_geometric
 ```
 
-## Your code and duckOSM
+## Traditional approach vs duckOSM
 
-| Your code today | duckOSM |
-|---|---|
-| OSMnx graph → `torch_geometric.utils.from_networkx(G)` | `duckosm.ml.to_pyg(net.driving)` |
-| node ids → index, by hand | `data.node_id`, `data.edge_id`: the index of each node and arc goes back to the network |
-| one-hot of `highway`, by hand | `features=["highway"]` gives `highway=primary`, … (`data.edge_attr_names`) |
-| a line graph for edge tasks (`nx.line_graph`) | `graph="turns"`: each edge is a node, each legal turn an arc (turn restrictions in) |
-| `dgl.from_networkx(G)` | `duckosm.ml.to_dgl(net.driving)` |
-| another library | `duckosm.ml.graph_arrays(net.driving)`: the same arrays as numpy |
+| Task | Traditional approach | duckOSM |
+|---|---|---|
+| Road graph for PyTorch Geometric | OSMnx → `torch_geometric.utils.from_networkx(G)` | `duckosm.ml.to_pyg(net.driving)` (Level 2 homogenous graph) |
+| Align node & edge indices | Manual index remapping (`0..N-1`) | `data.node_id`, `data.edge_id`: indices map directly back to network |
+| Categorical feature encoding | Manual one-hot encoding (`pd.get_dummies`) | `features=["highway"]` auto-creates 0/1 columns (`data.edge_attr_names`) |
+| Edge-level tasks (line graph) | `nx.line_graph` (ignores turn restrictions) | `graph="turns"`: legal turns only, respecting turn bans & signals |
+| Junction features & elevation | Manual degree & DEM calculation | `node_features=["lon", "lat", "in_degree", "out_degree", "degree", "ele"]` |
+| Road graph for DGL | `dgl.from_networkx(G)` | `duckosm.ml.to_dgl(net.driving)` |
+| Multi-relational urban graphs | Custom ETL stitching links, lanes, signals | No `HeteroData` export; the GMNS db has the `node`, `link`, `lane`, `movement` tables to read with SQL |
+| Custom frameworks / NumPy | Manual tensor/graph array extraction | `duckosm.ml.graph_arrays(net.driving)`: NumPy arrays |
+| Multimodal transport graphs | Separate queries with disconnected nodes | `net.walking`, `net.cycling`, or `gmns_all`: shared multimodal crossing nodes |
+| Visualize predictions on map | Manual GeoPandas merge and plotting | `net.driving.map(color_by=predicted_series)` keyed directly by `edge_id` |
 
 | `graph` | A node is | An arc is | For |
 |---|---|---|---|
@@ -34,6 +38,23 @@ net.driving.map(color_by=pd.Series(predicted.detach().numpy(), index=data.edge_i
 
 The `edge_id` is the same on each rebuild. So labels joined by `edge_id` (traffic counts, speeds) stay correct after an
 OSM update.
+
+## Heterogeneous graphs from Level 3 GMNS
+
+`duckosm.ml.to_pyg()` makes a homogeneous `Data` from the Level 2 network. duckOSM has no `HeteroData` export.
+
+The GMNS db (`<area>_gmns.duckdb`) has the entities of a heterogeneous graph. You can read them with SQL and make the
+`HeteroData` yourself:
+
+| GMNS table | One row is | Joins on |
+|---|---|---|
+| `node` | a junction | `node_id` |
+| `link` | one direction of a road | `link_id` (= `edge_id`), `from_node_id`, `to_node_id` |
+| `lane` | a lane of a link | `lane_id`, `link_id` |
+| `movement` | a legal turn, with its lanes in and out | `mvmt_id`, `node_id`, `ib_link_id`, `ob_link_id` |
+| `signal_controller` | a node with traffic lights (OSM has no signal timing) | `controller_id`, `node_id` |
+
+The columns of each table are in the [GMNS tables reference](../exports/gmns_tables.md).
 
 ## duckOSM and city2graph
 

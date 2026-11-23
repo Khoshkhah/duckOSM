@@ -1,7 +1,7 @@
 # railML (experimental)
 
 `duckosm railml` writes the railways of an area as a railML 2.4 infrastructure file, with your OSM fixes, for rail
-planning tools such as OpenTrack, RailSys and Viriato.
+planning tools such as OpenTrack, RailSys and Viriato. It reads the rail ways and nodes from `raw.*` of the Level 2 db, not from the GMNS db.
 
 | Reference and format | |
 |---|---|
@@ -33,7 +33,7 @@ larger one has no raw tables.
 | `infrastructure` | `id` | all of the area |
 | `ocp` (operation control point) | `id` (`ocp_<node id>`), `name` | a station or a halt |
 | `ocp/geoCoord` | `coord` (longitude latitude), `epsgCode` 4326 | the position of the station |
-| `track` | `id`, `type` (the OSM `railway` value) | one track |
+| `track` | `id`, `type` (`mainTrack` for `rail`, `subway`, `light_rail`; else `secondaryTrack`) | one track |
 | `trackBegin`, `trackEnd` | `id`, `pos` (metres from the track start) | the two ends of a track |
 | `connection` | `id`, `ref` (the connection at the other track) | two tracks that join |
 | `bufferStop`, `openEnd` | `id` | a track end with a buffer stop, or with nothing |
@@ -46,11 +46,11 @@ The `<node id>` is the OSM node id, so you can find each item in OSM.
 
 Mac mini (Apple M6, 12 cores, 16 GB).
 
-| Area (input) | Time | Memory | Output |
+| Area (input DuckDB) | Time | Memory | Output |
 |---|---|---|---|
-| Monaco (0.7 MB) | 0.03 s | 18.6 MB | 0.1 MB |
-| Kentucky (148 MB) | 0.22 s | 394 MB | 4.8 MB |
-| France (5.1 GB) | not run: the build with the raw tables needs more disk than the Mac mini has free | | |
+| Monaco (38 MB `.duckdb`) | 0.03 s | 18.6 MB | 0.1 MB |
+| Kentucky (~1.2 GB `.duckdb`) | 0.22 s | 394 MB | 4.8 MB |
+| France (~35 GB `.duckdb`) | not run | (needs raw tables on disk) | |
 
 ## Limits
 

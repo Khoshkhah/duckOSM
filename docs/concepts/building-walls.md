@@ -48,4 +48,3 @@ The column `type_reason` tells which rule gave the type (`street`, `address`, `e
 ## How sure it is
 
 The method is a rule of thumb from the shapes and a few tags. No reference data tells which wall is the real front.
-The score, all rules and all constants: [walls in detail](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/building_walls_details.md).

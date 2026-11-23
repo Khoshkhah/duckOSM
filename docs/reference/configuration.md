@@ -62,6 +62,7 @@ Each step is on by default, except where the table says off.
 | `options.boundary_cells`, `options.boundary_cell_resolutions` | off | the H3 cells that cover the boundary |
 | `options.chains` | on | [`driving.chains`](database.md#chains): the driving edges joined where the road only continues. The SUMO export with `merge` needs it. Command line: `--no-chains` |
 | `options.clip_strategy` | `smart` with the base-map layers, else `complete_ways` | how the file is cut to the boundary: `complete_ways`, `smart` or `simple` |
+| `options.engine` | | no effect: the network step is always the Rust engine. An old config with this key still works |
 | `options.memory_limit`, `options.threads` | DuckDB's own | the memory and the threads of DuckDB |
 
 ## `clip`
@@ -96,5 +97,5 @@ elevation:
 | `viz.enabled` | off | the maps of the build, as [`duckosm viz`](cli.md#viz) |
 
 More keys: `validation.assert_*` (each check, [Check a build](../guides/check-build.md)), `multimodal.transfer_costs`
-(a cost for each direction, for example `{"walking->driving": 60}`), `viz.basemap` (a web background under the maps) and
+(a cost for each direction, for example `{"walking->driving": 60}`), `multimodal.node_costs` (a CSV or Parquet file with the cost of a change at some junctions) and `multimodal.only_listed_nodes` (allow changes only there), `viz.basemap` (a web background under the maps) and
 `options.simplify_batches` (a memory limit for one step). The template of `duckosm init-config` explains each one.

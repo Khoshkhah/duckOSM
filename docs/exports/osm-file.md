@@ -1,19 +1,26 @@
 # OSM file
 
-Level 0 of the outputs: the OSM data of your area as one `.osm.pbf` file, **with your OSM fixes in it**. Other tools
-then read the edited data: OSMnx, osm2pgsql, SUMO's OSM import, QGIS, osmium.
+Level 0 of the outputs: the OSM data of your area as one `.osm.pbf` file, **with your OSM fixes in it**, powered by **[pbfcut](https://github.com/Khoshkhah/pbfcut)**. Other tools then read the edited data: OSMnx, osm2pgsql, SUMO's OSM import, QGIS, osmium.
 
 | Reference and format | |
 |---|---|
 | Format | OpenStreetMap [PBF format](https://wiki.openstreetmap.org/wiki/PBF_Format), sorted by type, then id, with dense nodes |
+| Engine | [pbfcut](https://github.com/Khoshkhah/pbfcut): fast Rust tool for cutting to boundaries and partitioning areas into tiles |
 | Input | the [Geofabrik downloads](https://download.geofabrik.de): extracts of continents, countries and regions, updated each day |
-| Cut | [pbfcut](https://github.com/Khoshkhah/pbfcut), with osmium's `smart` rule: each way with a node inside is kept whole |
+| Cut & Partition | [pbfcut](https://github.com/Khoshkhah/pbfcut), with osmium's `smart` rule; partitions large areas into tiles for low memory |
 | Check | on Monaco, a build of the cut file gives the same tables as a build with `--fixes` of the original file ([Monaco check](#monaco-check)) |
 
 ```bash
 duckosm get "Monaco"                         # -> monaco.osm.pbf and monaco.geojson
 duckosm build --pbf monaco.osm.pbf --boundary monaco.geojson
 ```
+
+## Powered by `pbfcut`
+
+Boundary cutting and tile partitioning run on **[pbfcut](https://github.com/Khoshkhah/pbfcut)**:
+
+* **Boundary cutting:** cuts extracts to exact polygons and embeds your fixes into the `.osm.pbf`.
+* **Tile partitioning:** splits large regions into tiles so duckOSM builds whole countries in low memory.
 
 ## `duckosm get`
 

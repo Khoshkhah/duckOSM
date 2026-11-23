@@ -73,8 +73,6 @@ In the **Turn** tab, the **From** road is blue, the roads that leave the junctio
 | **Changes on the map** | show or hide your changes on the map |
 | **Build again** | build the database again with the save file; off when the database has no record of its build (build it with `duckosm build -c`). The database then records the save file, so `net.fixes` and `net.rebuild()` find it |
 
-The details of the checks and of each record: [on GitHub](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/edit_osm_data_details.md).
-
 ## The fixes file
 
 `osm_fixes.yaml` has five keys. A rule for an object that is not in the area does nothing, so one file can hold the fixes of

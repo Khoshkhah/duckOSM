@@ -1,41 +1,59 @@
 # duckOSM for automated driving users
 
-This page is for users of the CommonRoad Scenario Designer, Lanelet2, scenariogeneration and CARLA. Each table gives
-the call of your tool and the duckOSM call that does the same work. The module is `duckosm.hdmap`
-([reference](../reference/sdk/hdmap.md)). The notebook [14. HD maps](https://khoshkhah.github.io/duckOSM/book/14_hdmap.html) runs each call on
-Monaco.
+This page is for users of the CommonRoad Scenario Designer, Lanelet2, scenariogeneration, and CARLA. Each section compares standard HD map authoring with the duckOSM equivalent. The module is `duckosm.hdmap` ([reference](../reference/sdk/hdmap.md)), and the CLI command is `duckosm opendrive` ([OpenDRIVE export](../exports/opendrive.md)). The notebook [14. HD maps](https://khoshkhah.github.io/duckOSM/book/14_hdmap.html) runs each call on Monaco.
 
 ```bash
 pip install "duckosm[sim,hdmap]"     # netconvert (the lanes of GMNS) and commonroad-io
 ```
 
-All lane maps come from the lanes of the GMNS step: `net.driving.to_gmns("out/gmns.duckdb")`. So the CommonRoad map,
-the Lanelet2 map and the lane routes have the same lanes, and your lane fixes (`lanes`, `turn_lanes_*` in the fixes
-file) are in each.
+## Level 3 GMNS as the Foundation for HD Maps
+
+Lanelet2, CommonRoad and the lane graph read the **Level 3 GMNS DuckDB** network (`duckosm gmns data/<area>.duckdb -o out/gmns.duckdb`): its `lane` and `lane_connector` tables. Thus they have the same lanes, turn connectors and fixes. OpenDRIVE reads the Level 2 db for the roads only; with `--junctions` it reads the GMNS db.
+
+```bash
+# 1. Generate GMNS DuckDB with physical lane and movement tables
+duckosm gmns data/monaco.duckdb -o out/gmns.duckdb
+
+# 2. Export OpenDRIVE (.xodr) directly from the command line
+duckosm opendrive data/monaco.duckdb -o monaco.xodr
+```
 
 ## CommonRoad
 
-| CommonRoad Scenario Designer | duckOSM |
-|---|---|
-| OSM → lanelets (`crdesigner` OSM conversion) | `duckosm.hdmap.to_commonroad("out/gmns.duckdb", "monaco.xml")` |
-| `CommonRoadFileReader("monaco.xml").open()` | the same call: commonroad-io reads the file |
+CommonRoad models traffic scenarios for autonomous vehicle motion planning. The Scenario Designer (`crdesigner`) typically requires converting raw OSM files with complex manual parameter tuning.
 
-| Part of the map | From |
-|---|---|
-| a lanelet for each lane | the GMNS `lane`: its center line to the edge of the junction (`geom_cut`) and its width |
-| a lanelet for each turn through a junction | the GMNS `lane_connector` (from SUMO's netconvert) |
-| predecessor, successor | lane → connector → lane |
-| left and right neighbour | the lanes of one link, same direction |
-| lanelet type | `bus_lane`, `bicycle_lane`, else `urban` |
-| coordinates | metres east and north of the center of the area; `location` has its latitude and longitude |
+| CommonRoad Scenario Designer | duckOSM CLI / Python SDK | What duckOSM does |
+|---|---|---|
+| `crdesigner` OSM conversion | `duckosm.hdmap.to_commonroad("out/gmns.duckdb", "monaco.xml")` | Converts GMNS lanes and junction connectors into native CommonRoad XML lanelets |
+| `CommonRoadFileReader("monaco.xml").open()` | Same call with `commonroad-io` | Standard CommonRoad tools parse and simulate the resulting scenario file |
 
-The result has `ids`: the `lanelet_id`, the GMNS lane or connector id, and the `edge_id`. Join your data on the
-`edge_id`.
+### Lanelet Generation from GMNS
 
-## Lanelet2, OpenDRIVE and lane routes
+| CommonRoad lanelet element | Derived from GMNS table | Description |
+|---|---|---|
+| **Road lanelet** | GMNS `lane` | Center line clipped to junction boundaries (`geom_cut`) with physical lane width |
+| **Intersection lanelet** | GMNS `lane_connector` | The path of each lane through the junction, from SUMO's internal lanes (netconvert) |
+| **Topology (predecessor/successor)** | `movement` & `lane_connector` | Direct lane-to-connector-to-lane topological linkages |
+| **Lateral adjacencies** | `lane.lane_num` within `link_id` | Left and right lanelet neighbors for lane-change maneuvers |
+| **Lanelet type** | `lane.allowed_uses` | `bus_lane`, `bicycle_lane`, or `urban` |
+| **Coordinate frame** | Local Cartesian projection | Tangent plane in metres (east/north) from area center, with geo-reference header |
 
-| Your tool | duckOSM |
-|---|---|
-| Lanelet2 map from OSM (by hand in JOSM) | `duckosm.hdmap.to_lanelet2("out/gmns.duckdb", "monaco.osm")` |
-| `lanelet2.routing` | `duckosm.hdmap.lane_graph(gmns_db)`, `duckosm.hdmap.route_lanes(gmns_db, a, b)` |
-| scenariogeneration, CARLA's OSM import | `net.driving.to_opendrive("monaco.xodr", junctions=True)` (experimental) |
+The exported lanelet dictionary includes `ids`: mapping each `lanelet_id` to its GMNS `lane_id` / `connector_id` and the stable Level 2 `edge_id`.
+
+## Lanelet2 and OpenDRIVE
+
+| Autonomous driving tool | duckOSM Python SDK / CLI | What duckOSM does |
+|---|---|---|
+| Manual Lanelet2 drawing in JOSM | `duckosm.hdmap.to_lanelet2("out/gmns.duckdb", "monaco.osm")` | Generates Lanelet2 OSM XML with `<relation type="lanelet">`, left/right boundaries, and regulatory elements |
+| `lanelet2.routing` graph | `duckosm.hdmap.build_lane_graph(gmns_db)`<br/>`duckosm.hdmap.route_lanes(gmns_db, a, b)` | Computes lane-level shortest paths and legal lane-change sequences directly in Python |
+| scenariogeneration / CARLA OSM import | `duckosm opendrive data/monaco.duckdb -o monaco.xodr`<br/>`net.driving.to_opendrive("monaco.xodr", junctions=True)` | Exports OpenDRIVE 1.7 XML (`.xodr`) with reference lines, lane sections, and junction connection records |
+
+### Comparison: Standard HD Map Pipelines vs duckOSM
+
+| Capability | Standard HD Map Tools | duckOSM HD Maps |
+|---|---|---|
+| **Authoring effort** | Hours of manual tagging or fragile geometric converters | 100% automated from Level 2 & 3 DuckDB networks in seconds |
+| **Junction connectors** | Drawn by the tool, or by hand | The lane-to-lane paths of netconvert, for the legal turns only |
+| **Cross-format parity** | CommonRoad, Lanelet2, and OpenDRIVE diverge in lane counts | All formats share identical underlying GMNS DuckDB lane tables |
+| **Traceability to network** | Lanelet IDs are isolated and cannot join to external traffic data | Every lanelet links to `edge_id`; simulation volumes and sensor counts map directly |
+| **Continuous updates** | Re-converting OSM loses all manual fixes | Custom lane counts and turn pockets in `osm_fixes.yaml` survive data updates |

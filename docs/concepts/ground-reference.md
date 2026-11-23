@@ -61,5 +61,4 @@ Two files of one area with different ground ids do not go together: a tool that 
 | one ground in an area | each product of the area has the same ground id |
 
 Related: [The terrain of an area](terrain.md), [Add elevation](../guides/elevation.md),
-[Elevation sources](../reference/elevation-sources.md). The history and the state of each project:
-[ground reference in detail](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/ground_reference.md).
+[Elevation sources](../reference/elevation-sources.md).

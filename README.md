@@ -3,33 +3,41 @@
 </p>
 
 <p align="center">
-  <b>Turn OpenStreetMap into routable networks, map layers and GIS files.<br>
-  One Rust engine, for your computer and your browser.</b>
+  <strong>Turn OpenStreetMap into routable networks, GMNS models, and GIS layers.</strong><br>
+  One Rust engine, for your computer and your browser.
 </p>
 
 <p align="center">
   <a href="https://pypi.org/project/duckosm/"><img alt="PyPI" src="https://img.shields.io/pypi/v/duckosm"></a>
   <a href="https://github.com/Khoshkhah/duckOSM/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Khoshkhah/duckOSM/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="https://khoshkhah.github.io/duckOSM/"><img alt="Docs" src="https://img.shields.io/badge/docs-khoshkhah.github.io%2FduckOSM-17191f"></a>
+  <a href="https://khoshkhah.github.io/duckOSM/"><img alt="Docs" src="https://img.shields.io/badge/docs-online-17191f"></a>
   <img alt="Python 3.10+" src="https://img.shields.io/badge/python-3.10%2B-3776AB">
-  <img alt="License MIT" src="https://img.shields.io/badge/license-MIT-blue">
+  <a href="LICENSE"><img alt="License MIT" src="https://img.shields.io/badge/license-MIT-blue"></a>
 </p>
 
 <p align="center">
-  <a href="https://khoshkhah.github.io/duckOSM/"><b>Documentation</b></a> ·
-  <a href="https://khoshkhah.github.io/duckOSM/book/"><b>The notebook manual</b></a> ·
-  <a href="https://khoshkhah.github.io/duckosm-studio/">duckOSM Studio (browser)</a> ·
-  <a href="https://khoshkhah.github.io/duckOSM/reference/python/">Python SDK</a> ·
-  <a href="https://khoshkhah.github.io/duckOSM/reference/cli/">Command line</a>
+  <a href="https://khoshkhah.github.io/duckOSM/"><b>Documentation</b></a>
+  &nbsp;•&nbsp;
+  <a href="https://khoshkhah.github.io/duckOSM/book/"><b>Notebook&nbsp;Manual</b></a>
+  &nbsp;•&nbsp;
+  <a href="https://khoshkhah.github.io/duckosm-studio/"><b>duckOSM&nbsp;Studio</b></a>
+  &nbsp;•&nbsp;
+  <a href="https://khoshkhah.github.io/duckOSM/reference/python/"><b>Python&nbsp;SDK</b></a>
+  &nbsp;•&nbsp;
+  <a href="https://khoshkhah.github.io/duckOSM/reference/cli/"><b>CLI&nbsp;Reference</b></a>
 </p>
 
 ---
 
 ## What duckOSM is
 
-duckOSM reads an OpenStreetMap `.osm.pbf` file and makes the routable road network of an area, its map layers, and
-files for GIS, routing and traffic simulation. One Rust engine runs it all: the command line, the Python SDK and the
-browser.
+duckOSM reads an OpenStreetMap `.osm.pbf` file and builds the complete transport network of an area—from GIS layers
+and turn-by-turn routing to multi-scale GMNS models, traffic simulations, and Graph Neural Networks. One Rust engine
+runs it all: the command line, the Python SDK and the browser.
+
+It processes areas tile by tile, keeping memory low and speeds fast even for an entire country. Fix the OSM data once on
+a map: your fixes go into one YAML file and apply at build time, so every downstream table, network layer, and export
+inherits the same corrected data.
 
 <table>
 <tr>
@@ -74,8 +82,24 @@ and gives the same rows.
 <td valign="top">
 
 **Fix the OSM data once**<br>
-Edit roads, turns and buildings on a map, and every output uses your fixes
+Edit roads, turns and buildings on a map: your fixes go into one YAML file and apply at build time
 ([Edit OSM data](https://khoshkhah.github.io/duckOSM/guides/edit-osm-data/)).
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+**GMNS in DuckDB**<br>
+The open standard (General Modeling Network Specification) in DuckDB: links, lanes, and turning movements for simulation and traffic assignment
+([GMNS network](https://khoshkhah.github.io/duckOSM/exports/gmns-network/)).
+
+</td>
+<td valign="top">
+
+**Traffic simulation**<br>
+SUMO, MATSim and DTALite exports; SUMO can join the edges of a road into one (`--merge`)
+([Exports](https://khoshkhah.github.io/duckOSM/exports/)).
 
 </td>
 </tr>
@@ -83,42 +107,47 @@ Edit roads, turns and buildings on a map, and every output uses your fixes
 
 ## What duckOSM makes
 
-All outputs come from one `.osm.pbf` file, in five levels. Each level keeps the `edge_id` of the routable network.
+All outputs come from one `.osm.pbf` file, in five levels, and all take your OSM fixes. Each level keeps the `edge_id` of the routable network.
 
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/images/levels-dark.svg">
-    <img src="https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/images/levels-light.svg" alt="The five levels of duckOSM's outputs: 0 OSM file (pbfcut), 1 OSM data with no network (QuackOSM, GDAL), 2 routable network with edges, edge_id and turns (GeoPackage, networkx), 3 simulation network, macro, meso and micro (GMNS, MATSim, SUMO), 4 HD map, each lane's shape in 3D, experimental (Lanelet2, OpenDRIVE)" width="900">
+    <img src="https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/images/levels-light.svg" alt="The five levels of duckOSM's outputs: 0 OSM file (pbfcut), 1 OSM data from .osm.pbf (QuackOSM, GDAL, Geofabrik, PMTiles), 2 routable network in DuckDB (GeoPackage, networkx), 3 GMNS network in GMNS DuckDB (GMNS, MATSim, SUMO), 4 HD map with 3D lane geometry, experimental (Lanelet2, OpenDRIVE)" width="900">
   </picture>
 </p>
 
-| Level | Command |
-|---|---|
-| 0. OSM file | `duckosm get` |
-| 1. OSM data | `duckosm quack` |
-| 2. Routable network | `duckosm build`, `export-gis`, `export-graph` |
-| 3. Simulation network | `duckosm sumo`, `matsim`, `gmns` |
-| 4. HD map (experimental) | `duckosm lanelet2`, `opendrive` |
+| Level | Database / Format | Read by / Target tools | Command |
+|---|---|---|---|
+| [0. OSM file](https://khoshkhah.github.io/duckOSM/exports/osm-file/) | `.osm.pbf` (cut by `pbfcut`) | Exact boundary cut with your fixes | `duckosm get`, `duckosm cut` |
+| [1. OSM data](https://khoshkhah.github.io/duckOSM/exports/osm-data/) | `from .osm.pbf` | QuackOSM · GDAL · Geofabrik · osm2pgsql · PMTiles | `duckosm quack` |
+| [2. Routable network](https://khoshkhah.github.io/duckOSM/exports/routable-network/) | `DuckDB` | Drive, walk, bike · GeoPackage · networkx | `duckosm build`, `export-gis`, `export-graph` |
+| [3. GMNS network](https://khoshkhah.github.io/duckOSM/exports/gmns-network/) | `GMNS DuckDB` | Multi-scale (macro, meso, micro) · GMNS · MATSim · SUMO | `duckosm gmns`, `sumo`, `matsim` |
+| [4. HD map](https://khoshkhah.github.io/duckOSM/exports/hd-map/) *(experimental)* | `3D geometry` | Lane shape in 3D · Lanelet2 · OpenDRIVE | `duckosm lanelet2`, `opendrive` |
 
 ## Quick start
 
 ```bash
 pip install duckosm
 
-duckosm get "Monaco"  # -> monaco.osm.pbf, monaco.geojson
-duckosm build --pbf monaco.osm.pbf --boundary monaco.geojson --modes driving
-duckosm quack monaco.osm.pbf --gdal -o out --name monaco
+duckosm get "Monaco"                                            # -> monaco.osm.pbf, monaco.geojson
+duckosm build --pbf monaco.osm.pbf --boundary monaco.geojson    # -> Level 2 routable database (monaco.duckdb)
+duckosm gmns monaco.duckdb                                      # -> Level 3 GMNS database (monaco_gmns.duckdb)
+duckosm quack monaco.osm.pbf --gdal -o out --name monaco        # -> Level 1 GIS layers
 ```
 
 ```python
 import duckosm
 
-area = duckosm.get("Monaco")  # as duckosm get
-db = duckosm.build(pbf=area.pbf, boundary=area.boundary)  # as duckosm build
+area = duckosm.get("Monaco")
+db = duckosm.build(pbf=area.pbf, boundary=area.boundary)  # Level 2 routable database
 
-r = duckosm.route_points(db, (7.4155, 43.7285), (7.4400, 43.7480))   # (lon, lat): Fontvieille to Larvotto
-r["time_s"], r["length_m"], r["edges"]   # the fastest path, door to door, and the ordered edge_ids
-duckosm.to_gis(db, "monaco.gpkg")         # a GeoPackage for QGIS
+# Route on the turn graph
+r = duckosm.route_points(db, (7.4155, 43.7285), (7.4400, 43.7480))   # Fontvieille to Larvotto
+r["time_s"], r["length_m"], r["edges"]
+
+# Export to Level 3 GMNS or GIS
+duckosm.to_gmns(db, "monaco_gmns.duckdb")   # multi-scale GMNS network
+duckosm.to_gis(db, "monaco.gpkg")           # GeoPackage for QGIS
 ```
 
 All functions: [Python SDK](https://khoshkhah.github.io/duckOSM/reference/python/) and [Rust SDK](https://khoshkhah.github.io/duckOSM/reference/rust/).

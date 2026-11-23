@@ -46,6 +46,10 @@ duckosm [OPTIONS] [PBF]
 | `--raw` | with `--boundary`: also write `raw.*` | off |
 | `--cut-pbf`, `--cut-osm` | with `--boundary`: also write the cut area as `cut.osm.pbf` or `cut.osm` | off |
 | `--no-graph`, `--no-restrictions`, `--no-speeds`, `--no-costs`, `--no-merge-segments`, `--no-functional-types`, `--no-bus-routes`, `--no-ways-tables`, `--no-chains` | turn off one step | |
+| `--pbf-is-cut`, `--allow-skipped` | with `--config`: the PBF is already cut to the boundary; go on when the config asks for a step that this program does not have | |
+| `--no-cycling-dismount`, `--no-global-junctions`, `--no-sidewalk-inference` | turn off one rule | |
+| `--graph`, `--tile-index`, `--no-tile-index` | build `edge_graph` (the default); add or leave out the tile columns | on |
+| `--tile Z/X/Y`, `--outside-junctions FILE` | the build of one tile of [`duckosm tiles`](#tiles) | |
 | `--no-connect-paths`, `--snap-m M` | the [connection of dangling paths](../concepts/cleanup.md), and its distance | on, 10 m |
 | `--timing` | print the time of each step | |
 
@@ -67,7 +71,7 @@ duckosm tiles [OPTIONS] [REGION] [-- BUILD_OPTIONS...]
 | `--config FILE` | a config file in place of `REGION` and `--boundary` | |
 | `-o`, `--out DIR` | the output folder | |
 | `--zoom Z` | the zoom of the tiles | `8` |
-| `--memory SIZE` | the memory for the tile builds at the same time, for example `4G` | |
+| `--memory SIZE` | the memory for the tile builds at the same time, for example `4G` | `2G` |
 | `--jobs N`, `--tile-threads N` | the tiles that build at the same time, and the threads of each | the cores / 2, `2` |
 | `--keep-tiles` | keep the files of each tile | |
 | `-- BUILD_OPTIONS` | the options of the build of each tile, as for `duckosm FILE`, for example `-- --modes driving` | |
@@ -93,6 +97,7 @@ duckosm get [OPTIONS] [PLACE]
 | `--fixes FILE` | an [OSM fixes file](../guides/edit-osm-data.md#the-fixes-file): the cut file has the fixes in it | |
 | `--cache DIR` | the folder of the downloads | `$DUCKOSM_CACHE`, else `~/.cache/duckosm` |
 | `--refresh` | download the extract and the list of extracts again | the cached files |
+| `--dry-run` | print the boundary and the extract as JSON, and stop: no download and no files | |
 
 ### `cut`
 
@@ -112,8 +117,7 @@ duckosm cut [OPTIONS] --boundary FILE -o FILE REGION
 
 ### `build`
 
-Builds a network from a PBF with a config file, or cuts one from a built database. The validation, the report and the
-multimodal graph of this command are not ported to Rust yet; [`duckosm FILE`](#duckosm-file) is the build all in Rust.
+Builds a network from a PBF with a config file, or cuts one from a built database. All the steps run in Rust.
 Guide: [Build a network](../guides/build.md).
 
 ```text
@@ -216,8 +220,13 @@ duckosm quack [OPTIONS] PBF
 |---|---|---|
 | `-o`, `--out DIR` | the output folder | `.` |
 | `--name NAME` | the files are `<out>/<name>_quack.*` | `area` |
-| `-f`, `--format` | `geoparquet`, `duckdb`; with `--gdal`: `gpkg`, `geoparquet` | |
+| `-f`, `--format` | `geoparquet`, `duckdb`; with `--gdal`: `gpkg`, `geoparquet`; with `--geofabrik`: `gpkg`, `shp`, `geoparquet` | |
 | `--gdal` | the five layers of GDAL's OSM driver, in place of the QuackOSM table | |
+| `--osm2pgsql` | the four tables of osm2pgsql's `pgsql` output (`planet_osm_point`, `planet_osm_line`, `planet_osm_polygon`, `planet_osm_roads`), in place of the QuackOSM table. Not with `--gdal`, `--geofabrik` or `--pmtiles` | |
+| `--postgis CONNECTION` | with `--osm2pgsql`: write the tables into this PostGIS database | |
+| `--latlong` | with `--osm2pgsql`: the geometry in EPSG:4326, not EPSG:3857 | |
+| `--pmtiles` | Shortbread vector tiles (zoom 0 to 14) in one `<out>/<name>.pmtiles` file. Not with `--gdal` or `--geofabrik` | |
+| `--geofabrik` | the 20 layers of Geofabrik's free GIS files, in place of the QuackOSM table | |
 | `--fixes FILE` | an [OSM fixes file](../guides/edit-osm-data.md#the-fixes-file) | |
 | `--tile-zoom Z` | make the table tile by tile with the map tiles of zoom `Z`, so the memory follows a tile, not the area | |
 | `--tiles N` | tile by tile, with at most `N` nodes in a tile | |
@@ -333,7 +342,9 @@ duckosm edit [OPTIONS] DB
 
 | Option | Does | Default |
 |---|---|---|
-| `--fixes FILE` | the fixes file; if it does not exist, the first change makes it | `osm_fixes.yaml` beside the database |
+| `--load FILE` | a fixes file that the page reads into its list. The page does not write it | |
+| `--save FILE` | the fixes file that the page writes, each change at once. It can be the `--load` file. It does not need to exist | |
+| `--fixes FILE` | old name for `--load FILE --save FILE`. Not with `--load` or `--save` | |
 | `--port INTEGER` | the port of the page on 127.0.0.1 | `8790` |
 
 Build again needs the record of the build in the database (`build_config` and `build_dir` of
@@ -411,11 +422,16 @@ duckosm route-multimodal-points [OPTIONS] DB LON LAT LON LAT
 
 | Option | Command | Does | Default |
 |---|---|---|---|
-| `-m`, `--mode` | all | the mode | `driving` |
+| `-m`, `--mode` | `route`, `route-points`, `directions` | the mode | `driving` |
 | `--weight` | `route`, `route-points` | `time` (fastest) or `length` (shortest) | `time` |
 | `--pairs FILE` | `route` | many routes: one pair of edge ids on each line | |
-| `--radius M` | `route-points` | the roads that a point can join, within `M` metres | `50` |
-| `--access-kmh V` | `route-points` | the walking speed to the road | `4.5` |
+| `--batch FILE` | `route-points`, `route-multimodal`, `route-multimodal-points` | many routes: one pair on each line (`LON LAT LON LAT`, or `SRC DST` for nodes); prints a JSON list | |
+| `--schema` | `route-multimodal`, `route-multimodal-points` | the schema of the multimodal tables | `mm` |
+| `--start-mode`, `--end-mode` | `route-multimodal` | the first and the last mode of the trip | `walking` |
+| `--modes LIST` | `route-multimodal`, `route-multimodal-points` | only these modes, a comma list | |
+| `--no-enforce-sequence` | `route-multimodal`, `route-multimodal-points` | do not force the order of the modes | |
+| `--radius M` | `route-points`, `route-multimodal-points` | the roads that a point can join, within `M` metres | `50` |
+| `--access-kmh V` | `route-points`, `route-multimodal-points` | the walking speed to the road | `4.5` |
 | `ROUTE` | `directions` | a JSON file of a route, as `route` prints it; `-` reads the standard input | |
 
 ### `features-check`
@@ -507,6 +523,13 @@ duckosm gmns [OPTIONS] DB
 | `--micro-mode TEXT` | modes for `--micro`; repeat for several | `driving` |
 | `--combined` | also write `gmns_all`, one network for all modes | |
 | `--drive-side` | `right` or `left`: the side two-way lanes are drawn on | `right` |
+| `--pair-carriageways` / `--no-pair-carriageways` | place a one-way road mapped next to its opposite direction as one two-way road | on |
+| `--walk-frame` / `--no-walk-frame` | move a mapped sidewalk off the carriageway, to the kerb | off |
+| `--walk-clearance METRES` | the gap between the kerb and a footpath placed by `--walk-frame` | `0.0` |
+| `--gtfs PATH` | a GTFS feed (`.zip` or folder; repeat for several): its stops become `location` rows on the nearest link of each mode | |
+| `--gtfs-max-m METRES` | how far from a link a GTFS stop can be and still go on it | `30.0` |
+| `--csv-extensions` | keep duckOSM's extra columns in the CSV files, as user-defined fields with a `u_` prefix | |
+| `--check` | check the values of the result; exit code 1 if a check fails | |
 | `--tile-zoom Z` | make an area with nodes in two or more map tiles of zoom `Z` one tile at a time, so the memory follows a tile, not the area. `0`: the whole area at once | `9` |
 
 ### `gmns-map`
@@ -573,7 +596,7 @@ duckosm export-gis [OPTIONS] DB
 
 Reads a GeoPackage or shapefile export back through GDAL and writes an HTML page: a map of every
 layer and a check of counts, CRS and `edge_id`s. Needs geopandas. Page:
-[Check an export](../exports/gis.md#check-an-export).
+[GeoPackage, GeoParquet and shapefile](../exports/gis.md).
 
 ```text
 duckosm gis-debug [OPTIONS] EXPORT_PATH
@@ -734,3 +757,5 @@ duckosm multimodal [OPTIONS] DB
 | `--transfer-cost FLOAT` | seconds added at each change of mode | `60.0` |
 | `--pair-cost FROM->TO=SECONDS` | another cost for one direction, for example `walking->driving=120`; repeat it for more directions (the build's `multimodal.transfer_costs`) | none |
 | `--schema TEXT` | schema for the two tables | `mm` |
+| `--node-costs FILE` | a CSV or Parquet file with the cost of a change of mode at some junctions | |
+| `--only-listed-nodes` | with `--node-costs`: allow changes of mode only at those junctions | |

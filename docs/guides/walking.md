@@ -32,7 +32,7 @@ The first row that matches decides:
 |---|---|
 | `escalator` | `highway=steps` with `conveying` |
 | `steps` | `highway=steps` |
-| `sidewalk` | `footway=sidewalk`, or a road with a `sidewalk` tag (not `no` / `none` / `separate`) |
+| `sidewalk` | `footway=sidewalk`, or a road with a `sidewalk` tag (not `no` / `none` / `separate`) that is not `pedestrian`, `living_street`, `path`, `track`, `bridleway`, `corridor` or `platform` |
 | `crossing` | `footway=crossing` |
 | `footpath` | all other `highway=footway`, and all ways that no other row matches |
 | `plaza` | `highway=pedestrian` with `area=yes` |

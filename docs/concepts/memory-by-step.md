@@ -43,5 +43,4 @@ the area ([the limits](browser-native.md#speed-and-memory)).
 
 The levels, the building faces and `raw.*` do not hold a list of the whole area.
 
-What stays between steps, the network substeps and the join of `raw.*`:
-[memory in detail](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/memory_by_step_details.md).
+What stays between steps, the network substeps and the join of `raw.*` are cleaned after each stage.

@@ -56,7 +56,7 @@ Not in the file:
 Mac mini (Apple M6, 12 cores, 16 GB). 1 GB = 10⁹ bytes. The memory is the peak footprint (`/usr/bin/time -l`), and
 the disk is the peak of the output and the temporary files.
 
-| Area (input) | | duckOSM | Tilemaker 3.2.0 |
+| Area (source .osm.pbf) | | duckOSM | Tilemaker 3.2.0 |
 |---|---|---|---|
 | Monaco (0.6 MB) | time | 0.06 s | 1.5 s |
 | | memory | 0.05 GB | 1.5 GB |
@@ -66,7 +66,7 @@ the disk is the peak of the output and the temporary files.
 | | memory | 1.13 GB | 2.9 GB |
 | | file | 101 MB | 101 MB |
 | | tiles | 41 640 | 71 791 |
-| France (5.1 GB) | time | 228 s | 212 s |
+| France (5.1 GB) | time | 3 min 48 s | 3 min 32 s |
 | | memory | 2.7 GB | 3.1 GB |
 | | file | 2.95 GB | 2.91 GB |
 | | tiles | 308 154 | 623 176 |

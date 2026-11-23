@@ -24,4 +24,4 @@ duckosm.planning.to_aequilibrae(net.driving, "out/aequilibrae")
 Notebook: [13. Transport planning](https://khoshkhah.github.io/duckOSM/book/13_planning.html). Guide:
 [duckOSM for transport planning users](../../compare/for-planning-users.md).
 
-Pages: [GMNS](../../exports/gmns.md), [GMNS meso and micro](../../exports/gmns-meso-micro.md).
+Page: [GMNS (macro, meso, micro)](../../exports/gmns.md).

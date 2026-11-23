@@ -38,8 +38,7 @@ Mac mini (Apple M6, 12 cores, 16 GB), headless Chromium for the browser. By tile
 
 - **The disk is the limit, not the memory.** France with three modes needs about 35 GB of disk. It was not built: the
   Mac mini has too little free disk.
-- **One build without tiles:** France (driving) needs 8.1 GB natively, and it does not fit in the 4 GB of the browser.
+- **One build without tiles:** France (driving) needs more than 8 GB natively ([Memory at each step](memory-by-step.md)), and it does not fit in the 4 GB of the browser.
 - **The browser's files are about 1.2 times larger:** the browser compresses with Snappy, because it has no zstd.
 
-The memory of each step: [Memory at each step](memory-by-step.md). Each step in detail:
-[browser_native_steps](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/browser_native_steps.md).
+The memory of each step: [Memory at each step](memory-by-step.md).
