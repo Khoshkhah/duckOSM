@@ -19,15 +19,15 @@ duckosm matsim monaco.duckdb -m all            # all modes in one network
 Each edge becomes one directed link. A road that several modes use is one link with each mode (`modes="car,bike,walk"`),
 so a trip can change mode with no transfer links.
 
-| Link attribute | From |
-|---|---|
-| `id` | `edge_id` |
-| `from`, `to` | `source`, `target` |
-| `length` | `length_m` |
-| `freespeed` | `maxspeed_kmh` / 3.6, in m/s |
-| `permlanes` | the lanes in this direction (1 if OSM has no lane count) |
-| `capacity` | a value for each lane of the road class × `permlanes`, in vehicles an hour |
-| `modes` | `car`, `bike`, `walk` |
+| Link attribute | From duckOSM | Description & MATSim Role |
+|---|---|---|
+| `id` | `edge_id` | Unique link identifier. Matches DuckDB network tables for direct join of simulation results. |
+| `from`, `to` | `source`, `target` | Upstream and downstream topological node IDs in UTM coordinates. |
+| `length` | `length_m` | Physical length in metres. Governs free-flow travel time and QSim queue storage capacity. |
+| `freespeed` | `maxspeed_kmh` / 3.6 | Free-flow speed in m/s. Maximum travel speed on an uncontested link. |
+| `permlanes` | `lanes` per direction | Number of travel lanes (1 if omitted in OSM, or inferred from road class). |
+| `capacity` | `lane_capacity` × `permlanes` | Maximum saturation outflow (veh/h). Regulates queue discharge in MATSim's QSim. |
+| `modes` | `car`, `bike`, `walk` | Permitted modes (`modes="car,bike,walk"`). Allows multi-modal trips without transfer links. |
 
 The node coordinates are in metres, in the UTM zone of the data (`--crs` gives another). After
 [`duckosm elevation`](../guides/elevation.md), each node also has a `z`.
