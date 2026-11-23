@@ -298,4 +298,4 @@ The standard has 25 tables. duckOSM writes 12 of them.
 several modes use is one link, with all of them in `allowed_uses` (`auto,bike,walk`). The lanes and the movements
 differ by mode, so they stay in the schema of each mode.
 
-The tables `meso_*` and `micro_*`: [GMNS meso and micro](gmns-meso-micro.md).
+The tables `meso_*` and `micro_*`: [GMNS meso and micro](gmns.md#meso-and-micro-networks).

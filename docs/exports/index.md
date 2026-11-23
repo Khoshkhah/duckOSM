@@ -65,7 +65,7 @@ The multi-resolution network in the GMNS standard, from macro (links) to micro (
 | PyTorch Geometric, GNNs | [PyG HeteroData](../reference/sdk/ml.md): heterogeneous urban graph tensors | `duckosm.ml.to_pyg()` |
 | SUMO | [SUMO](sumo.md) plain XML and `.netccfg` (netconvert makes the `.net.xml`) | `duckosm sumo` |
 | MATSim, BEAM, eqasim | [MATSim](matsim.md) `network.xml`, lanes and signals | `duckosm matsim`, `matsim-lanes` |
-| DTALite, Path4GMNS | [GMNS meso and micro](gmns-meso-micro.md) | `duckosm gmns --meso --micro` |
+| DTALite, Path4GMNS | [GMNS meso and micro](gmns.md#meso-and-micro-networks) | `duckosm gmns --meso --micro` |
 | Rail planning: OpenTrack, RailSys | [railML 2.4](railml.md) | `duckosm railml` |
 
 ### 4. HD map

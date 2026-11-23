@@ -1,5 +1,7 @@
 # GMNS
 
+Part of **[3. GMNS network](gmns-network/index.md)**.
+
 `duckosm gmns` writes the network in [GMNS](https://zephyr-data-specs.github.io/GMNS/), the table format of DTALite,
 Path4GMNS and other network models, with your OSM fixes. Each GMNS `link_id` is the duckOSM `edge_id`. In driving,
 the links are the edges of `driving.edges` and also the bus-only edges of `driving.private_edges` (`access = 'bus'`:
@@ -25,11 +27,15 @@ duckosm gmns monaco.duckdb --to-csv gmns/        # also the CSV files
 
 | Network | One link is | For |
 |---|---|---|
-| macro (`duckosm gmns`) | one direction of a road, from junction to junction, with its lanes as attributes | traffic assignment and routing: DTALite, Path4GMNS |
+| macro (`duckosm gmns`) | one direction of a road, from junction to junction, with its lanes as attributes | traffic assignment and routing: DTALite, Path4GMNS, PyG HeteroData |
 | meso (`--meso`) | a road section, and a connector for each legal turn through a junction | simulators that move groups of vehicles along roads and through junctions |
 | micro (`--micro`) | a cell of about 7 m of one lane, a lane change, or a lane-to-lane turn | simulators that move each vehicle cell by cell and lane by lane |
 
-The meso and micro tables: [GMNS meso and micro](gmns-meso-micro.md).
+```bash
+duckosm gmns monaco.duckdb --meso --micro                  # -> monaco_gmns.duckdb with meso_driving, micro_driving
+duckosm gmns monaco.duckdb --meso --meso-mode cycling      # the meso network of cycling
+duckosm gmns-viz monaco_gmns.duckdb                        # draws the meso and micro networks
+```
 
 ## The tables
 
@@ -50,6 +56,26 @@ specification. The geometries and the lane connectors stay in the DuckDB file.
 Click a table for its columns, in the Reference: [GMNS tables](gmns_tables.md).
 
 ![One junction in GMNS: a node, a link with two lanes, and the movements each lane can take](../images/gmns_junction.svg)
+
+## Meso and micro networks
+
+`duckosm gmns --meso --micro` adds two networks for simulators that work below the road: road sections (meso) and lane cells (micro), with your OSM fixes. The ids come from `edge_id`, so they stay the same after each build.
+
+| Network | Table | One row is |
+|---|---|---|
+| meso | `meso_<mode>.meso_node` | the end of a road section |
+| | `meso_<mode>.meso_link` | a road section, about 6 m shorter than its road at each end, or a connector: a curve for one legal turn between two sections |
+| micro | `micro_<mode>.micro_node` | the start of a cell of a lane |
+| | `micro_<mode>.micro_link` | a cell of about 7 m, a lane change between cells side by side, or a turn through a junction |
+
+| Table | Columns |
+|---|---|
+| `meso_node` | `node_id` (`<link_id>u` start, `<link_id>d` end), `x_coord`, `y_coord`, `macro_node_id`, `macro_link_id`, `geom` |
+| `meso_link` | `link_id` (`M<link_id>` a section, `X<ib>-<ob>` a connector), `meso_type` (`normal`, `movement`), `from_node_id`, `to_node_id`, `length`, `lanes`, `free_speed`, `facility_type`, `macro_link_id`, `movement_id`, `start_ib_lane`, `end_ib_lane`, `geometry`, `geom` |
+| `micro_node` | `node_id` (`<lane_id>@<k>`), `x_coord`, `y_coord`, `lane_id`, `cell_k`, `macro_link_id`, `lane_no`, `geom` |
+| `micro_link` | `link_id` (`C…` a cell, `H…` a lane change, `X…` a turn), `cell_type` (`normal`, `lane_change`, `movement`), `from_node_id`, `to_node_id`, `length`, `width`, `lane_no`, `macro_link_id`, `meso_link_id`, `geometry`, `geom` |
+
+Lengths are in metres, and each link starts and ends at its nodes.
 
 ## Lanes from OSM tags
 
@@ -116,7 +142,8 @@ stops on a tile:
 | Lanes | each lane with its shape, and from the OSM tags its turns, its use (bus, bike) and its width | each lane with its shape |
 | Turns | the legal turns, with the OSM turn restrictions | from the geometry |
 | Complex junctions | as in OSM | merged into one |
-| Micro network | [meso and micro](gmns-meso-micro.md), new | mature |
+| Meso and micro | included, with stable `edge_id` | mature |
+| Columns that only one has | `geom`, `meso_type`, the lane ranges, `width`, `cell_k` | `zone_id`, `activity_type`, `is_boundary`, a micro `capacity` |
 
 All options: [Command line](../reference/cli.md#gmns). The design and the audit against the specification:
 [gmns_spec_conformance](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/gmns_spec_conformance.md).

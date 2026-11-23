@@ -14,7 +14,7 @@ flowchart LR
 |---|---|---|
 | DTALite, Path4GMNS | [GMNS](../gmns.md): macro tables ([all GMNS tables](../gmns_tables.md)) | `duckosm gmns` |
 | PyTorch Geometric, GNNs | [PyG HeteroData](../../reference/sdk/ml.md): heterogeneous urban graph tensors | `duckosm.ml.to_pyg()` |
-| Mesoscopic and microscopic simulators | [GMNS meso and micro](../gmns-meso-micro.md): road sections and lane cells | `duckosm gmns --meso --micro` |
+| Mesoscopic and microscopic simulators | [GMNS meso and micro](../gmns.md#meso-and-micro-networks): road sections and lane cells | `duckosm gmns --meso --micro` |
 | MATSim, BEAM, eqasim | [MATSim](../matsim.md): `network.xml`, lanes and signals | `duckosm matsim`, `matsim-lanes` |
 | SUMO | [SUMO](../sumo.md): plain XML and `.netccfg` (netconvert makes the `.net.xml`) | `duckosm sumo` |
 | Rail planning: OpenTrack, RailSys | [railML 2.4](../railml.md) | `duckosm railml` |
