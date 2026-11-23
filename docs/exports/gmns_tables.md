@@ -22,21 +22,36 @@ The column "Spec" says where a column comes from:
 
 ## The tables
 
-| Table | In the standard | One row is |
-|---|---|---|
-| [`config`](#config) | yes | the dataset: units, CRS, version |
-| [`use_definition`](#use_definition), [`use_group`](#use_group) | yes | a use of a lane (`auto`, `bus`, `bike`, `walk`), and the uses of a mode |
-| [`node`](#node) | required | a junction, or the end of a link |
-| [`link`](#link) | required | one direction of a road |
-| [`geometry`](#geometry) | yes | the shape of a link |
-| [`lane`](#lane) | yes | one lane of a link |
-| [`movement`](#movement) | yes | one legal turn at a junction |
-| [`location`](#location) | yes | a point on a link: a crossing, a sign, a stop |
-| [`curb_seg`](#curb_seg), [`signal_controller`](#signal_controller), [`zone`](#zone) | yes | on-street parking, a traffic signal, the area |
-| [`lane_connector`](#lane_connector) | ➕ | the path from one lane to the next, through a junction |
-| [`lane_check`](#lane_check) | ➕ | a lane or a turn that got no connection: data to check |
-| [`crossing`](#crossing), [`lane_crossing`](#lane_crossing) | ➕ | a pedestrian crossing painted on the road, and each lane that it covers |
-| [`link_along`](#link_along) | ➕ | a road that a footpath runs along |
+In the GMNS database (`<area>_gmns.duckdb`), **every table belongs to a network schema**. There are no tables in the default `main` schema.
+
+### The four network schemas
+
+* **`gmns_driving` (16 tables):** Driving network for cars, buses, and trucks. Includes lanes, turns, signals, curb parking, crosswalks, and intersection turn curves.
+* **`gmns_walking` (14 tables):** Pedestrian network for sidewalks, paths, and crosswalks. Tracks parallel roads via `link_along` and connects footways to road crossings.
+* **`gmns_cycling` (13 tables):** Bicycle network for cycleways and bikeable roads. Tracks parallel roads via `link_along`.
+* **`gmns_all` (5 tables):** Created with `--combined`. Merges shared streets across modes into one link with `allowed_uses = 'auto,bike,walk'`. Lanes and turns stay in the mode schemas.
+
+### Table matrix by schema
+
+| Table | In standard | `gmns_all` | `gmns_driving` | `gmns_walking` | `gmns_cycling` | One row is |
+|---|:---:|:---:|:---:|:---:|:---:|---|
+| [`link`](#link) | required | ✅ *(merged)* | ✅ | ✅ | ✅ | one direction of a road or path: length, speed, lanes, capacity |
+| [`node`](#node) | required | ✅ *(merged)* | ✅ | ✅ | ✅ | a junction or endpoint (`x_coord`, `y_coord`, `ctrl_type`) |
+| [`config`](#config) | yes | ✅ | ✅ | ✅ | ✅ | dataset metadata: units, CRS, version |
+| [`use_definition`](#use_definition) | yes | ✅ | ✅ | ✅ | ✅ | a use of a lane (`auto`, `bus`, `bike`, `walk`) |
+| [`use_group`](#use_group) | yes | ✅ | ✅ | ✅ | ✅ | the uses of a mode |
+| [`geometry`](#geometry) | yes | — *(in link)* | ✅ | ✅ | ✅ | the spatial shape of a link |
+| [`lane`](#lane) | yes | — | ✅ | ✅ | ✅ | one lane: use, width, and turns |
+| [`movement`](#movement) | yes | — | ✅ | ✅ | ✅ | one legal turn at a junction |
+| [`location`](#location) | yes | — | ✅ | ✅ | ✅ | a point on a link: crossing, sign, stop |
+| [`signal_controller`](#signal_controller) | yes | — | ✅ | ✅ | ✅ | traffic signal controller at an intersection |
+| [`zone`](#zone) | yes | — | ✅ | ✅ | ✅ | study area boundary polygon |
+| [`curb_seg`](#curb_seg) | yes | — | ✅ | ✅ | ✅ | on-street parking and curb segments |
+| [`lane_connector`](#lane_connector) | ➕ | — | ✅ | ✅ | — | path through a junction (driving) or footway join (walking) |
+| [`crossing`](#crossing) | ➕ | — | ✅ | — | — | pedestrian crossing painted on a roadway |
+| [`lane_crossing`](#lane_crossing) | ➕ | — | ✅ | — | — | specific vehicular road lanes crossed by a crossing |
+| [`link_along`](#link_along) | ➕ | — | ✅ *(ref)* | ✅ | ✅ | footpath or cycle track running parallel to a road |
+| [`lane_check`](#lane_check) | ➕ | — | optional | — | — | diagnostic log of unmapped lane arrows or disconnected turns |
 
 ## config
 

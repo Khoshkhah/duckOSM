@@ -118,7 +118,7 @@ lane that buses can use (`<edge_id>_<index>`), and 15 m long. `lines` has the re
 
 Mac mini (Apple M6, 12 cores, 16 GB). The plain XML only (`--no-netconvert`).
 
-| Area (input) | Time | Memory | Output |
+| Area (source .osm.pbf) | Time | Memory | Output |
 |---|---|---|---|
 | Kentucky (148 MB) | 11 s | 2.6 GB | 1.4 GB |
 | France (5.1 GB) | not run: the Mac mini has too little free disk | | |

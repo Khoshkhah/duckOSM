@@ -54,7 +54,7 @@ rules as the [QuackOSM table](../concepts/quackosm.md#osm-fixes). Geofabrik's fi
 
 Mac mini (Apple M6, 12 cores, 16 GB).
 
-| | Monaco (0.7 MB) | Kentucky (148 MB) |
+| | Monaco (0.7 MB `.osm.pbf`) | Kentucky (148 MB `.osm.pbf`) |
 |---|---|---|
 | Time, GeoPackage | 0.06 s | 5.9 s |
 | Time, all three formats from one read | 0.09 s | 11.3 s |

@@ -33,7 +33,7 @@ duckosm export-gis monaco.duckdb -f shp          # -> monaco_gis/
 
 Mac mini (Apple M6, 12 cores, 16 GB). France is the driving network only.
 
-| Area (input) | Format | Time | Memory | Output |
+| Area (source .osm.pbf) | Format | Time | Memory | Output |
 |---|---|---|---|---|
 | Kentucky (148 MB) | GeoPackage | 14 s | 663 MB | 843 MB |
 | | GeoParquet | 0.33 s | 2.1 GB | 386 MB |

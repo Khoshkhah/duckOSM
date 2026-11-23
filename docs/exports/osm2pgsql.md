@@ -58,7 +58,7 @@ new lines.
 
 Mac mini (Apple M6, 12 cores, 16 GB), PostgreSQL 18 with PostGIS 3.7.
 
-| Area (input) | | osm2pgsql 2.3.1 | duckOSM into PostGIS | duckOSM to GeoParquet |
+| Area (source .osm.pbf) | | osm2pgsql 2.3.1 | duckOSM into PostGIS | duckOSM to GeoParquet |
 |---|---|---|---|---|
 | Monaco (0.6 MB) | Time | 0.25 s | 0.25 s | **0.09 s** |
 | | Memory | 29 MB | 52 MB | 62 MB |

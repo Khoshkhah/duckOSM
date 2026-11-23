@@ -39,7 +39,7 @@ Routing needs the turn graph, because only it knows the turn restrictions.
 
 Mac mini (Apple M6, 12 cores, 16 GB).
 
-| Area (input) | Output | Time | Memory | Output size |
+| Area (source .osm.pbf) | Output | Time | Memory | Output size |
 |---|---|---|---|---|
 | Kentucky (148 MB) | `export-graph` (GraphML) | 13 s | 2.9 GB | 1.9 GB |
 | | `to_networkx()` | 16 s | 5.6 GB | |

@@ -61,7 +61,7 @@ Each layer has the same columns:
 
 Mac mini (Apple M6, 12 cores, 16 GB). The time of the whole build (driving) with the layers.
 
-| Area (input) | Time | Memory | Output |
+| Area (source .osm.pbf) | Time | Memory | Output |
 |---|---|---|---|
 | Monaco (0.7 MB) | 0.27 s | 134 MB | 13.6 MB |
 | Kentucky (148 MB) | 44 s | 3.7 GB | 2.8 GB |
