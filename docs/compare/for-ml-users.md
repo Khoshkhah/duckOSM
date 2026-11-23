@@ -37,7 +37,37 @@ OSM update.
 
 ## Heterogeneous graphs from Level 3 GMNS
 
-While Level 2 exports homogenous turn and junction graphs, Level 3 GMNS DuckDB (`<area>_gmns.duckdb`) provides the full multi-relational urban topology: intersections (`node`), road sections (`link`), physical lanes (`lane`), turning connections (`movement`), and signals (`signal_controller`). In graph learning, these map directly to heterogeneous graph models (`HeteroData` in PyTorch Geometric) for lane-level speed forecasting, signal control RL, and spatial network embeddings.
+While Level 2 exports homogenous turn and junction graphs (`Data` in PyTorch Geometric), Level 3 GMNS DuckDB (`<area>_gmns.duckdb`) provides the full multi-relational urban topology as **`HeteroData`**:
+
+| GMNS Table | `HeteroData` Entity | Features |
+|---|---|---|
+| `link` | `data['road'].x` | `length`, `free_speed`, `lanes`, `capacity`, `facility_type` |
+| `lane` | `data['lane'].x` | `width`, `allowed_uses`, `turn_arrow` |
+| `node` | `data['intersection'].x` | `lon`, `lat`, `degree`, `ctrl_type` |
+| `signal_controller` | `data['signal'].x` | `cycle_time`, `phase_count` |
+
+Edges connect different entity types using specific relations:
+
+```python
+from torch_geometric.data import HeteroData
+import torch
+
+data = HeteroData()
+
+# Node feature matrices: each entity type keeps its own columns
+data['road'].x = torch.tensor(...)          # links: length, speed, lanes, facility_type
+data['lane'].x = torch.tensor(...)          # physical lanes: width, allowed_uses, turn arrow
+data['intersection'].x = torch.tensor(...)  # nodes: coordinates, in/out degrees, control type
+data['signal'].x = torch.tensor(...)        # signal controllers: cycle time, phases
+
+# Edge indices: relations connecting different entity types
+data['road', 'movement', 'road'].edge_index = ...     # legal road-to-road turns
+data['lane', 'part_of', 'road'].edge_index = ...      # lane-to-road membership
+data['lane', 'to_lane', 'lane'].edge_index = ...      # lane-to-lane turning arcs
+data['signal', 'controls', 'road'].edge_index = ...   # signalized intersection controls
+```
+
+This multi-relational structure allows relational GNN architectures (such as `RGCNConv` or `HGTConv`) to model lane-level friction, queue spillover, and intelligent signal coordination. See [Chapter 15 of the notebook manual](https://khoshkhah.github.io/duckOSM/book/15_ml.html).
 
 ## duckOSM and city2graph
 

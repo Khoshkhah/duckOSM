@@ -72,6 +72,15 @@ To preserve complete multimodal routing and allow `gmns_all` to seamlessly union
 
 See the complete table matrix and column definitions in **[GMNS tables](gmns_tables.md)**.
 
+### Urban AI and Graph Neural Networks (`HeteroData`)
+
+In addition to traditional transport planning (Path4GMNS, DTALite) and simulation (SUMO, MATSim), GMNS DuckDB tables translate directly into PyTorch Geometric **`HeteroData`** for modern Graph Neural Networks:
+
+* **Entity node types:** `road` (`link`), `lane` (`lane`), `intersection` (`node`), and `signal` (`signal_controller`).
+* **Multi-relational message passing:** Connects lanes to their parent links (`part_of`), tracks lane-to-lane turning transitions (`to_lane`), and links signal controllers to controlled links (`controls`).
+
+Unlike flat road graphs, this allows relational GNNs (RGCN, HGT) to model lane-level friction, bus-lane spillover, and intelligent traffic light reinforcement learning. See [Chapter 15 of the notebook manual](https://khoshkhah.github.io/duckOSM/book/15_ml.html) and [duckOSM for Graph ML users](../compare/for-ml-users.md).
+
 ![One junction in GMNS: a node, a link with two lanes, and the movements each lane can take](../images/gmns_junction.svg)
 
 ## Meso and micro networks
