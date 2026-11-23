@@ -18,7 +18,7 @@ pip install "duckosm[ml]"      # torch and torch_geometric
 | Edge-level tasks (line graph) | `nx.line_graph` (ignores turn restrictions) | `graph="turns"`: legal turns only, respecting turn bans & signals |
 | Junction features & elevation | Manual degree & DEM calculation | `node_features=["lon", "lat", "in_degree", "out_degree", "degree", "ele"]` |
 | Road graph for DGL | `dgl.from_networkx(G)` | `duckosm.ml.to_dgl(net.driving)` |
-| Multi-relational urban graphs | Custom ETL stitching links, lanes, signals | Level 3 GMNS DuckDB: direct mapping to `HeteroData` across 3 tiers |
+| Multi-relational urban graphs | Custom ETL stitching links, lanes, signals | No `HeteroData` export; the GMNS db has the `node`, `link`, `lane`, `movement` tables to read with SQL |
 | Custom frameworks / NumPy | Manual tensor/graph array extraction | `duckosm.ml.graph_arrays(net.driving)`: zero-copy NumPy arrays |
 | Multimodal transport graphs | Separate queries with disconnected nodes | `net.walking`, `net.cycling`, or `gmns_all`: shared multimodal crossing nodes |
 | Visualize predictions on map | Manual GeoPandas merge and plotting | `net.driving.map(color_by=predicted_series)` keyed directly by `edge_id` |
@@ -41,62 +41,20 @@ OSM update.
 
 ## Heterogeneous graphs from Level 3 GMNS
 
-While Level 2 exports homogenous turn and junction graphs (`Data` in PyTorch Geometric), Level 3 GMNS DuckDB (`<area>_gmns.duckdb`) structures urban space into a **three-tier hierarchy** represented as **`HeteroData`**:
+`duckosm.ml.to_pyg()` makes a homogeneous `Data` from the Level 2 network. duckOSM has no `HeteroData` export.
 
-```mermaid
-flowchart TD
-  subgraph Tier1 ["1. Macro Tier · Intersections & Corridors"]
-    Node["Intersection (node)<br/>Coordinates · Degree · Control Type"]
-    Link["Road Link (link)<br/>Length · Free Speed · Lanes · Capacity"]
-  end
+The GMNS db (`<area>_gmns.duckdb`) has the entities of a heterogeneous graph. You can read them with SQL and make the
+`HeteroData` yourself:
 
-  subgraph Tier2 ["2. Meso Tier · Physical Lanes"]
-    Lane["Physical Lane (lane)<br/>Width · Allowed Uses · Turn Arrow"]
-  end
+| GMNS table | One row is | Joins on |
+|---|---|---|
+| `node` | a junction | `node_id` |
+| `link` | one direction of a road | `link_id` (= `edge_id`), `from_node_id`, `to_node_id` |
+| `lane` | a lane of a link | `lane_id`, `link_id` |
+| `movement` | a legal turn, with its lanes in and out | `mvmt_id`, `node_id`, `ib_link_id`, `ob_link_id` |
+| `signal_controller` | a node with traffic lights (OSM has no signal timing) | `controller_id`, `node_id` |
 
-  subgraph Tier3 ["3. Micro & Control Tier · Movements & Timing"]
-    Movement["Turn Movement (movement)<br/>Lane-to-Lane Turn Arc · Legal Rules"]
-    Signal["Signal Controller (signal_controller)<br/>Cycle Time · Phases · Offsets"]
-  end
-
-  %% Hierarchical & Relational Connections
-  Link -->|"starts_at / ends_at"| Node
-  Lane -->|"part_of"| Link
-  Lane -->|"turns_into"| Movement
-  Movement -->|"leads_to"| Lane
-  Signal -->|"controls"| Movement
-  Signal -->|"installed_at"| Node
-```
-
-| Hierarchy Tier | GMNS Table | `HeteroData` Entity | Features | Role in GNN |
-|---|---|---|---|---|
-| **Macro** | `link` | `data['road'].x` | `length`, `free_speed`, `lanes`, `capacity` | Corridor-level traffic assignment & speed estimation |
-| **Macro** | `node` | `data['intersection'].x` | `lon`, `lat`, `degree`, `ctrl_type` | Network topology & routing decisions |
-| **Meso** | `lane` | `data['lane'].x` | `width`, `allowed_uses`, `turn_arrow` | Lateral lane changes & bus-lane spillover |
-| **Micro/Control** | `signal_controller` | `data['signal'].x` | `cycle_time`, `phase_count` | Signal timing optimization & queue control RL |
-| **Micro/Control** | `movement` | `data['movement']` | `turning_angle`, `curve_length` | Lane-to-lane turning friction & delay |
-
-```python
-from torch_geometric.data import HeteroData
-import torch
-
-data = HeteroData()
-
-# Node feature matrices: each entity type keeps its own columns
-data['road'].x = torch.tensor(...)          # links: length, speed, lanes, facility_type
-data['lane'].x = torch.tensor(...)          # physical lanes: width, allowed_uses, turn arrow
-data['intersection'].x = torch.tensor(...)  # nodes: coordinates, in/out degrees, control type
-data['signal'].x = torch.tensor(...)        # signal controllers: cycle time, phases
-
-# Edge indices: relations connecting different entity types
-data['lane', 'part_of', 'road'].edge_index = ...            # lane-to-road containment
-data['road', 'starts_at', 'intersection'].edge_index = ...  # topological junction connection
-data['lane', 'turns_into', 'movement'].edge_index = ...     # lane-to-movement transition
-data['movement', 'leads_to', 'lane'].edge_index = ...       # movement-to-exit-lane connection
-data['signal', 'controls', 'movement'].edge_index = ...     # signal phase regulation
-```
-
-This multi-relational structure allows relational GNN architectures (such as `RGCNConv` or `HGTConv`) to model lane-level friction, queue spillover, and intelligent signal coordination. See [Chapter 15 of the notebook manual](https://khoshkhah.github.io/duckOSM/book/15_ml.html).
+The columns of each table are in the [GMNS tables reference](../exports/gmns_tables.md).
 
 ## duckOSM and city2graph
 

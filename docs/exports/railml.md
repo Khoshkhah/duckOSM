@@ -1,7 +1,7 @@
 # railML (experimental)
 
 `duckosm railml` writes the railways of an area as a railML 2.4 infrastructure file, with your OSM fixes, for rail
-planning tools such as OpenTrack, RailSys and Viriato. Rail tracks, switches, and signals map to the Level 3 GMNS infrastructure hierarchy.
+planning tools such as OpenTrack, RailSys and Viriato. It reads the rail ways and nodes from `raw.*` of the Level 2 db, not from the GMNS db.
 
 | Reference and format | |
 |---|---|

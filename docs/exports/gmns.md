@@ -31,7 +31,7 @@ duckosm gmns monaco.duckdb --to-csv gmns/        # also exports standard GMNS CS
 
 | Network | One link is | For |
 |---|---|---|
-| macro (`duckosm gmns`) | one direction of a road, from junction to junction, with its lanes as attributes | traffic assignment and routing: DTALite, Path4GMNS, PyG HeteroData |
+| macro (`duckosm gmns`) | one direction of a road, from junction to junction, with its lanes as attributes | traffic assignment and routing: DTALite, Path4GMNS |
 | meso (`--meso`) | a road section, and a connector for each legal turn through a junction | simulators that move groups of vehicles along roads and through junctions |
 | micro (`--micro`) | a cell of about 7 m of one lane, a lane change, or a lane-to-lane turn | simulators that move each vehicle cell by cell and lane by lane |
 
@@ -45,15 +45,13 @@ duckosm gmns-viz monaco_gmns.duckdb                        # draws the meso and 
 
 In `<area>_gmns.duckdb`, **every table belongs to a network schema** (the default `main` schema is empty). GMNS is dedicated purely to transport networks, unlike Level 2 (`<area>.duckdb`) which also stores GIS layers (`features`) and raw OSM tags (`raw`).
 
-### Multimodal integrity and continuous road chains
+### One link for each edge
 
-In duckOSM, roads are cut at pedestrian crossings and cycle paths so that walking and cycling networks connect directly to vehicular roadways at exact, shared `node_id`s.
+duckOSM cuts roads where a footpath or a cycleway crosses them. Thus the walking, cycling and driving networks meet at the same `node_id`.
 
-To preserve complete multimodal routing and allow `gmns_all` to seamlessly union all modes on shared IDs:
+Each `gmns_<mode>.link` is one Level 2 edge: `link_id` = `edge_id`. GMNS does not merge links. Thus each crossing node stays in each mode, and `gmns_all` can join the modes on `link_id`.
 
-* **Unmerged links by default (`link_id = edge_id`):** `gmns_<mode>.link` maintains 1:1 parity with Level 2 `edge_id`. Every crossing node remains present across modes, ensuring park-and-ride, walk-to-car, and transit transfers never lose their physical connection points.
-* **`chain_id` column on `link`:** Each vehicular link carries its `chain_id` to indicate which continuous roadway corridor it belongs to.
-* **`gmns_driving.chains` table:** Contains the consolidated road corridors between true intersections (mirroring Level 2's `driving.chains`). Single-mode vehicular simulators (such as SUMO with `--merge`) and macro traffic assignment models can read this table directly to eliminate artificial mid-block crossing delays without sacrificing the multimodal graph.
+To get one road section between two junctions, use Level 2 [`driving.chains`](../reference/database.md#chains). SUMO `--merge` reads that table.
 
 ### Macro schemas (`duckosm gmns`)
 
@@ -71,15 +69,6 @@ To preserve complete multimodal routing and allow `gmns_all` to seamlessly union
 * **In CSV (`--to-csv`):** Exports the standard specification tables with WKT text geometries (`geometry`), ready for DTALite and Path4GMNS.
 
 See the complete table matrix and column definitions in **[GMNS tables](gmns_tables.md)**.
-
-### Urban AI and Graph Neural Networks (`HeteroData`)
-
-In addition to traditional transport planning (Path4GMNS, DTALite) and simulation (SUMO, MATSim), GMNS DuckDB tables translate directly into PyTorch Geometric **`HeteroData`** for modern Graph Neural Networks:
-
-* **Entity node types:** `road` (`link`), `lane` (`lane`), `intersection` (`node`), and `signal` (`signal_controller`).
-* **Multi-relational message passing:** Connects lanes to their parent links (`part_of`), tracks lane-to-lane turning transitions (`to_lane`), and links signal controllers to controlled links (`controls`).
-
-Unlike flat road graphs, this allows relational GNNs (RGCN, HGT) to model lane-level friction, bus-lane spillover, and intelligent traffic light reinforcement learning. See [Chapter 15 of the notebook manual](https://khoshkhah.github.io/duckOSM/book/15_ml.html) and [duckOSM for Graph ML users](../compare/for-ml-users.md).
 
 ![One junction in GMNS: a node, a link with two lanes, and the movements each lane can take](../images/gmns_junction.svg)
 

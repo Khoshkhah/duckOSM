@@ -57,14 +57,13 @@ The routable network of each mode: edges with their `edge_id`, nodes, and the le
 
 ### 3. GMNS network
 
-The multi-resolution network in the GMNS standard, from macro (links) to micro (lanes, movements, and cells). Level 3 GMNS DuckDB (`<area>_gmns.duckdb`) is the common interchange foundation for downstream traffic simulation (SUMO, MATSim), rail infrastructure (railML), and Graph Neural Networks (PyG HeteroData).
+The multi-resolution network in the GMNS standard, from macro (links) to micro (lanes, movements, and cells), with the simulation exports. `matsim-lanes` and the HD map exports read the GMNS db (`<area>_gmns.duckdb`). SUMO, MATSim `network.xml` and railML read the Level 2 db.
 
 | Read by | Export | Command |
 |---|---|---|
 | DTALite, Path4GMNS | [GMNS](gmns.md) tables: macro | `duckosm gmns` |
-| PyTorch Geometric, GNNs | [PyG HeteroData](../reference/sdk/ml.md): heterogeneous urban graph tensors from GMNS | `duckosm.ml.to_pyg()` |
 | SUMO | [SUMO](sumo.md) plain XML and `.netccfg` (netconvert makes the `.net.xml`) | `duckosm sumo` |
-| MATSim, BEAM, eqasim | [MATSim](matsim.md) `network.xml`, lanes and signals from GMNS | `duckosm matsim`, `matsim-lanes` |
+| MATSim, BEAM, eqasim | [MATSim](matsim.md) `network.xml` (Level 2 db); lanes and signals (GMNS db) | `duckosm matsim`, `matsim-lanes` |
 | DTALite, Path4GMNS | [GMNS meso and micro](gmns.md#meso-and-micro-networks) | `duckosm gmns --meso --micro` |
 | Rail planning: OpenTrack, RailSys | [railML 2.4](railml.md) rail topology | `duckosm railml` |
 
@@ -88,10 +87,10 @@ joins on the exported network too.
 
 ## Two starting points
 
-Most exports read the database `duckosm build` writes (`monaco.duckdb`). The lane-level and simulation exports read the **GMNS database** (`monaco_gmns.duckdb`) produced by `duckosm gmns`:
+Most exports read the database `duckosm build` writes (`monaco.duckdb`). The lane-level exports read the **GMNS database** (`monaco_gmns.duckdb`) that `duckosm gmns` makes:
 
-* **`monaco.duckdb` (Level 2):** powers GIS formats, networkx / rustworkx, and routing on `edge_graph`.
-* **`monaco_gmns.duckdb` (Level 3 & 4):** powers GMNS, PyTorch Geometric GNNs, SUMO, MATSim, and 3D lane models (Lanelet2, OpenDRIVE).
+* **`monaco.duckdb` (Level 2):** GIS formats, networkx / rustworkx, PyTorch Geometric and DGL, routing on `edge_graph`, SUMO, MATSim `network.xml`, railML and OpenDRIVE.
+* **`monaco_gmns.duckdb` (Level 3 and 4):** the GMNS CSV tables, MATSim lanes and signals (`matsim-lanes`), Lanelet2, CommonRoad, the lane graph and OpenDRIVE junctions (`opendrive --junctions`).
 
 See each level page below for its dedicated export diagram and details.
 

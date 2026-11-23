@@ -19,7 +19,7 @@ duckosm sumo monaco.duckdb --netconvert --join-junctions    # merges nearby comp
 
 ## What goes in
 
-SUMO network files are compiled from the Level 3 GMNS multi-resolution schema: junction topology (`node`), road links (`link`), physical lanes (`lane`), turning movements with restrictions (`movement`), and signal groups (`signal_controller`).
+`duckosm sumo` reads the Level 2 network (`<area>.duckdb`), not the GMNS db. The direction is the opposite: `duckosm gmns` runs this export and netconvert to get the lane connectors of `gmns_driving`.
 
 | SUMO item | From duckOSM |
 |---|---|
@@ -41,7 +41,6 @@ Multimodal routing splits roads at path crossings and cycleways so pedestrian an
 
 * **Edge IDs:** Merged edges receive a `chain_id`. Original duckOSM edge IDs are preserved in `<param key="edge_ids">` (and mapped in `duckosm.sim.edge_map`). Unmerged edges retain their `edge_id`.
 * **Rules preserved:** Chains never cross traffic signals, stop signs, or turn restrictions.
-* **Multimodal preservation:** While SUMO merges driving corridors for simulation performance, GMNS preserves the underlying 1:1 `edge_id` links in `gmns_all` so walking, cycling, and driving continue to share exact physical crossing nodes.
 * **Scope:** Driving network only (not compatible with `--join-junctions`).
 
 ### Signal timing and bus stops

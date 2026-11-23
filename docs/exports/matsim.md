@@ -35,7 +35,7 @@ The node coordinates are in metres, in the UTM zone of the data (`--crs` gives a
 ## Lanes and signals
 
 `network.xml` alone has no turns: MATSim lets a car take each link at a junction, banned turns too. For the legal turns,
-generate lanes and signals directly from the Level 3 GMNS DuckDB database (`<area>_gmns.duckdb`):
+make the lanes and signals files from the GMNS db (`<area>_gmns.duckdb`). `network.xml` comes from the Level 2 db:
 
 ```bash
 duckosm gmns monaco.duckdb                     # creates monaco_gmns.duckdb with lanes and turns
