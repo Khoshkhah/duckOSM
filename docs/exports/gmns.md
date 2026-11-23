@@ -72,7 +72,7 @@ it turns red, and the lanes that its turns lead into turn green.
 
 ## Speed and memory
 
-An area with nodes in two or more map tiles (zoom 9, `--tile-zoom`) is made one tile at a time, with a band of 2 km
+An area with nodes in two or more map tiles (zoom 8, the tiles of `duckosm tiles`; `--tile-zoom`) is made one tile at a time, with a band of 2 km
 around the tile. The memory is that of the largest tile, not of the area
 ([gmns_by_tiles](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/gmns_by_tiles.md)). Driving, with
 netconvert. Memory: the program and netconvert together.
@@ -81,8 +81,9 @@ netconvert. Memory: the program and netconvert together.
 |---|---|---|---|---|
 | Monaco (0.7 MB), all modes | Mac mini (M6, 16 GB) | 0.79 s | 145 MB | 8.4 MB |
 | Kentucky (148 MB), whole area (before) | Mac mini (M6, 16 GB) | 1085 s | 25.9 GB | 6.2 GB |
-| Kentucky (148 MB), 49 tiles | WSL (20 cores, 23 GB) | 1406 s | 5.0 GB | 5.9 GB |
-| Île-de-France (duckOSM db 2.2 GB), 15 tiles | WSL (20 cores, 23 GB) | 1373 s | 8.5 GB | 2.6 GB |
+| Kentucky (148 MB), 18 tiles (zoom 8, the default) | WSL (20 cores, 23 GB) | 1828 s | 9.0 GB | 5.6 GB |
+| Kentucky (148 MB), 49 tiles (zoom 9) | WSL (20 cores, 23 GB) | 1406 s | 5.0 GB | 5.9 GB |
+| Île-de-France (duckOSM db 2.2 GB), 15 tiles (zoom 9) | WSL (20 cores, 23 GB) | 1373 s | 8.5 GB | 2.6 GB |
 | France (5.1 GB) | | not run: the GMNS db (about 150 GB) does not fit on the disk | | |
 
 Île-de-France stands for the densest part of France: Paris is one tile (9/259/176, 734 s, 1.3 million movements).
@@ -95,15 +96,16 @@ Kentucky by tiles takes more time than the whole area on the Mac mini (1406 s ag
 | The copy of the source and the merge of each tile | 145 s (10 %) |
 | The GMNS steps of the 49 tiles, with netconvert on each tile. The roads of the band of 2 km are done in two tiles or more | 1259 s; the part of the band is not measured |
 
-A smaller zoom (`--tile-zoom 8`) gives fewer tiles and less band, for more memory. It is not measured.
+Zoom 8 uses more memory than zoom 9 (Kentucky: 9.0 GB against 5.0 GB), because a tile is larger. It is the default
+because it is the tiling of `duckosm tiles`: all steps use one tiling. `--tile-zoom 9` or `10` gives less memory.
 
-Known limit: netconvert stops with a crash (exit 245) on the Kentucky tile 9/134/197: version 1.28 on Linux, and versions
-1.27 and 1.28 on macOS (Apple silicon). netconvert 1.27 on Linux has no problem with the same input files. If netconvert
-stops on a tile:
+On the GMNS db of Kentucky (zoom 8, WSL): `duckosm lanelet2` 175 s, 8.9 GB, 9.8 GB file; `duckosm opendrive
+--junctions` 64 s, 2.1 GB, 8.0 GB file.
 
-- On Linux, use SUMO 1.27: `pip install "eclipse-sumo==1.27.*" "sumo-data==1.27.*"`.
-- Use other tiles: `--tile-zoom 10` gives netconvert other input. Kentucky at zoom 10 runs to the end on macOS (150
-  tiles, 747 s, 3.9 GB).
+Known limit: the netconvert of the eclipse-sumo package for macOS (1.27 and 1.28, Apple silicon) stops with a crash
+(exit 245) in "Computing node shapes" on large tiles of Kentucky (zoom 8 and 9). netconvert 1.27 on Linux builds the
+same input files. netconvert 1.28 on Linux also stops on the Kentucky tile 9/134/197: on Linux, use SUMO 1.27
+(`pip install "eclipse-sumo==1.27.*" "sumo-data==1.27.*"`).
 
 ## duckOSM and osm2gmns
 

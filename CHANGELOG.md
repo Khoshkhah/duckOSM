@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **`duckosm gmns` by tiles uses zoom 8 by default** (before: 9), the tiles of `duckosm tiles`: all steps use one
+  tiling. Kentucky (driving, with netconvert, WSL): 18 tiles, 1828 s, 9.0 GB, before 49 tiles, 1406 s, 5.0 GB.
+  `--tile-zoom 9` gives the old tiles. The netconvert of eclipse-sumo for macOS (1.27, 1.28) stops with a crash on large
+  Kentucky tiles; Linux builds them (`docs/exports/gmns.md`).
 - **`duckosm.hdmap.surfaces(gmns_db)`: the road surfaces as polygons.** It gives two GeoDataFrames: one polygon for each
   lane (its line to the edge of the junction, with the lane width) and one for each junction (the union of its lane
   connectors). DuckDB makes the polygons in the UTM zone of the area. Monaco: 3,318 lanes and 1,727 junctions.

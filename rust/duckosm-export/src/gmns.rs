@@ -108,8 +108,9 @@ pub struct ModeSummary {
     pub counts: Vec<(&'static str, i64)>,
 }
 
-/// The default zoom of GMNS by tiles (`duckosm gmns --tile-zoom`).
-pub const TILE_ZOOM: u8 = 9;
+/// The default zoom of GMNS by tiles (`duckosm gmns --tile-zoom`): 8, the tiles of `duckosm tiles` (one tiling for all
+/// steps).
+pub const TILE_ZOOM: u8 = 8;
 
 /// The options of `to_gmns` (the options of `duckosm gmns`).
 #[derive(Clone)]

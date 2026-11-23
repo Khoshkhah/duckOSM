@@ -8,8 +8,8 @@ Mac mini, more than 15 GB on WSL. Now an area with nodes in two or more map tile
 
 ## The steps of one tile
 
-The tiles are the map tiles of `cut`, `quack --tile-zoom` and the build by tiles (`pbfcut::tiles::Tile`), zoom 9 by
-default (`duckosm gmns --tile-zoom`, 0: the whole area at once).
+The tiles are the map tiles of `cut`, `quack --tile-zoom` and the build by tiles (`pbfcut::tiles::Tile`), zoom 8 by
+default (since 2026-11-23; before: 9) (`duckosm gmns --tile-zoom`, 0: the whole area at once).
 
 | Step | What it does |
 |---|---|
