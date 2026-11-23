@@ -51,3 +51,5 @@ Both are networks of lanes, from the same GMNS lanes and turns. They differ in t
 
 Where OSM has no `turn:lanes` (most roads), any lane can take any legal turn. So a route can turn from a lane that a
 real driver leaves first. Use it for planning, not for lane-accurate control.
+
+Planned: this output will read the [HD map database](../reference/hdmap-database.md). That gives the turns and the lane changes from one table, with the road marks that allow a lane change.

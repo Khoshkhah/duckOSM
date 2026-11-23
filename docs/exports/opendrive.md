@@ -56,3 +56,5 @@ each run of lanes, so the file has more connecting roads.
 | A connecting road has one lane, joined to the rightmost lane | not made yet |
 | A connecting road ends about 2 m from its road, sometimes more. A strict simulator can report it | not fixed yet |
 | No road type, speed limit, markings, signals or banking | not made yet |
+
+Planned: this output will read the [HD map database](../reference/hdmap-database.md). That gives the lane widths, one lane for each turn lane, road marks, signals and heights with junctions.

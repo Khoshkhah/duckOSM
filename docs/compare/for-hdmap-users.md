@@ -39,3 +39,9 @@ The result has `ids`: the `lanelet_id`, the GMNS lane or connector id, and the `
 | Lanelet2 map from OSM (by hand in JOSM) | `duckosm.hdmap.to_lanelet2("out/gmns.duckdb", "monaco.osm")` |
 | `lanelet2.routing` | `duckosm.hdmap.lane_graph(gmns_db)`, `duckosm.hdmap.route_lanes(gmns_db, a, b)` |
 | scenariogeneration, CARLA's OSM import | `net.driving.to_opendrive("monaco.xodr", junctions=True)` (experimental) |
+
+## Planned: one HD map database
+
+`duckosm hdmap` will write one [HD map database](../reference/hdmap-database.md) with the lanes, their borders in 3D,
+the junction paths, the stop lines, the signals and the road marks. The CommonRoad, Lanelet2 and OpenDRIVE files will
+all come from it, so they have the same lanes and the same ids. The code does not exist yet.

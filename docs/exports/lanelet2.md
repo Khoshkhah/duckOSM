@@ -46,3 +46,5 @@ go down with the tiles. France can need more than 16 GB.
 | The borders are correct to about 1 m, not to cm | they come from OSM center lines and lane widths, not from a survey |
 | The `lanelet2` router cannot route from one lanelet to the next | most lanelets touch where roads meet, but do not share both end points |
 | No lane-change neighbours, traffic lights or stop lines | not made yet |
+
+Planned: this output will read the [HD map database](../reference/hdmap-database.md). That gives the shared borders and the end points that the `lanelet2` router needs, the stop lines, the traffic lights and the road marks.

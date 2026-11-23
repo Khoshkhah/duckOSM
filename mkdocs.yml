@@ -99,6 +99,7 @@ plugins:
           - exports/lanelet2.md
           - exports/railml.md
           - exports/lane-routing.md
+          - reference/hdmap-database.md
         Concepts:
           - concepts/build.md
           - concepts/terrain.md
@@ -176,6 +177,7 @@ nav:
           - railML: exports/railml.md
       - 4. HD map:
           - exports/lanes/index.md
+          - HD map database (planned): reference/hdmap-database.md
           - Lane-level routing: exports/lane-routing.md
           - Lanelet2: exports/lanelet2.md
           - OpenDRIVE: exports/opendrive.md
@@ -224,5 +226,6 @@ nav:
       - The boundary file: reference/boundary.md
       - Database schema: reference/database.md
       - GMNS tables: exports/gmns_tables.md
+      - HD map database (planned): reference/hdmap-database.md
       - Base-map layers: reference/features.md
       - Elevation sources: reference/elevation-sources.md

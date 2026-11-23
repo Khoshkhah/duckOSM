@@ -10,7 +10,7 @@ Every `duckosm` command and its options. `duckosm <command> --help` prints the s
 | [Query and inspect](#query-and-inspect) | `info`, `way` |
 | [Maps, pages and routing](#maps-and-routing) | `viz`, `levels`, `levels-edit`, `edit`, `studio`, `ask`, `bus`, `route-map`, `route`, `route-points`, `directions`, `route-multimodal`, `route-multimodal-points`, `features-check` |
 | [Exports](#exports) | `sumo`, `sumo-map`, `matsim`, `matsim-lanes`, `gmns`, `gmns-map`, `gmns-viz`, `export-gis`, `gis-debug`, `export-graph` |
-| [Experimental and lane-level](#experimental-and-lane-level) | `opendrive`, `lanelet2`, `railml`, `lane-graph`, `route-lanes` |
+| [Experimental and lane-level](#experimental-and-lane-level) | `opendrive`, `lanelet2`, `railml`, `lane-graph`, `route-lanes`, `hdmap` (planned) |
 | [Enrich a built database](#enrich-a-built-database) | `elevation`, `admin`, `multimodal` |
 
 `DB` is a built duckOSM database; `GMNS_DB` is a database written by [`gmns`](#gmns). Commands that
@@ -676,6 +676,25 @@ duckosm route-lanes [OPTIONS] GMNS_DB FROM_LANE TO_LANE
 | `-m`, `--mode TEXT` | the GMNS mode | `driving` |
 | `-o`, `--out TEXT` | also write the route as GeoJSON | |
 | `--json` | print the route as JSON: `lanes`, `cost`, `maneuvers`, `geometry` (WKT) | |
+
+### `hdmap` (planned)
+
+Writes the [HD map database](hdmap-database.md) (`<area>_hdmap.duckdb`) from a GMNS database. The code does not exist
+yet.
+
+```text
+duckosm hdmap [OPTIONS] GMNS_DB
+```
+
+| Option | Does | Default |
+|---|---|---|
+| `--out PATH` | the HD map database | `<area>_hdmap.duckdb`, next to the GMNS database |
+| `-m`, `--mode TEXT` | the GMNS mode; repeat for several | `driving` |
+| `--source PATH` | the Level 2 database: the ground and the heights | none: no heights |
+| `--crs TEXT` | the metric CRS | UTM zone of the data |
+| `--default-width M` | the width of a lane with no width | `3.25` |
+| `--bridge-grade G` | the grade of a bridge deck from its landings | `0.05` |
+| `--clearance M` | the free height over or under a crossed road | `5.0` |
 
 ## Enrich a built database
 

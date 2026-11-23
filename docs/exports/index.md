@@ -71,6 +71,9 @@ Each lane with its own shape and its connections, for driving simulators and aut
 
 OpenDRIVE, Lanelet2, railML and the lane graph are **experimental**: tested for structure, not yet loaded in the target tools.
 
+Planned: the HD map outputs will read one [HD map database](../reference/hdmap-database.md) (`duckosm hdmap`, made
+from the GMNS database), so that the files agree.
+
 ## The same id everywhere
 
 Each network export keeps the **`edge_id`** as the id in the target format: the SUMO edge id, the MATSim link id, the GMNS
@@ -95,6 +98,7 @@ flowchart LR
   gmns --> xodrj["opendrive --junctions"]
   gmns --> ll2["lanelet2"]
   gmns --> lg["lane-graph, route-lanes"]
+  gmns -.-> hd[("monaco_hdmap.duckdb<br/>duckosm hdmap (planned)")]
 ```
 
 ## Coordinates
