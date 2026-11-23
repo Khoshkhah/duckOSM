@@ -2,6 +2,9 @@
 //!
 //! Each edge is one directed link (`edge_id` is the link id). The node coordinates are in a projected CRS (default: the
 //! UTM zone of the data). More than one mode: one link for each `edge_id`, with the modes of all its rows.
+//!
+//! The input is a duckOSM db (`<mode>.edges`) or a GMNS db (`gmns_<mode>.link`, `link_id` = `edge_id`):
+//! docs/design/sim_from_gmns.md. From GMNS, the bus-only links are in the network too (mode `bus`).
 
 use crate::stream::each_chunk;
 use crate::{data_utm_crs, has_table, open, quoteattr, Out, Result};
@@ -43,20 +46,32 @@ fn matsim_mode(m: &str) -> &str {
     }
 }
 
-/// The MATSim modes of the duckOSM modes, in the order car, bike, walk.
+/// The MATSim modes of the duckOSM modes, in the order car, bike, walk. A mode can be a comma list (the `allowed_uses` of a
+/// GMNS bus-only link: `bus,bike`).
 fn modes_str(modes: &BTreeSet<&str>) -> String {
     let order = |m: &str| ["car", "bike", "walk"].iter().position(|x| *x == m).unwrap_or(99);
-    let mut v: Vec<&str> = modes.iter().map(|m| matsim_mode(m)).collect();
+    let mut v: Vec<&str> = modes.iter().flat_map(|m| m.split(',')).map(|m| matsim_mode(m.trim())).collect();
     v.sort_by_key(|m| order(m));
     v.dedup();
     v.join(",")
 }
 
+/// Is `con` a GMNS db: `gmns_<mode>.link` and no `<mode>.edges`?
+pub fn is_gmns(con: &Connection) -> Result<bool> {
+    let (mut edges, mut links) = (false, false);
+    for m in MODES {
+        edges |= has_table(con, m, "edges")?;
+        links |= has_table(con, &format!("gmns_{m}"), "link")?;
+    }
+    Ok(links && !edges)
+}
+
 /// `mode`: one mode, `all`, or a comma list. The modes that are asked for, in the order driving, cycling, walking.
-fn resolve_modes(con: &Connection, mode: &str) -> Result<Vec<&'static str>> {
+fn resolve_modes(con: &Connection, mode: &str, gmns: bool) -> Result<Vec<&'static str>> {
     let mut present = Vec::new();
     for m in MODES {
-        if has_table(con, m, "edges")? {
+        let here = if gmns { has_table(con, &format!("gmns_{m}"), "link")? } else { has_table(con, m, "edges")? };
+        if here {
             present.push(m);
         }
     }
@@ -93,6 +108,8 @@ struct Row {
     spd: Option<f64>,
     length: Option<f64>,
     cost: Option<f64>,
+    /// GMNS `link.capacity` (vehicles/hour/lane); None: the class value of `hw`
+    cap: Option<f64>,
 }
 
 fn pos(v: Option<f64>) -> Option<f64> {
@@ -114,7 +131,7 @@ fn single_link(r: &Row) -> Link {
         tgt: r.tgt,
         length,
         freespeed,
-        capacity: capacity(norm_hw(r.hw.as_deref())) * permlanes as f64,
+        capacity: pos(r.cap).unwrap_or_else(|| capacity(norm_hw(r.hw.as_deref()))) * permlanes as f64,
         permlanes,
         modes: modes_str(&BTreeSet::from([r.mode.as_str()])),
     }
@@ -143,7 +160,7 @@ fn multi_link(rs: &[Row]) -> Link {
         tgt: rs[0].tgt,
         length,
         freespeed,
-        capacity: capacity(norm_hw(hw)) * permlanes as f64,
+        capacity: drow.and_then(|d| pos(d.cap)).unwrap_or_else(|| capacity(norm_hw(hw))) * permlanes as f64,
         permlanes,
         modes: modes_str(&modes),
     }
@@ -163,12 +180,15 @@ pub struct Summary {
 /// The nodes are the nodes of the links, in the order of their ids, in the CRS `crs` (default: the UTM zone of the data).
 pub fn to_matsim(db: &Path, out: &Path, mode: &str, crs: Option<&str>, gz: bool) -> Result<Summary> {
     let con = open(db)?;
-    let modes = resolve_modes(&con, mode)?;
+    let gmns = is_gmns(&con)?;
+    let modes = resolve_modes(&con, mode, gmns)?;
+    // the tables of a mode: duckOSM's, or GMNS's
+    let nodes_of = |m: &str| if gmns { format!("gmns_{m}.node") } else { format!("{m}.nodes") };
     let crs = match crs {
         Some(c) => c.to_string(),
-        None => data_utm_crs(&con, &format!("{}.nodes", modes[0]), "geom")?,
+        None => data_utm_crs(&con, &nodes_of(modes[0]), "geom")?,
     };
-    let union = |cols: &str, filter: &str| modes.iter().map(|m| format!("SELECT {cols} FROM {m}.nodes{filter}")).collect::<Vec<_>>().join(" UNION ");
+    let union = |cols: &str, filter: &str| modes.iter().map(|m| format!("SELECT {cols} FROM {}{filter}", nodes_of(m))).collect::<Vec<_>>().join(" UNION ");
     // the nodes with coordinates in `crs`; a node of more than one mode has one place
     let xy = format!(
         "SELECT node_id, first(x) AS x, first(y) AS y FROM (SELECT node_id, ST_X(t) AS x, ST_Y(t) AS y FROM \
@@ -181,11 +201,25 @@ pub fn to_matsim(db: &Path, out: &Path, mode: &str, crs: Option<&str>, gz: bool)
         .iter()
         .enumerate()
         .map(|(i, m)| {
-            format!(
-                "SELECT {i} * 1099511627776 + rowid AS k, '{m}' AS mode, edge_id, source, target, highway, lanes::BIGINT AS lanes, \
-                 maxspeed_kmh::DOUBLE AS spd, length_m::DOUBLE AS len, cost_s::DOUBLE AS cost FROM {m}.edges \
-                 WHERE source IS NOT NULL AND target IS NOT NULL"
-            )
+            if gmns {
+                // a driving link that cars cannot use (a bus-only link): its own uses (`bus`, `bus,bike`) are its modes
+                let mode = if *m == "driving" {
+                    "CASE WHEN allowed_uses IS NULL OR allowed_uses LIKE '%auto%' THEN 'driving' ELSE allowed_uses END".to_string()
+                } else {
+                    format!("'{m}'")
+                };
+                format!(
+                    "SELECT {i} * 1099511627776 + rowid AS k, {mode} AS mode, link_id AS edge_id, from_node_id AS source, to_node_id AS target, \
+                     facility_type AS highway, lanes::BIGINT AS lanes, free_speed::DOUBLE AS spd, length::DOUBLE AS len, NULL::DOUBLE AS cost, \
+                     capacity::DOUBLE AS cap FROM gmns_{m}.link WHERE from_node_id IS NOT NULL AND to_node_id IS NOT NULL"
+                )
+            } else {
+                format!(
+                    "SELECT {i} * 1099511627776 + rowid AS k, '{m}' AS mode, edge_id, source, target, highway, lanes::BIGINT AS lanes, \
+                     maxspeed_kmh::DOUBLE AS spd, length_m::DOUBLE AS len, cost_s::DOUBLE AS cost, NULL::DOUBLE AS cap FROM {m}.edges \
+                     WHERE source IS NOT NULL AND target IS NOT NULL"
+                )
+            }
         })
         .collect::<Vec<_>>()
         .join(" UNION ALL ");
@@ -206,16 +240,20 @@ pub fn to_matsim(db: &Path, out: &Path, mode: &str, crs: Option<&str>, gz: bool)
         );
         (format!("SELECT f.fk, r.* FROM r JOIN ({first}) f USING (edge_id) ORDER BY f.fk, r.k"), format!("SELECT source, target FROM ({first})"))
     };
+    let (ele_schema, ele_table, ele_col) = if gmns { (format!("gmns_{}", modes[0]), "node", "z_coord") } else { (modes[0].to_string(), "nodes", "ele") };
     let have_ele: i64 = con
         .query_row(
-            "SELECT count(*) FROM duckdb_columns() WHERE schema_name = ? AND table_name = 'nodes' AND column_name = 'ele'",
-            [modes[0]],
+            "SELECT count(*) FROM duckdb_columns() WHERE schema_name = ? AND table_name = ? AND column_name = ?",
+            [ele_schema.as_str(), ele_table, ele_col],
             |r| r.get(0),
         )
         .map_err(|e| e.to_string())?;
-    // nodes.ele: only when `duckosm elevation` added it
+    // nodes.ele (GMNS: node.z_coord): only when `duckosm elevation` added it
     let ele = if have_ele > 0 {
-        format!("SELECT node_id, first(ele) AS ele FROM ({}) GROUP BY node_id", union("node_id, ele::DOUBLE AS ele", " WHERE ele IS NOT NULL"))
+        format!(
+            "SELECT node_id, first(ele) AS ele FROM ({}) GROUP BY node_id",
+            union(&format!("node_id, {ele_col}::DOUBLE AS ele"), &format!(" WHERE {ele_col} IS NOT NULL"))
+        )
     } else {
         "SELECT NULL::BIGINT AS node_id, NULL::DOUBLE AS ele WHERE false".into()
     };
@@ -277,6 +315,7 @@ pub fn to_matsim(db: &Path, out: &Path, mode: &str, crs: Option<&str>, gz: bool)
                 spd: c.f64(8, i),
                 length: c.f64(9, i),
                 cost: c.f64(10, i),
+                cap: c.f64(11, i),
             };
             if modes.len() == 1 {
                 put_link(&mut o, single_link(&r))?;

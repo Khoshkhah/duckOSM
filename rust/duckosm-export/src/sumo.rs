@@ -13,7 +13,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 /// The default options of netconvert (`DEFAULT_NETCFG`): the ids and the topology of duckOSM stay as they are.
-const DEFAULT_NETCFG: [(&str, &str); 6] = [
+pub(crate) const DEFAULT_NETCFG: [(&str, &str); 6] = [
     ("proj.utm", "true"),
     ("geometry.remove", "false"),
     ("junctions.join", "false"),
@@ -51,7 +51,7 @@ const NODE_TYPES: [&str; 3] = ["traffic_light", "allway_stop", "priority_stop"];
 
 /// The signal programs that netconvert built (the `<tlLogic>` elements of the .net.xml) as a .tll.xml, as `_write_tll`; the number
 /// (none: no file).
-fn write_tll(net: &Path, path: &Path) -> Result<usize> {
+pub(crate) fn write_tll(net: &Path, path: &Path) -> Result<usize> {
     let (mut out, mut n, mut inside) = (String::new(), 0, false);
     crate::each_line(net, |l| {
         let t = l.trim_start();
@@ -238,21 +238,21 @@ fn shape(wkt: Option<&str>) -> Option<String> {
 }
 
 #[derive(Clone)]
-struct Edge {
-    id: i64,
-    src: i64,
-    tgt: i64,
-    hw: Option<String>,
-    name: Option<String>,
-    lanes: Option<i64>,
-    spd: Option<f64>,
-    length: Option<f64>,
-    wkt: Option<String>,
+pub(crate) struct Edge {
+    pub(crate) id: i64,
+    pub(crate) src: i64,
+    pub(crate) tgt: i64,
+    pub(crate) hw: Option<String>,
+    pub(crate) name: Option<String>,
+    pub(crate) lanes: Option<i64>,
+    pub(crate) spd: Option<f64>,
+    pub(crate) length: Option<f64>,
+    pub(crate) wkt: Option<String>,
 }
 
 /// The `<edge>` element of one edge, with its `<lane>`s: `from`, `to` (a joined node has a new name), `both` (the reverse edge
 /// is there), `lanes` (use, width) left to right, `extra` (attributes that GMNS sets).
-fn edge_xml(r: &Edge, from: &str, to: &str, both: bool, lanes: Option<&[(String, f64)]>, extra: Option<&Vec<(String, String)>>, mode: &str) -> String {
+pub(crate) fn edge_xml(r: &Edge, from: &str, to: &str, both: bool, lanes: Option<&[(String, f64)]>, extra: Option<&Vec<(String, String)>>, mode: &str) -> String {
     let path_mode = mode == "walking" || mode == "cycling";
     let mut a = vec![format!("id=\"{}\"", r.id), format!("from=\"{from}\""), format!("to=\"{to}\""), format!("priority=\"{}\"", priority(r.hw.as_deref()))];
     if let Some(l) = lanes {
@@ -349,7 +349,7 @@ pub(crate) fn find_netconvert() -> Result<(PathBuf, Option<PathBuf>)> {
     Err("netconvert not found. Install SUMO (system package) or `pip install duckosm[sumo]` (with its environment active), or set SUMO_HOME, or run with --no-netconvert to write only the plain XML".into())
 }
 
-fn rel(p: &Path, base: &Path) -> String {
+pub(crate) fn rel(p: &Path, base: &Path) -> String {
     // the files are in the folder of the config: their names
     p.strip_prefix(base).unwrap_or(p).display().to_string()
 }
@@ -642,6 +642,17 @@ fn split_lone_lanes(got: Vec<(i64, Vec<(i64, i64, i64)>)>, profile: &HashMap<i64
 #[allow(clippy::too_many_arguments)]
 pub fn to_sumo_with(db: &Path, out_dir: &Path, mode: &str, net_name: &str, connections: bool, config: Option<&Path>, netconvert: bool, o: &SumoOptions) -> Result<Summary> {
     let con = open(db)?;
+    // a GMNS db: its own lanes and lane connections (docs/design/sim_from_gmns.md)
+    if crate::matsim::is_gmns(&con)? {
+        if o.merge || o.bus_edges || o.lanes.is_some() || !o.edge_attrs.is_empty() {
+            return Err("a GMNS db: no --merge (its links are the network that GMNS describes)".into());
+        }
+        if o.config.iter().any(|(k, v)| k == "junctions.join" && v.eq_ignore_ascii_case("true")) {
+            return Err("a GMNS db: no --join-junctions (its lanes and connections are for the nodes that GMNS has)".into());
+        }
+        drop(con);
+        return crate::sumo_gmns::to_sumo_gmns(db, out_dir, mode, net_name, connections, config, netconvert);
+    }
     let chains = match o.merge {
         true if mode != "driving" => return Err(format!("merge: only the driving network has chains, not {mode}")),
         true => Some(crate::sumo_merge::Chains::read(&con, mode)?),
