@@ -40,7 +40,9 @@ pub fn chain_id(ids: &[i64]) -> i64 {
 
 /// The chains of `edges`, each one its edges in driving order. Every edge is in one chain. Edge `a` joins edge `b` (`b`
 /// comes after `a`) only at a node where:
-/// - the mode's edges go only to `a`'s source and `b`'s target (one in and one out, or two in and two out on a two-way road);
+/// - the mode's edges go only to `a`'s source and `b`'s target (one in and one out, or two in and two out on a two-way road:
+///   then each of the two other ends has one edge in and one edge out, so a road beside it between the same nodes is not
+///   taken for its other direction);
 /// - `a` and `b` have the same `key`;
 /// - the node is not in `stop_nodes` (a traffic light or a stop sign);
 /// - the turn `a` → `b` is in `turns` (the mode's legal turns), and not in `keep_turns` (a turn with a rule);
@@ -77,6 +79,17 @@ pub fn chains(
         // one in and one out, or two in and two out: always the same two other ends
         if ends.len() != 2 || ends.contains(n) {
             continue;
+        }
+        // two in and two out: a two-way road, each other end once in and once out. Two edges out to one node (and two in from
+        // two nodes) is not one road: it is a road and another road beside it, between the same two nodes
+        if i_n.len() == 2 {
+            let mut from: Vec<i64> = i_n.iter().map(|&i| edges[i].source).collect();
+            let mut to: Vec<i64> = o_n.iter().map(|&o| edges[o].target).collect();
+            from.sort_unstable();
+            to.sort_unstable();
+            if from != to || from[0] == from[1] {
+                continue;
+            }
         }
         for &i in i_n {
             let a = &edges[i];
@@ -165,6 +178,15 @@ mod tests {
                     .map(move |b| (a.id, b.id))
             })
             .collect()
+    }
+
+    #[test]
+    fn parallel_road_is_not_the_other_direction() {
+        // Monaco, node 6482583607 = 2: 10 (from 1) and 20 (from 3) come in; 11 and 21 both go out to 3 (a road and a service
+        // road beside it). Not a two-way road: 10 must not join 11, so the turn 20 -> 11 is not inside a chain.
+        let es = vec![e(10, 1, 2, "k"), e(20, 3, 2, "s"), e(11, 2, 3, "k"), e(21, 2, 3, "s")];
+        let c = chains(&es, &all_turns(&es), &HashSet::new(), &HashSet::new(), &HashSet::new());
+        assert!(c.iter().all(|c| c.len() == 1), "{c:?}");
     }
 
     #[test]
