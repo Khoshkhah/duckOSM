@@ -50,8 +50,8 @@ OPENING = {
     "Lanelet2 map, a lane graph and an OpenDRIVE file.",
     "15_ml": "A road network is a graph, and duckOSM gives it in two forms: junctions joined by roads, and roads joined "
     "by legal turns. In this chapter, you make both graphs of Monaco for networkx, rustworkx and PyTorch Geometric, and "
-    "train a small graph neural network that predicts the speed limit of each road. Each prediction goes back to its "
-    "road by its `edge_id`.",
+    "train graph neural networks for speed limits, signalized junctions, and semi-supervised traffic flow imputation. "
+    "Each prediction goes back to its road by its `edge_id`.",
 }
 IMG = "https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/docs/notebooks/images"
 COLAB = "https://colab.research.google.com/github/Khoshkhah/duckOSM/blob/main/docs/notebooks/01_area_to_network.ipynb"
