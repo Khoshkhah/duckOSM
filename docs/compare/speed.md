@@ -81,9 +81,9 @@ Measured on the same test environment (Apple M6, 12 cores, 16 GB RAM). France be
 
 ---
 
-## Technical Notes and Scaling Architecture
+## Technical Notes
 
-- **Sub-Linear Memory Scaling via Tiles:** For country-scale datasets (such as France), `duckosm tiles` partitions the input PBF into map tiles of zoom 8 using [pbfcut](https://github.com/Khoshkhah/pbfcut), processes each tile independently in parallel workers, and merges the resulting DuckDB tables. Peak memory remains bounded under 2 GB on native builds regardless of total national area.
-- **Direct DuckDB File Streaming:** Downstream export utilities (`export-gis`, `matsim`, `sumo`) stream rows directly from DuckDB query iterators into compressed output streams (such as `.xml.gz` or `.parquet`), completely avoiding intermediate in-memory graph allocations.
-- **In-Browser WebAssembly:** The browser engine compiles the exact same Rust core and DuckDB-Wasm engine to WebAssembly, coordinating threads via Web Workers and `SharedArrayBuffer`. Stated memory figures represent the peak linear WebAssembly memory allocation across all active workers.
-- **Continuous 64-Bit ID Stability:** High-throughput partitioning and corridor contraction (`--merge`) preserve topological integrity: every node, link, lane, and connector carries deterministic 64-bit persistent IDs (`edge_id`, `node_id`, `chain_id`), guaranteeing full trace parity across multi-resolution outputs.
+- **Bounded memory (`duckosm tiles`):** Cuts large areas into zoom-8 tiles with [pbfcut](https://github.com/Khoshkhah/pbfcut); native memory stays under 2 GB RAM regardless of country size.
+- **Direct file streaming:** Simulation and GIS exports (`matsim`, `sumo`, `export-gis`) stream rows straight from DuckDB to compressed files without buffering graphs in memory.
+- **In-browser WebAssembly:** Runs the exact same Rust and DuckDB core in threaded Wasm workers (`SharedArrayBuffer`). Memory reflects total allocated linear Wasm heap.
+- **Persistent 64-bit IDs:** Partitioning and corridor contraction (`--merge`) maintain strict topological integrity with deterministic 64-bit IDs (`edge_id`, `node_id`, `chain_id`).
