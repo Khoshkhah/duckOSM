@@ -1,151 +1,96 @@
 # SUMO
 
-`duckosm sumo` writes a network for [SUMO](https://eclipse.dev/sumo/), with your OSM fixes. Each SUMO edge id is the
-duckOSM `edge_id`.
+`duckosm sumo` writes a simulation network for [SUMO](https://eclipse.dev/sumo/) with your OSM fixes. Each SUMO edge preserves the duckOSM `edge_id`.
 
 | Reference and format | |
 |---|---|
-| Format | SUMO [plain XML](https://sumo.dlr.de/docs/Networks/PlainXML.html) (`.nod.xml`, `.edg.xml`, `.con.xml`), the bus stops (`.add.xml`) and the netconvert config (`.netccfg`). netconvert makes the [SUMO network](https://sumo.dlr.de/docs/Networks/SUMO_Road_Networks.html) `.net.xml` from them |
+| Format | SUMO [plain XML](https://sumo.dlr.de/docs/Networks/PlainXML.html) (`.nod.xml`, `.edg.xml`, `.con.xml`), bus stops (`.add.xml`), and netconvert config (`.netccfg`). netconvert compiles them into `.net.xml` |
 | Reference tool | SUMO's [netconvert](https://sumo.dlr.de/docs/netconvert.html) |
-| Check | netconvert reads the plain XML and keeps each edge id and each connection. [How each output is checked](../concepts/checks.md) |
+| Check | netconvert compiles the plain XML, preserving all edge IDs and turning connections ([Validation](../concepts/checks.md)) |
 
 ```bash
-pip install "duckosm[sumo]"                      # adds SUMO's netconvert
-duckosm sumo monaco.duckdb                       # -> sumo/monaco.{nod,edg,con,add}.xml and sumo/monaco.netccfg
-netconvert -c sumo/monaco.netccfg                # -> sumo/monaco.net.xml
-duckosm sumo monaco.duckdb --netconvert          # duckOSM runs netconvert: also monaco.net.xml and monaco.tll.xml
-duckosm sumo monaco.duckdb --netconvert --join-junctions   # netconvert joins the junctions that are near each other
-duckosm sumo monaco.duckdb --netconvert --merge  # one SUMO edge for each chain of driving.chains
+pip install "duckosm[sumo]"                                 # adds SUMO's netconvert
+duckosm sumo monaco.duckdb                                  # -> sumo/monaco.{nod,edg,con,add}.xml and .netccfg
+netconvert -c sumo/monaco.netccfg                           # -> sumo/monaco.net.xml
+duckosm sumo monaco.duckdb --netconvert                     # runs netconvert automatically: builds .net.xml and .tll.xml
+duckosm sumo monaco.duckdb --netconvert --merge             # consolidates continuous road chains into single edges
+duckosm sumo monaco.duckdb --netconvert --join-junctions    # merges nearby complex intersections
 ```
-
-The files have all that netconvert takes from an OSM file for these items. Thus you do not give netconvert the OSM file,
-which has no fixes and no `edge_id`.
 
 ## What goes in
 
 | SUMO item | From duckOSM |
 |---|---|
 | edge id | `edge_id` |
-| connections | the legal turns (`edge_graph`), so the turn restrictions stay. netconvert adds no turn |
-| lanes | one SUMO lane for each lane, with its width and its vehicle classes, numbered from the right |
-| lane classes | bus lane `bus`, bike lane `bicycle`, car lane: each road vehicle |
-| walking network | one 2 m lane for pedestrians, and SUMO walking areas at the junctions |
-| cycling network | one 1.5 m lane for bicycles |
-| traffic lights | a node with `highway=traffic_signals` gets `type="traffic_light"` in the `.nod.xml` |
-| stop signs | `highway=stop` gives `type="priority_stop"`; with `stop=all`, `type="allway_stop"` |
-| bus stops | `<busStop>` in the `.add.xml` (see below) |
+| connections | legal turns from `edge_graph` (preserves OSM turn restrictions) |
+| lanes | physical width, vehicle classes, numbered from right to left |
+| lane classes | `bus`, `bicycle`, general road traffic (`passenger`) |
+| walking network | 2 m pedestrian lanes with junction walking areas |
+| cycling network | 1.5 m dedicated bicycle lanes |
+| traffic lights | nodes with `highway=traffic_signals` become `type="traffic_light"` on the junction |
+| stop signs | `highway=stop` becomes `type="priority_stop"` (or `type="allway_stop"`) |
+| bus stops | `<busStop>` elements in `.add.xml` |
 
-The coordinates are in metres, in the UTM zone of the data.
+Coordinates are projected to UTM metres. In OSM, traffic signals and stop signs are often mapped on approach roads before an intersection; duckOSM automatically attaches them to the junction node and groups adjacent signals into a single coordinated traffic light.
 
-### Traffic lights and stop signs
+### Fewer edges (`--merge`)
 
-OSM often puts a traffic light or a stop sign on a node of the way before the junction, not on the junction. duckOSM
-moves the sign to the nearest network node of the same way, if it is 25 m or nearer (the distance of netconvert's
-`tls.guess-signals.dist`). The traffic lights within 20 m of each other get one program: the node attribute `tl`
-(netconvert's `tls.join-dist`). duckOSM does this, not netconvert, because the edges stay as they are: netconvert can
-guess signals only from nodes in the network.
+Multimodal routing splits roads at path crossings and cycleways. SUMO does not need these splits. `--merge` (`to_sumo(..., merge=True)`) combines continuous road segments into single edges using [`driving.chains`](../reference/database.md#chains):
 
-`highway=give_way` has no SUMO node type. A SUMO priority junction already makes the minor road wait, so duckOSM does not
-change the node. On Monaco: 18 traffic-light junctions, 12 stop-sign junctions, 106 bus stops.
+* **Edge IDs:** Merged edges receive a `chain_id`. Original duckOSM edge IDs are preserved in `<param key="edge_ids">` (and mapped in `duckosm.sim.edge_map`). Unmerged edges retain their `edge_id`.
+* **Rules preserved:** Chains never cross traffic signals, stop signs, or turn restrictions.
+* **Scope:** Driving network only (not compatible with `--join-junctions`).
 
-### The netconvert config
+### Signal timing and bus stops
 
-`<name>.netccfg` is the input of `netconvert -c`. Change it as text, or give `config={...}` to `to_sumo`.
+* **Traffic signals (`<name>.tll.xml`):** OSM does not store signal timing plans. With `--netconvert`, duckOSM extracts netconvert's generated programs into `<name>.tll.xml` and adds them to `.netccfg`. Edit cycle phases and offsets in this file, then rerun `netconvert -c` to use your custom timing.
+* **Bus stops (`<name>.add.xml`):** Generated for SUMO (`sumo -a <name>.add.xml`) from OSM platforms (`highway=bus_stop`, `public_transport=platform`) along bus routes, placed on the rightmost bus-accessible lane.
 
-| Line | You can change it |
-|---|---|
-| `node-files`, `edge-files`, `connection-files` | no: the files of duckOSM |
-| `tllogic-files` | only after `--netconvert`: the signal programs (see below) |
-| `output-file` | yes |
-| `proj.utm` | yes: `true` gives metres in the UTM zone of the data |
-| `geometry.remove` = `false` | no: with `true`, netconvert joins edges, and an edge id is no longer one `edge_id`. Use `--merge` (below) |
-| `junctions.join` = `false` | use `--join-junctions` (`config={"junctions.join": "true"}`): duckOSM then keeps the turns through the joined junction |
-| `numerical-ids` = `false` | no: with `true`, netconvert gives new ids |
-| `no-turnarounds.except-deadend` | yes |
-| `tls.default-type` = `actuated` | yes: OSM has no signal timings, so the default program follows the traffic (`static` gives fixed times) |
+### Netconvert options (`<name>.netccfg`)
 
-### Fewer edges: `--merge`
+The generated `.netccfg` file configures netconvert. Customize options in text or via `config={...}` in Python:
 
-duckOSM cuts a road at each node that another network uses, for example a footway crossing, because the multimodal
-routing needs the cut. SUMO does not need these cuts. `--merge` (`to_sumo(..., merge=True)`) writes one SUMO edge for
-each chain of [`driving.chains`](../reference/database.md#chains): the edges joined where the road only continues.
+| Key | Default | Description |
+|---|---|---|
+| `output-file` | `<name>.net.xml` | Output compiled network |
+| `proj.utm` | `true` | Coordinates in UTM metres |
+| `tls.default-type` | `actuated` | Traffic-actuated signal control (`static` for fixed time) |
+| `junctions.join` | `false` | Join nearby complex junctions (`--join-junctions`) |
+| `geometry.remove` | `false` | Keep `false` to preserve `edge_id`s (use `--merge` instead) |
+| `numerical-ids` | `false` | Keep `false` to preserve duckOSM IDs |
 
-- The id of a joined edge is its `chain_id`. Its `<param key="edge_ids">` lists the duckOSM edges, and
-  `duckosm.sim.edge_map` gives one row for each of them. An edge that is not joined keeps its `edge_id`.
-- The connections, the traffic lights, the stop signs and the bus stops stay. A chain does not go through a traffic
-  light or a stop sign, or through a turn that has a rule.
-- Driving only, and not with `--join-junctions`. In Python: only with a database path, and without `bus_edges`,
-  `edge_attrs`, `lanes` and a `config` dict.
+## Visualizing lanes
 
-On Monaco: 2,840 edges become 1,775 edges and 2,995 junctions become 1,592. The same 2,614 edges are in the
-strongly connected part of the network, and all 18 traffic lights stay.
-
-A joined edge can be long and curved, for example a part of a small roundabout with two lanes. netconvert's normal
-junction shapes can then cover the island of the roundabout. netconvert's own join (`geometry.remove=true`) gives the
-same shapes. `config={"junctions.minimal-shape": "true"}` gives small junction shapes and a clean roundabout.
-
-### The signal programs and the bus stops
-
-OSM seldom has signal timings, and a `.tll.xml` program must have one signal for each link of its junction, in the order
-that netconvert gives. Thus duckOSM does not write programs of its own. With `--netconvert`, duckOSM copies the programs
-that netconvert built (from `tls.default-type`, `tls.cycle.time` and `tls.layout`) to `<name>.tll.xml`, and adds the file
-to the `.netccfg`. Edit the phases and the offsets in it, and run `netconvert -c` again: netconvert uses your programs.
-
-`<name>.add.xml` is for SUMO itself (`sumo --additional-files`), not for netconvert. A bus stop is each OSM platform
-(`highway=bus_stop`, `public_transport=platform`), and each bus `stop_position` with no platform within 30 m. It is on the
-nearest edge of a bus route (`bus.route_edges`) within 30 m, on the side of the road where the stop is, on the right-most
-lane that buses can use (`<edge_id>_<index>`), and 15 m long. `lines` has the refs of the bus routes on that edge.
-
-## See it
-
-`duckosm sumo-map sumo/monaco.net.xml` draws each SUMO lane at its width. The colors are those of
-[`gmns-map`](gmns.md#see-it): a car lane is gray, a bus lane red, a bike lane blue.
+`duckosm sumo-map sumo/monaco.net.xml` renders each compiled SUMO lane at its physical width:
 
 <figure class="pair" markdown="span">
   ![The lanes of one Monaco junction from the GMNS export, drawn by roadstyle](../images/tour-lanes-gmns.png)
   ![The same junction from the SUMO export after netconvert, drawn by roadstyle](../images/tour-lanes-sumo.png)
-  <figcaption>One Monaco junction: the GMNS lanes (left, <code>duckosm gmns-map</code>) and SUMO's lanes after netconvert (right, <code>duckosm sumo-map</code>).</figcaption>
+  <figcaption>One Monaco junction: GMNS lanes (left, <code>duckosm gmns-map</code>) vs SUMO compiled lanes (right, <code>duckosm sumo-map</code>).</figcaption>
 </figure>
 
 | | GMNS | SUMO |
 |---|---|---|
-| Lane shape | duckOSM: the road line, moved to the side for each lane | netconvert: each lane ends at the edge of its junction |
-| Inside a junction | the paths of SUMO, kept as `lane_connector` | netconvert's junction shape and its internal lanes |
-| Lane ids | `<link_id>_<lane_num>`, lane 1 on the left | `<edge_id>_<index>`, index 0 on the right |
-| Tools | DuckDB, Path4GMNS, DTALite | `sumo`, `sumo-gui`, `netedit` |
+| Lane geometry | Centerline offset by lane width | Compiled junction shapes and internal lanes |
+| Junction paths | `lane_connector` tables | Netconvert internal lanes |
+| Lane IDs | `<link_id>_<lane_num>` (1 on left) | `<edge_id>_<index>` (0 on right) |
+| Target tools | DuckDB, Path4GMNS, DTALite | `sumo`, `sumo-gui`, `netedit` |
 
 ## Speed and memory
 
-Mac mini (Apple M6, 12 cores, 16 GB). The plain XML only (`--no-netconvert`).
+Mac mini (Apple M6, 12 cores, 16 GB). Plain XML export (`--no-netconvert`):
 
-| Area (input DuckDB) | Time | Memory | Output |
+| Area (input DuckDB) | Time | Peak Memory | Output XML |
 |---|---|---|---|
 | Kentucky (~1.2 GB `.duckdb`) | 11 s | 2.6 GB | 1.4 GB |
-| France (~35 GB `.duckdb`) | not run: the Mac mini has too little free disk | | |
+| France (~35 GB `.duckdb`) | not run | (needs ~40 GB disk) | |
 
-The files are written while DuckDB reads the rows. Before this change, Kentucky needed 5.0 GB. The files have the same
-bytes.
-
-## duckOSM and SUMO's OSM import
-
-SUMO can also read OSM itself: `netconvert --osm-files`. The same area, both ways, on the Mac mini:
-
-| | duckOSM (`duckosm sumo`) | SUMO's OSM import |
-|---|---|---|
-| Time, memory: Monaco | measuring | measuring |
-| Time, memory: Kentucky | measuring | measuring |
-| Edges, lanes, connections | measuring | measuring |
-| Turn restrictions kept | all (from `edge_graph`) | measuring |
-| OSM fixes | yes | no |
-| Edge ids | `edge_id`, the same after each build | OSM way id and a part number |
+Files stream directly as DuckDB reads rows, bounding peak memory.
 
 ## Limits
 
-- No painted turn arrows (`turn:lanes`): SUMO's plain XML has no field for them. The [GMNS](gmns.md) export has them.
-- Not yet: crossings, sidewalks, roundabouts and height. Not read: `traffic_signals:direction`.
-- The bus stops are put on the right side of the road (traffic on the right).
-- A turn that is open or closed to some vehicles only (`turn_permission`) goes to netconvert lane by lane, and only
-  `--netconvert` writes it so. When you run netconvert yourself, these turns are open to all vehicles.
-- No demand, routes or `.sumocfg`: these are your scenario.
+* **Turn arrows (`turn:lanes`):** SUMO plain XML has no field for painted lane arrows. Use the [GMNS](gmns.md) export for lane-level turn markings.
+* **Vehicle restrictions:** Conditional turn permissions (`turn_permission`) are written lane-by-lane by `--netconvert`. Running netconvert standalone allows all vehicles.
+* **Scenario inputs:** Demand matrices, routes (`.rou.xml`), and simulation settings (`.sumocfg`) are defined by your scenario.
 
 All options: [Command line](../reference/cli.md#sumo).
