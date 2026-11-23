@@ -28,4 +28,6 @@ data = duckosm.ml.to_pyg(net.driving, graph="turns", features=["length_m", "lane
 Notebook: [15. Graph machine learning](https://khoshkhah.github.io/duckOSM/book/15_ml.html). Guide:
 [duckOSM for graph machine learning users](../../compare/for-ml-users.md).
 
+For multi-relational graphs across intersections, lanes, movements, and traffic signals, Level 3 GMNS DuckDB (`<area>_gmns.duckdb`) maps directly to `torch_geometric.data.HeteroData` across 3 tiers ([details](../../compare/for-ml-users.md#heterogeneous-graphs-from-level-3-gmns)).
+
 The top-level `duckosm.to_networkx(con, ...)` takes a DuckDB connection, as before. Page: [networkx](../../exports/networkx.md).
