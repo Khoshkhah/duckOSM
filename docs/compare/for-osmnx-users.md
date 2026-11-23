@@ -3,7 +3,7 @@
 This guide provides the direct duckOSM equivalent for every OSMnx 2 function. Operations are located in the core package (`duckosm`), the CLI (`duckosm`), and the analysis module (`duckosm.analysis` — [reference](../reference/sdk/analysis.md)). The notebook [9. Street network analysis](https://khoshkhah.github.io/duckOSM/book/09_analysis.html) demonstrates these workflows on Monaco.
 
 ```bash
-pip install "duckosm[analysis]"      # networkx, scipy, matplotlib
+pip install "duckosm[analysis]"      # networkx, matplotlib, geopandas
 ```
 
 ```python
@@ -25,12 +25,12 @@ G = an.to_osmnx(drive)
 
 | OSMnx 2 call | duckOSM CLI / Python SDK | What duckOSM does |
 |---|---|---|
-| `ox.graph_from_place("Monaco", network_type="drive")` | `duckosm network Monaco`<br/>`net = duckosm.network("Monaco"); drive = net.driving` | Extracts all 3 modes (`driving`, `walking`, `cycling`) from cached PBF in a single fast pass |
+| `ox.graph_from_place("Monaco", network_type="drive")` | `net = duckosm.network("Monaco"); drive = net.driving` | Builds the 3 modes (`driving`, `walking`, `cycling`) in one build |
 | `ox.graph_from_bbox(bbox)` | `duckosm.network(bbox=(west, south, east, north))` | Spatial bounding box query |
 | `ox.graph_from_point((lat, lon), dist=500)` | `duckosm.network(point=(lon, lat), dist_m=500)` | Circular area around coordinate |
 | `ox.graph_from_xml("file.osm")` | `duckosm.network(pbf="file.osm.pbf")` | Fast native PBF parsing rather than XML |
 | `network_type="walk"`, `"bike"` | `net.walking`, `net.cycling` | Co-located networks sharing identical junction node IDs |
-| `ox.load_graphml(path)` | `duckosm.open("data/monaco.duckdb")` | Opens instant zero-copy DuckDB network file |
+| `ox.load_graphml(path)` | `duckosm.open("data/monaco.duckdb")` | Opens a built DuckDB network file |
 | `ox.geocode_to_gdf("Monaco")` | `net.boundary` | Polygon boundary of the queried area |
 
 ## Read and Inspect Data
@@ -67,8 +67,8 @@ G = an.to_osmnx(drive)
 
 | OSMnx 2 call | duckOSM Python SDK | What duckOSM does |
 |---|---|---|
-| `ox.routing.shortest_path(G, a, b)` | `drive.route(a, b)` | High-performance in-process Rust router adhering to OSM turn restrictions |
-| `ox.routing.route_to_gdf(G, route)` | `net.edges(where=f"edge_id IN {tuple(route.edges)}")` | Queries route edges directly by ID |
+| `ox.routing.shortest_path(G, a, b)` | `drive.route(a, b)` | In-process Rust router, with the OSM turn restrictions |
+| `ox.routing.route_to_gdf(G, route)` | `route.edges` | The edges of the route as a GeoDataFrame, in route order |
 | `ox.plot_graph(G)` | `net.plot("driving")` (static PNG) or `net.map("driving")` (interactive HTML) | Fast MapLibre / Lonboard WebGL maps |
 | `ox.plot_graph_route(G, route)` | `net.map("driving", routes=route)` | Overlays route geometry on interactive vector basemap |
 | `ox.save_graph_geopackage(G, path)` | `net.to_gis("out/monaco.gpkg")` | Exports GeoPackage with edge and node layers |

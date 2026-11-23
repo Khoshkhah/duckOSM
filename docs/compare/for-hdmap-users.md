@@ -8,7 +8,7 @@ pip install "duckosm[sim,hdmap]"     # netconvert (the lanes of GMNS) and common
 
 ## Level 3 GMNS as the Foundation for HD Maps
 
-All high-definition lane maps in duckOSM build on top of the **Level 3 GMNS DuckDB** network (`duckosm gmns data/<area>.duckdb -o out/gmns.duckdb`). Because CommonRoad, Lanelet2, and OpenDRIVE consume the same GMNS `lane` and `lane_connector` tables, lane geometry, turn connectors, and custom fixes (`lanes`, `turn_lanes_*` in `osm_fixes.yaml`) remain 100% consistent across all formats.
+Lanelet2, CommonRoad and the lane graph read the **Level 3 GMNS DuckDB** network (`duckosm gmns data/<area>.duckdb -o out/gmns.duckdb`): its `lane` and `lane_connector` tables. Thus they have the same lanes, turn connectors and fixes. OpenDRIVE reads the Level 2 db for the roads only; with `--junctions` it reads the GMNS db.
 
 ```bash
 # 1. Generate GMNS DuckDB with physical lane and movement tables
@@ -32,7 +32,7 @@ CommonRoad models traffic scenarios for autonomous vehicle motion planning. The 
 | CommonRoad lanelet element | Derived from GMNS table | Description |
 |---|---|---|
 | **Road lanelet** | GMNS `lane` | Center line clipped to junction boundaries (`geom_cut`) with physical lane width |
-| **Intersection lanelet** | GMNS `lane_connector` | Smooth cubic spline curves connecting incoming to outgoing lanes across junctions |
+| **Intersection lanelet** | GMNS `lane_connector` | The path of each lane through the junction, from SUMO's internal lanes (netconvert) |
 | **Topology (predecessor/successor)** | `movement` & `lane_connector` | Direct lane-to-connector-to-lane topological linkages |
 | **Lateral adjacencies** | `lane.lane_num` within `link_id` | Left and right lanelet neighbors for lane-change maneuvers |
 | **Lanelet type** | `lane.allowed_uses` | `bus_lane`, `bicycle_lane`, or `urban` |
@@ -45,15 +45,15 @@ The exported lanelet dictionary includes `ids`: mapping each `lanelet_id` to its
 | Autonomous driving tool | duckOSM Python SDK / CLI | What duckOSM does |
 |---|---|---|
 | Manual Lanelet2 drawing in JOSM | `duckosm.hdmap.to_lanelet2("out/gmns.duckdb", "monaco.osm")` | Generates Lanelet2 OSM XML with `<relation type="lanelet">`, left/right boundaries, and regulatory elements |
-| `lanelet2.routing` graph | `duckosm.hdmap.lane_graph(gmns_db)`<br/>`duckosm.hdmap.route_lanes(gmns_db, a, b)` | Computes lane-level shortest paths and legal lane-change sequences directly in Python |
-| scenariogeneration / CARLA OSM import | `duckosm opendrive data/monaco.duckdb -o monaco.xodr`<br/>`net.driving.to_opendrive("monaco.xodr", junctions=True)` | Exports OpenDRIVE 1.4 XML (`.xodr`) with reference lines, lane sections, and junction connection records |
+| `lanelet2.routing` graph | `duckosm.hdmap.build_lane_graph(gmns_db)`<br/>`duckosm.hdmap.route_lanes(gmns_db, a, b)` | Computes lane-level shortest paths and legal lane-change sequences directly in Python |
+| scenariogeneration / CARLA OSM import | `duckosm opendrive data/monaco.duckdb -o monaco.xodr`<br/>`net.driving.to_opendrive("monaco.xodr", junctions=True)` | Exports OpenDRIVE 1.7 XML (`.xodr`) with reference lines, lane sections, and junction connection records |
 
 ### Comparison: Standard HD Map Pipelines vs duckOSM
 
 | Capability | Standard HD Map Tools | duckOSM HD Maps |
 |---|---|---|
 | **Authoring effort** | Hours of manual tagging or fragile geometric converters | 100% automated from Level 2 & 3 DuckDB networks in seconds |
-| **Junction connectors** | Heuristic straight lines or manual spline editing | Real netconvert lane-to-lane spline geometry adhering to OSM turn bans |
+| **Junction connectors** | Drawn by the tool, or by hand | The lane-to-lane paths of netconvert, for the legal turns only |
 | **Cross-format parity** | CommonRoad, Lanelet2, and OpenDRIVE diverge in lane counts | All formats share identical underlying GMNS DuckDB lane tables |
 | **Traceability to network** | Lanelet IDs are isolated and cannot join to external traffic data | Every lanelet links to `edge_id`; simulation volumes and sensor counts map directly |
 | **Continuous updates** | Re-converting OSM loses all manual fixes | Custom lane counts and turn pockets in `osm_fixes.yaml` survive data updates |

@@ -3,7 +3,7 @@
 This page is for users of openrouteservice (ORS), OSRM, r5py, pandana, and OSMnx. It gives the direct duckOSM equivalent for every standard routing operation. All routing functions are in the core SDK (`duckosm.routing` — [reference](../reference/sdk/routing.md)) and execute via an embedded, multi-threaded Rust routing engine directly inside Python. The notebook [8. Advanced routing](https://khoshkhah.github.io/duckOSM/book/08_routing_advanced.html) runs these workflows on Monaco.
 
 ```bash
-pip install "duckosm[viz]"      # lonboard, mapclassify (for interactive route maps)
+pip install "duckosm[viz]"      # roadstyle (for interactive route maps)
 ```
 
 ```python
@@ -17,9 +17,9 @@ car, walk, bike = net.driving, net.walking, net.cycling
 
 | Task | Standard tool call | duckOSM call | What duckOSM does |
 |---|---|---|---|
-| **Fastest route** | ORS `directions`, OSRM `route`, OSMnx `shortest_path` | `car.route(a, b)` | Multi-threaded Rust Dijkstra/CH search adhering to OSM turn restrictions |
+| **Fastest route** | ORS `directions`, OSRM `route`, OSMnx `shortest_path` | `car.route(a, b)` | Rust Dijkstra on the turn graph, with the OSM turn restrictions |
 | **Shortest route** | OSMnx `shortest_path(weight="length")` | `car.route(a, b, weight="length")` | Minimizes physical distance in metres |
-| **Route edges** | OSMnx `route_to_gdf` | `car.route(a, b).edges` | Returns list of stable `edge_id`s directly queryable in DuckDB |
+| **Route edges** | OSMnx `route_to_gdf` | `car.route(a, b).edge_ids` | The list of stable `edge_id`s of the route; `.edges` gives them as a GeoDataFrame |
 | **Turn-by-turn guidance** | ORS / OSRM `steps=true` | `car.route(a, b).directions()` | Generates street names, maneuver icons, turn angles, and segment lengths |
 | **Multi-origin / destination** | OSMnx `shortest_path(G, origs, dests)` | `car.routes(origins, destinations)` | Vectorized parallel routing across coordinate or edge lists |
 | **Alternative routes (KSP)** | OSMnx `k_shortest_paths`, OSRM `alternatives` | `car.k_shortest_paths(a, b, k=3)` | Returns distinct viable detour paths |
@@ -28,9 +28,9 @@ car, walk, bike = net.driving, net.walking, net.cycling
 | **Isochrones** | ORS `isochrones`, r5py `Isochrones` | `walk.isochrones(origins, minutes=[5, 10, 15])` | Generates buffered reachable road polygons (`buffer_m=25`) |
 | **Cumulative accessibility** | pandana `aggregate`, `nearest_pois` | `walk.accessibility(homes, shops, minutes=[5, 10])` | Counts reachable destinations within time thresholds for every origin |
 | **Nearest edge snapping** | OSMnx `nearest_edges` | Built-in: pass `(lon, lat)` points | Coordinates snap automatically to the nearest legal road edge |
-| **Geocoding** | ORS `geocode`, OSMnx `geocode` | `duckosm.routing.geocode(car, "Boulevard Albert 1er")` | Local fuzzy place and street name search without external web APIs |
+| **Geocoding** | ORS `geocode`, OSMnx `geocode` | `duckosm.routing.geocode(car, "Boulevard Albert 1er")` | A street name of the network (exact match, any case); else Nominatim, which needs the internet |
 | **Multimodal route** | r5py with `transport_modes` | `net.route_multimodal_points(a, b)` | Seamless walk-drive-bike journey across co-located transfer nodes |
-| **Custom graph algorithm** | OSMnx `graph_from_place` | `car.to_networkx()`, `car.to_rustworkx()` | Zero-copy export to NetworkX or Rustworkx graph structures |
+| **Custom graph algorithm** | OSMnx `graph_from_place` | `car.to_networkx()`, `car.to_rustworkx()` | The turn graph for NetworkX or rustworkx |
 
 ## Architectural Differences
 

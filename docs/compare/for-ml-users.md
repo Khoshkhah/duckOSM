@@ -19,7 +19,7 @@ pip install "duckosm[ml]"      # torch and torch_geometric
 | Junction features & elevation | Manual degree & DEM calculation | `node_features=["lon", "lat", "in_degree", "out_degree", "degree", "ele"]` |
 | Road graph for DGL | `dgl.from_networkx(G)` | `duckosm.ml.to_dgl(net.driving)` |
 | Multi-relational urban graphs | Custom ETL stitching links, lanes, signals | No `HeteroData` export; the GMNS db has the `node`, `link`, `lane`, `movement` tables to read with SQL |
-| Custom frameworks / NumPy | Manual tensor/graph array extraction | `duckosm.ml.graph_arrays(net.driving)`: zero-copy NumPy arrays |
+| Custom frameworks / NumPy | Manual tensor/graph array extraction | `duckosm.ml.graph_arrays(net.driving)`: NumPy arrays |
 | Multimodal transport graphs | Separate queries with disconnected nodes | `net.walking`, `net.cycling`, or `gmns_all`: shared multimodal crossing nodes |
 | Visualize predictions on map | Manual GeoPandas merge and plotting | `net.driving.map(color_by=predicted_series)` keyed directly by `edge_id` |
 

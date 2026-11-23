@@ -8,29 +8,28 @@ pip install "duckosm[sim]"      # SUMO (netconvert, sumo) and sumolib
 
 ## Input and CLI Commands
 
-Unlike standard simulation tools that attempt to parse raw OSM XML or PBF directly with heuristic parsers, duckOSM builds on top of the Level 2 routable DuckDB database (which already has stable edge IDs, directed edges, lanes, turn restrictions, and OSM fixes applied).
+The simulation exports read the Level 2 routable DuckDB database. It already has stable edge ids, directed edges, lanes, turn restrictions and your OSM fixes.
 
 ```bash
-# Export to SUMO plain XML and generate network.net.xml via netconvert
-duckosm sumo data/monaco.duckdb -o out/sumo/
+# SUMO plain XML and network.netccfg
+duckosm sumo data/monaco.duckdb --out-dir out/sumo
 
-# SUMO with continuous corridor chains merged and traffic signal programs
-duckosm sumo data/monaco.duckdb -o out/sumo/ --merge --signals
+# also run netconvert: network.net.xml and the signal programs (.tll.xml); one edge for each chain
+duckosm sumo data/monaco.duckdb --out-dir out/sumo --netconvert --merge
 
-# Export to MATSim network XML (compressed .xml.gz)
+# MATSim network XML (compressed .xml.gz)
 duckosm matsim data/monaco.duckdb -o out/matsim/network.xml.gz
 ```
 
 ## SUMO: netconvert vs duckOSM
 
-In the standard SUMO workflow, `netconvert --osm-files` parses raw OSM ways, guessing lane allocation and creating internal micro-nodes at every pedestrian crossing. With duckOSM, network geometry, lanes, and turn bans are structured first, then passed to `netconvert`.
+In the standard SUMO workflow, `netconvert --osm-files` reads the OSM ways itself. With duckOSM, the edges, lanes and turn restrictions come from the duckOSM network, and `netconvert` reads them as plain XML.
 
 | Standard Tool (netconvert / SUMO) | duckOSM CLI / Python SDK | What duckOSM does |
 |---|---|---|
-| `netconvert --osm-files map.osm` | `duckosm sumo data/monaco.duckdb -o out/sumo/`<br/>`net.driving.to_sumo("out/sumo")` | Writes plain XML (`.edg.xml`, `.nod.xml`, `.con.xml`, `.tll.xml`) with traffic lights, stop signs, and bus stops, plus `network.netccfg` |
+| `netconvert --osm-files map.osm` | `duckosm sumo data/monaco.duckdb --out-dir out/sumo`<br/>`net.driving.to_sumo("out/sumo")` | Writes plain XML (`.nod.xml`, `.edg.xml`, `.con.xml`, `.add.xml`) with traffic lights, stop signs and bus stops, plus `network.netccfg`. With `--netconvert`, also `.net.xml` and `.tll.xml` |
 | `osmWebWizard` (download and convert) | `duckosm.network("Monaco").driving.to_sumo("out/sumo", run_netconvert=True)` | Builds Level 2 DuckDB and generates `network.net.xml` in one call |
 | `--geometry.remove` / heuristic contraction | `duckosm sumo ... --merge`<br/>`to_sumo("out/sumo", merge=True)` | Contracts continuous segments using `driving.chains` (`chain_id`), cutting Monaco edges from 2,840 to 1,775 while preserving real junctions |
-| Heuristic signal guesser | `duckosm sumo ... --signals`<br/>`to_sumo("out/sumo", signals=True)` | Generates explicit signal phases, detectors, and stop signs based on OSM signals and lane connections |
 | `sumolib.net.readNet("map.net.xml")` | `duckosm.sim.sumo_net(files)` | Loads SUMO network into Python for analysis and route inspection |
 | `edgeData` output, by SUMO edge ID | `ids = duckosm.sim.edge_map(files)` | Provides direct mapping table between SUMO internal IDs and duckOSM `edge_id` |
 | Fix a network by hand in netedit | Persistent rule in `osm_fixes.yaml` | Fixes stay across all subsequent OSM builds and exports |
@@ -39,11 +38,11 @@ In the standard SUMO workflow, `netconvert --osm-files` parses raw OSM ways, gue
 
 | Feature | netconvert from OSM | duckOSM SUMO |
 |---|---|---|
-| **Edge ID stability** | Ephemeral IDs derived from OSM ways; changes every rebuild | Persistent 64-bit `edge_id` hash; results join back reliably across builds |
-| **Intermediate crossings** | Splits roads at every pedestrian crossing, creating artificial bottlenecks | `--merge` contracts continuous corridors (`chain_id`), reducing edge count by ~38% |
-| **Turn restrictions** | Direct OSM relation parsing (often drops complex bans) | Strict OSM turn restrictions (`no_left_turn`, `only_straight_on`, conditional) enforced |
-| **Lane assignments** | Fallback heuristics on single OSM tags | Per-direction physical lane allocations with bus, bike, and turn-pocket lanes |
-| **Traffic signals** | Default generated programs often deadlock complex geometries | Coordinated signal programs (`.tll.xml`) derived from verified junction movements |
+| **Edge ID stability** | Ids from the OSM way ids (`123#1`); a change of the ways changes them | Persistent 64-bit `edge_id` hash; results join back reliably across builds |
+| **Intermediate crossings** | | duckOSM cuts roads at footpath crossings; `--merge` joins them again (`chain_id`): about 38% fewer edges on Monaco |
+| **Turn restrictions** | netconvert reads the OSM relations itself | The legal turns of `edge_graph` go into `.con.xml`, with the OSM turn restrictions and your fixes |
+| **Lane assignments** | netconvert reads the OSM lane tags | Lanes for each direction, with bus and bike lanes, from `driving.lane_profile` |
+| **Traffic signals** | netconvert makes the programs | netconvert makes the programs too (`--netconvert` writes them to `.tll.xml`); duckOSM moves each OSM signal to its junction first |
 
 ## MATSim: pt2matsim vs duckOSM
 
@@ -52,8 +51,8 @@ MATSim models individual travelers across multi-hour schedules. Links require ex
 | pt2matsim / MATSim tools | duckOSM CLI / Python SDK | What duckOSM does |
 |---|---|---|
 | pt2matsim `Osm2MultimodalNetwork` | `duckosm matsim data/monaco.duckdb -o out/matsim/network.xml.gz`<br/>`net.driving.to_matsim("network.xml.gz")` | Streamed export to MATSim v2 `network.xml.gz` with complete link attributes |
-| Multimodal network creation | `duckosm.sim.to_matsim(net, "network.xml.gz", modes=["driving", "cycling", "walking"])` | Co-located multimodal network where footways and roads share connection nodes |
-| MATSim lanes and signal groups | `duckosm.sim.to_matsim_lanes(gmns_db, "out/matsim")` | Generates MATSim `lanes20.dtd` and `signalsystems20.dtd` from Level 3 GMNS tables |
+| Multimodal network creation | `duckosm.sim.to_matsim(net, "network.xml.gz", mode=["driving", "cycling", "walking"])` | Co-located multimodal network where footways and roads share connection nodes |
+| MATSim lanes and signal groups | `duckosm.sim.to_matsim_lanes(gmns_db, "out/matsim")` | Writes `lanes.xml` (laneDefinitions v2.0) and the signal files (signalSystems, signalGroups, signalControl v2.0) from the GMNS tables |
 | Link volume analysis | `duckosm.sim.edge_map("network.xml.gz")` | Directly joins MATSim simulated volumes and travel times back to DuckDB via `edge_id` |
 
 ### MATSim Link Attributes

@@ -8,14 +8,17 @@ pip install "duckosm[sim,planning]"     # netconvert (lanes and movements of GMN
 
 ## Input and CLI
 
-Unlike osm2gmns, which re-parses raw OSM XML or PBF files directly and computes heuristic network cuts, duckOSM builds on top of the Level 2 routable DuckDB database (which already has stable edge IDs, topology, and OSM fixes applied).
+osm2gmns reads the OSM file itself. `duckosm gmns` reads the Level 2 routable DuckDB database, which already has stable edge ids, the topology and your OSM fixes.
 
 ```bash
-# Generate GMNS DuckDB database with macro, meso, and micro schemas
+# GMNS DuckDB database: the macro schemas (gmns_<mode>)
 duckosm gmns data/monaco.duckdb -o out/gmns.duckdb
 
+# also the meso schemas and the combined gmns_all network
+duckosm gmns data/monaco.duckdb -o out/gmns.duckdb --meso --combined
+
 # Also export GMNS-standard CSV tables into a folder
-duckosm gmns data/monaco.duckdb -o out/gmns.duckdb --csv out/gmns/
+duckosm gmns data/monaco.duckdb -o out/gmns.duckdb --to-csv out/gmns/
 ```
 
 ## osm2gmns vs duckOSM
@@ -23,8 +26,8 @@ duckosm gmns data/monaco.duckdb -o out/gmns.duckdb --csv out/gmns/
 | osm2gmns call | duckOSM CLI / Python SDK | What duckOSM does |
 |---|---|---|
 | `og.getNetFromFile("map.osm")` | `net = duckosm.network("Monaco")` | Uses Level 2 directed network with stable IDs and turn restrictions |
-| `og.consolidateComplexIntersections(net)` | Built-in via `chains` | Preserves crossing nodes for walking/cycling while offering continuous corridor `chain_id`s |
-| `og.outputNetToCSV(net)` | `duckosm gmns <in.duckdb> -o <out.duckdb> --csv <out_dir>`<br/>`net.to_gmns("out/gmns.duckdb", to_csv="out/gmns")` | Writes relational DuckDB schemas (`gmns_driving`, `gmns_walking`, `gmns_cycling`, `gmns_all`) plus optional CSV files |
+| `og.consolidateComplexIntersections(net)` | Level 2 `driving.chains` | Keeps the crossing nodes for walking and cycling; each chain of edges between junctions has a `chain_id` |
+| `og.outputNetToCSV(net)` | `duckosm gmns <in.duckdb> -o <out.duckdb> --to-csv <out_dir>`<br/>`net.to_gmns("out/gmns.duckdb", to_csv="out/gmns")` | Writes the DuckDB schemas `gmns_driving`, `gmns_walking`, `gmns_cycling` (and `gmns_all` with `--combined`), plus the CSV files if you ask |
 | `og.generateMovements(net)` | Included in `to_gmns` (`movement` table) | Built from SUMO netconvert lane-to-lane connectors and OSM turn restrictions |
 | `og.buildMultiResolutionNets(net)` | `duckosm.planning.to_meso(gmns_db)`<br/>`duckosm.planning.to_micro(gmns_db)` | Direct SQL generation into DuckDB schemas `meso_*` and `micro_*` |
 | GMNS validator script | `duckosm.planning.check_gmns("out/gmns.duckdb")` | Verifies node/link/movement foreign keys, connectivity, and coordinate validity |
@@ -33,15 +36,15 @@ duckosm gmns data/monaco.duckdb -o out/gmns.duckdb --csv out/gmns/
 
 | Feature | osm2gmns | duckOSM GMNS |
 |---|---|---|
-| **Storage format** | Loose CSV files without indexes or relational integrity | Relational DuckDB database with indexed SQL schemas + optional CSV export |
-| **Multimodal support** | Single mode at a time or separate CSV runs | 4 schemas in one DuckDB file: `gmns_driving`, `gmns_walking`, `gmns_cycling`, and unified `gmns_all` |
-| **Multimodal co-location** | Dropped crossing nodes disconnect sidewalks and cycleways | Shared `node_id`s preserved across all modes; pedestrian crossings remain intact |
-| **Corridor consolidation** | Destructive node removal (breaks multimodal connections) | Non-destructive: `link_id = edge_id` preserved for multimodal parity, with `chains` table for continuous vehicular corridors |
-| **Link identifier** | Run-specific arbitrary integers (`1..N`) | Stable `edge_id` hash matching Level 2 and downstream simulation exports |
-| **Lane allocation** | OSM `lanes` tag with fallback heuristics | Per-direction physical lanes (`lane` table) with designated bike, bus, and turn lanes |
-| **Movements & turns** | Heuristic turn angles that may permit illegal turns | Actual OSM turn bans (`restriction:*`), signals, and physical lane connectors (`movement` table) |
-| **Multi-resolution** | Extra Python script steps producing separate CSV folders | Meso (`meso_*`) and micro (`micro_*`) schemas generated directly inside the same DuckDB file |
-| **Fixes & overrides** | Manual post-processing of CSVs after each run | Persistent YAML fixes (`osm_fixes.yaml`) applied at build time that survive data updates |
+| **Storage format** | CSV files | A DuckDB database, and CSV files if you ask |
+| **Multimodal support** | | `gmns_driving`, `gmns_walking` and `gmns_cycling` in one DuckDB file, and `gmns_all` with `--combined` |
+| **Multimodal co-location** | | The modes share the same `node_id`s; the crossing nodes stay |
+| **Corridor consolidation** | | GMNS keeps one link for each edge (`link_id = edge_id`); Level 2 `driving.chains` has the chains between junctions |
+| **Link identifier** | | The stable `edge_id` hash, the same as in Level 2 and the simulation exports |
+| **Lane allocation** | | Lanes for each direction (`lane` table), with bike, bus and turn lanes |
+| **Movements & turns** | | The legal turns with the OSM turn restrictions, and their lanes from netconvert (`movement` table) |
+| **Multi-resolution** | | `--meso` and `--micro` write the `meso_*` and `micro_*` schemas into the same DuckDB file |
+| **Fixes & overrides** | | Your fixes in one YAML file (`osm_fixes.yaml`), applied at each build |
 
 ## path4gmns and DTALite
 
@@ -80,10 +83,10 @@ project.network.build_graphs(modes=["c"])
 
 | Link field | Value in duckOSM export | Purpose |
 |---|---|---|
-| `link_id` | 1, 2, … | Sequential integer required by AequilibraE's C++ matrix solver |
+| `link_id` | 1, 2, … | A sequential integer (`row_number()`) |
 | `edge_id` | duckOSM `edge_id` | Join simulation results (volume, V/C, travel time) directly back to DuckDB |
 | `direction` | 1 | Each edge is strictly one-way/directed |
-| `link_type` | OSM `highway` value (`primary`, `residential`, etc.) | Road classification and volume-delay function (BPR) parameters |
+| `link_type` | OSM `highway` value (`primary`, `residential`, etc.) | The road class |
 | `speed_ab` | Speed in km/h | Free-flow speed |
 | `capacity_ab` | Lanes × capacity per lane | Link saturation flow rate (aligned with GMNS capacity definitions) |
 | `travel_time_ab` | Free-flow time in minutes | Base impedance for shortest path and assignment algorithms |

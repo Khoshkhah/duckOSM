@@ -4,7 +4,7 @@
 
 <p align="center">
   <strong>Turn OpenStreetMap into routable networks, GMNS models, and GIS layers.</strong><br>
-  One Rust engine powered by DuckDB, for your computer and your browser.
+  One Rust engine, for your computer and your browser.
 </p>
 
 <p align="center">
@@ -33,7 +33,7 @@
 
 duckOSM reads an OpenStreetMap `.osm.pbf` file and builds the complete transport network of an area—from GIS layers
 and turn-by-turn routing to multi-scale GMNS models, traffic simulations, and Graph Neural Networks. One Rust engine
-powered by DuckDB runs it all: the command line, the Python SDK and the browser.
+runs it all: the command line, the Python SDK and the browser.
 
 It processes areas tile by tile, keeping memory low and speeds fast even for an entire country. Fix the OSM data once on
 a map: your fixes go into one YAML file and apply at build time, so every downstream table, network layer, and export
@@ -91,14 +91,14 @@ Edit roads, turns and buildings on a map: your fixes go into one YAML file and a
 <td valign="top">
 
 **GMNS in DuckDB**<br>
-The open standard (General Modeling Network Specification) in DuckDB: links, lanes, and turning movements for simulation and Graph AI
+The open standard (General Modeling Network Specification) in DuckDB: links, lanes, and turning movements for simulation and traffic assignment
 ([GMNS network](https://khoshkhah.github.io/duckOSM/exports/gmns-network/)).
 
 </td>
 <td valign="top">
 
 **Traffic simulation**<br>
-SUMO, MATSim and DTALite exports with automated validation and segment merging (`--merge`)
+SUMO, MATSim and DTALite exports; SUMO can join the edges of a road into one (`--merge`)
 ([Exports](https://khoshkhah.github.io/duckOSM/exports/)).
 
 </td>
@@ -111,8 +111,8 @@ All outputs come from one `.osm.pbf` file, in five levels, and all take your OSM
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="images/levels-dark.svg">
-    <img src="images/levels-light.svg" alt="The five levels of duckOSM's outputs: 0 OSM file (pbfcut), 1 OSM data from .osm.pbf (QuackOSM, GDAL, Geofabrik, PMTiles), 2 routable network in DuckDB (GeoPackage, networkx), 3 GMNS network in GMNS DuckDB (GMNS, GNNs, MATSim, SUMO), 4 HD map with 3D lane geometry, experimental (Lanelet2, OpenDRIVE)" width="900">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/images/levels-dark.svg">
+    <img src="https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/images/levels-light.svg" alt="The five levels of duckOSM's outputs: 0 OSM file (pbfcut), 1 OSM data from .osm.pbf (QuackOSM, GDAL, Geofabrik, PMTiles), 2 routable network in DuckDB (GeoPackage, networkx), 3 GMNS network in GMNS DuckDB (GMNS, MATSim, SUMO), 4 HD map with 3D lane geometry, experimental (Lanelet2, OpenDRIVE)" width="900">
   </picture>
 </p>
 
@@ -121,7 +121,7 @@ All outputs come from one `.osm.pbf` file, in five levels, and all take your OSM
 | [0. OSM file](https://khoshkhah.github.io/duckOSM/exports/osm-file/) | `.osm.pbf` (cut by `pbfcut`) | Exact boundary cut with your fixes | `duckosm get`, `duckosm cut` |
 | [1. OSM data](https://khoshkhah.github.io/duckOSM/exports/osm-data/) | `from .osm.pbf` | QuackOSM · GDAL · Geofabrik · osm2pgsql · PMTiles | `duckosm quack` |
 | [2. Routable network](https://khoshkhah.github.io/duckOSM/exports/routable-network/) | `DuckDB` | Drive, walk, bike · GeoPackage · networkx | `duckosm build`, `export-gis`, `export-graph` |
-| [3. GMNS network](https://khoshkhah.github.io/duckOSM/exports/gmns-network/) | `GMNS DuckDB` | Multi-scale (macro, meso, micro) · GMNS · GNNs · MATSim · SUMO | `duckosm gmns`, `sumo`, `matsim` |
+| [3. GMNS network](https://khoshkhah.github.io/duckOSM/exports/gmns-network/) | `GMNS DuckDB` | Multi-scale (macro, meso, micro) · GMNS · MATSim · SUMO | `duckosm gmns`, `sumo`, `matsim` |
 | [4. HD map](https://khoshkhah.github.io/duckOSM/exports/hd-map/) *(experimental)* | `3D geometry` | Lane shape in 3D · Lanelet2 · OpenDRIVE | `duckosm lanelet2`, `opendrive` |
 
 ## Quick start
