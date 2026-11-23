@@ -41,14 +41,21 @@ duckosm gmns monaco.duckdb -o out/gmns.duckdb --meso      # writes to custom out
 duckosm gmns-viz monaco_gmns.duckdb                        # draws the meso and micro networks in an interactive HTML viewer
 ```
 
-## The four network schemas: all, driving, walking, cycling
+## Network schemas
 
 In `<area>_gmns.duckdb`, **every table belongs to a network schema** (the default `main` schema is empty). GMNS is dedicated purely to transport networks, unlike Level 2 (`<area>.duckdb`) which also stores GIS layers (`features`) and raw OSM tags (`raw`).
 
-* **`gmns_driving` (Driving Network — 16 tables):** The vehicular road network for cars, trucks, and buses. Models lanes (`lane`), lane-level turns with restrictions (`movement`), signals (`signal_controller`), on-street parking (`curb_seg`), crosswalks spanning road lanes (`crossing`, `lane_crossing`), and smooth intersection curves (`lane_connector`).
-* **`gmns_walking` (Pedestrian Network — 14 tables):** Sidewalks, footpaths, stairs, plazas, and crosswalks. Tracks parallel roadways via `link_along` and connects footways to road crossings via `lane_connector`.
-* **`gmns_cycling` (Bicycle Network — 13 tables):** Cycleways, protected bike paths, shared lanes, and bikeable roads. Tracks parallel roadways via `link_along`.
-* **`gmns_all` (Unified Multimodal Network — 5 tables, via `--combined`):** Merges shared physical streets across driving, walking, and cycling into a single link with unioned `allowed_uses = 'auto,bike,walk'` (`link_id` = `edge_id`). Lanes and turns stay in the mode schemas.
+### Macro schemas (`duckosm gmns`)
+
+* **`gmns_driving` (16 tables):** The vehicular road network for cars, trucks, and buses. Models lanes (`lane`), lane-level turns with restrictions (`movement`), signals (`signal_controller`), on-street parking (`curb_seg`), crosswalks spanning road lanes (`crossing`, `lane_crossing`), and smooth intersection curves (`lane_connector`).
+* **`gmns_walking` (14 tables):** Sidewalks, footpaths, stairs, plazas, and crosswalks. Tracks parallel roadways via `link_along` and connects footways to road crossings via `lane_connector`.
+* **`gmns_cycling` (13 tables):** Cycleways, protected bike paths, shared lanes, and bikeable roads. Tracks parallel roadways via `link_along`.
+* **`gmns_all` (5 tables, via `--combined`):** Merges shared physical streets across driving, walking, and cycling into a single link with unioned `allowed_uses = 'auto,bike,walk'` (`link_id` = `edge_id`). Lanes and turns stay in the mode schemas.
+
+### Meso and micro schemas (`--meso`, `--micro`)
+
+* **`meso_<mode>` (2 tables, via `--meso`):** Road sections (`meso_link`, trimmed ~6 m from junctions) and junction turn connectors between section endpoints (`meso_node`). Default: `meso_driving`.
+* **`micro_<mode>` (2 tables, via `--micro`):** Discrete 7-meter lane cells, lateral lane changes, and turn movements (`micro_link`) between cell boundary vertices (`micro_node`). Default: `micro_driving`.
 
 * **In DuckDB (`.duckdb`):** Stores all tables with native DuckDB spatial geometries (`geom`) for fast spatial SQL queries and map rendering.
 * **In CSV (`--to-csv`):** Exports the standard specification tables with WKT text geometries (`geometry`), ready for DTALite and Path4GMNS.

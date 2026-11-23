@@ -5,7 +5,7 @@ Each table of the GMNS database of [`duckosm gmns`](gmns.md), and each of its co
 
 | Rule | |
 |---|---|
-| Schemas | Every table belongs to a network schema: `gmns_driving`, `gmns_walking`, `gmns_cycling`, or `gmns_all` (with `--combined`). There are no tables outside schemas. With `--meso`, `--micro` also `meso_<mode>`, `micro_<mode>`. See [the 4 network schemas](gmns.md#the-four-network-schemas-all-driving-walking-cycling). |
+| Schemas | Every table belongs to a schema: `gmns_driving`, `gmns_walking`, `gmns_cycling`, or `gmns_all` (with `--combined`). There are no tables outside schemas. With `--meso`, `--micro` also `meso_<mode>`, `micro_<mode>`. See [network schemas](gmns.md#network-schemas). |
 | Ids | `link_id` is the duckOSM `edge_id` (BIGINT), the same after each build and in each mode. `node_id` is the OSM node id |
 | Units | metres, km/h, longitude and latitude (EPSG:4326) |
 | Geometry | `geometry` is WKT text (in the CSV files). `geom` is the same shape as a DuckDB `GEOMETRY` (not in the CSV files) |
@@ -24,14 +24,21 @@ The column "Spec" says where a column comes from:
 
 In the GMNS database (`<area>_gmns.duckdb`), **every table belongs to a network schema**. There are no tables in the default `main` schema.
 
-### The four network schemas
+### The network schemas
 
+In the GMNS database (`<area>_gmns.duckdb`), **every table belongs to a schema**. There are no tables in the default `main` schema.
+
+#### Macro schemas (`duckosm gmns`)
 * **`gmns_driving` (16 tables):** Driving network for cars, buses, and trucks. Includes lanes, turns, signals, curb parking, crosswalks, and intersection turn curves.
 * **`gmns_walking` (14 tables):** Pedestrian network for sidewalks, paths, and crosswalks. Tracks parallel roads via `link_along` and connects footways to road crossings.
 * **`gmns_cycling` (13 tables):** Bicycle network for cycleways and bikeable roads. Tracks parallel roads via `link_along`.
 * **`gmns_all` (5 tables):** Created with `--combined`. Merges shared streets across modes into one link with `allowed_uses = 'auto,bike,walk'`. Lanes and turns stay in the mode schemas.
 
-### Table matrix by schema
+#### Meso and micro schemas (`--meso`, `--micro`)
+* **`meso_<mode>` (2 tables, via `--meso`):** Road sections and junction turn connectors for mesoscopic simulation (default: `meso_driving`).
+* **`micro_<mode>` (2 tables, via `--micro`):** Discrete 7-meter lane cells, lateral lane changes, and turn movements for microscopic simulation (default: `micro_driving`).
+
+### Table matrix: macro schemas
 
 | Table | In standard | `gmns_all` | `gmns_driving` | `gmns_walking` | `gmns_cycling` | One row is |
 |---|:---:|:---:|:---:|:---:|:---:|---|
@@ -52,6 +59,15 @@ In the GMNS database (`<area>_gmns.duckdb`), **every table belongs to a network 
 | [`lane_crossing`](#lane_crossing) | ➕ | — | ✅ | — | — | specific vehicular road lanes crossed by a crossing |
 | [`link_along`](#link_along) | ➕ | — | ✅ *(ref)* | ✅ | ✅ | footpath or cycle track running parallel to a road |
 | [`lane_check`](#lane_check) | ➕ | — | optional | — | — | diagnostic log of unmapped lane arrows or disconnected turns |
+
+### Table matrix: meso and micro schemas
+
+| Schema | Table | In standard | One row is | Key columns |
+|---|---|:---:|---|---|
+| `meso_<mode>` | `meso_node` | ➕ duckOSM | the end of a road section | `node_id`, `x_coord`, `y_coord`, `macro_node_id`, `macro_link_id`, `geom` |
+| `meso_<mode>` | `meso_link` | ➕ duckOSM | a road section or junction connector | `link_id`, `meso_type`, `from_node_id`, `to_node_id`, `length`, `lanes`, `free_speed`, `macro_link_id`, `movement_id`, `geom` |
+| `micro_<mode>` | `micro_node` | ➕ duckOSM | the boundary vertex of a lane cell | `node_id`, `x_coord`, `y_coord`, `lane_id`, `cell_k`, `macro_link_id`, `lane_no`, `geom` |
+| `micro_<mode>` | `micro_link` | ➕ duckOSM | a 7 m cell, lane change, or turn arc | `link_id`, `cell_type`, `from_node_id`, `to_node_id`, `length`, `width`, `lane_no`, `macro_link_id`, `meso_link_id`, `geom` |
 
 ## config
 
