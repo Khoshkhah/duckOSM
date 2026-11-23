@@ -88,7 +88,7 @@ Edit roads, turns and buildings on a map: your fixes go into one YAML file and a
 
 **GMNS in DuckDB**<br>
 The open standard (General Modeling Network Specification) in DuckDB: links, lanes, movements and zones for simulation and Graph AI
-([GMNS tables](https://khoshkhah.github.io/duckOSM/exports/gmns/)).
+([GMNS network](https://khoshkhah.github.io/duckOSM/exports/gmns-network/)).
 
 </td>
 <td valign="top">
@@ -112,36 +112,55 @@ All outputs come from one `.osm.pbf` file, in five levels, and all take your OSM
   </picture>
 </p>
 
-| Level | Database / Reference | Outputs / Command |
-|---|---|---|
-| 0. OSM file | `.osm.pbf` (cut by `pbfcut`) | `duckosm get`, `duckosm cut` |
-| 1. OSM data | `.osm.pbf` (tables) | `duckosm quack` (QuackOSM, GDAL, Geofabrik, osm2pgsql, PMTiles) |
-| 2. Routable network | `DuckDB` | `duckosm build`, `export-gis`, `export-graph` |
-| 3. GMNS network | `GMNS DuckDB` | `duckosm gmns`, `sumo`, `matsim` |
-| 4. HD map (experimental) | 3D lane geometry | `duckosm lanelet2`, `opendrive` |
+| Level | Database / Format | Read by / Target tools | Command |
+|---|---|---|---|
+| [0. OSM file](https://khoshkhah.github.io/duckOSM/exports/osm-file/) | `.osm.pbf` (cut by `pbfcut`) | Exact boundary cut with your fixes | `duckosm get`, `duckosm cut` |
+| [1. OSM data](https://khoshkhah.github.io/duckOSM/exports/osm-data/) | `from .osm.pbf` | QuackOSM · GDAL · Geofabrik · osm2pgsql · PMTiles | `duckosm quack` |
+| [2. Routable network](https://khoshkhah.github.io/duckOSM/exports/routable-network/) | `DuckDB` | Drive, walk, bike · GeoPackage · networkx | `duckosm build`, `export-gis`, `export-graph` |
+| [3. GMNS network](https://khoshkhah.github.io/duckOSM/exports/gmns-network/) | `GMNS DuckDB` | Multi-scale (macro, meso, micro) · GMNS · GNNs · MATSim · SUMO | `duckosm gmns`, `sumo`, `matsim` |
+| [4. HD map](https://khoshkhah.github.io/duckOSM/exports/hd-map/) *(experimental)* | `3D geometry` | Lane shape in 3D · Lanelet2 · OpenDRIVE | `duckosm lanelet2`, `opendrive` |
 
 ## Quick start
 
 ```bash
 pip install duckosm
 
-duckosm get "Monaco"  # -> monaco.osm.pbf, monaco.geojson
-duckosm build --pbf monaco.osm.pbf --boundary monaco.geojson --modes driving
-duckosm quack monaco.osm.pbf --gdal -o out --name monaco
+duckosm get "Monaco"                                            # -> monaco.osm.pbf, monaco.geojson
+duckosm build --pbf monaco.osm.pbf --boundary monaco.geojson    # -> Level 2 routable database (monaco.duckdb)
+duckosm gmns monaco.duckdb                                      # -> Level 3 GMNS database (monaco_gmns.duckdb)
+duckosm quack monaco.osm.pbf --gdal -o out --name monaco        # -> Level 1 GIS layers
 ```
 
 ```python
 import duckosm
 
-area = duckosm.get("Monaco")  # as duckosm get
-db = duckosm.build(pbf=area.pbf, boundary=area.boundary)  # as duckosm build
+area = duckosm.get("Monaco")
+db = duckosm.build(pbf=area.pbf, boundary=area.boundary)  # Level 2 routable database
 
-r = duckosm.route_points(db, (7.4155, 43.7285), (7.4400, 43.7480))   # (lon, lat): Fontvieille to Larvotto
-r["time_s"], r["length_m"], r["edges"]   # the fastest path, door to door, and the ordered edge_ids
-duckosm.to_gis(db, "monaco.gpkg")         # a GeoPackage for QGIS
+# Route on the turn graph
+r = duckosm.route_points(db, (7.4155, 43.7285), (7.4400, 43.7480))   # Fontvieille to Larvotto
+r["time_s"], r["length_m"], r["edges"]
+
+# Export to Level 3 GMNS or GIS
+duckosm.to_gmns(db, "monaco_gmns.duckdb")   # multi-scale GMNS network
+duckosm.to_gis(db, "monaco.gpkg")           # GeoPackage for QGIS
 ```
 
 All functions: [Python SDK](https://khoshkhah.github.io/duckOSM/reference/python/) and [Rust SDK](https://khoshkhah.github.io/duckOSM/reference/rust/).
+
+## Speed and memory
+
+Mac mini (Apple M6, 12 cores, 16 GB). Built with Rust and DuckDB, processing large areas tile-by-tile (`--tile-zoom 9`) to keep memory bounded:
+
+| Task | Area (source .osm.pbf) | Time | Peak Memory | Output |
+|---|---|---|---|---|
+| Routable network (`build`) | France (5.1 GB) | 3 min 36 s | 1.6 GB | 1.2 GB |
+| OSM feature tables (`quack`) | France (5.1 GB) | 2 min 30 s | 3.8 GB | 2.9 GB |
+| GMNS network (`gmns`) | Kentucky (148 MB) | 12 min | 3.9 GB | 5.8 GB |
+| MATSim simulation (`matsim`) | France (5.1 GB) | 46 s | 10.0 GB | 923 MB |
+| GIS layers (`export-gis`) | France (5.1 GB) | 6.9 s | 7.4 GB | 3.6 GB |
+
+Full benchmarks and comparisons: [Speed on France](https://khoshkhah.github.io/duckOSM/compare/speed/).
 
 ## Learn with the notebook manual
 
