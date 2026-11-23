@@ -113,7 +113,7 @@ figure figcaption, .figure-caption { font-size: .82rem; color: var(--bk-muted); 
 
 // ---- the right panel: the sections of the chapter ----
 #TOC .nav-link, #toc-title { color: var(--bk-muted); }
-#TOC .nav-link.active { color: var(--bk-accent); font-weight: 600; }
+#TOC .nav-link.active { color: var(--bk-accent); font-weight: inherit; }
 #toc-title { font-weight: 700; text-transform: uppercase; letter-spacing: .06em; font-size: .72rem; }
 nav[role=doc-toc] ul ul .nav-link { font-size: .78rem; }
 
@@ -191,7 +191,7 @@ h3 .header-section-number { color: var(--bk-text) !important; }
 // the open chapter and the active section: ink text and a yellow bar
 .sidebar-navigation .sidebar-link.active { box-shadow: inset 3px 0 0 #ffd43b; }
 .sidebar-navigation .sidebar-link.active .chapter-number { color: var(--bk-text) !important; }
-#TOC .nav-link.active, nav[role=doc-toc] .nav-link.active { color: var(--bk-text) !important; border-left: 2px solid #ffd43b !important; font-weight: 600; }
+#TOC .nav-link.active, nav[role=doc-toc] .nav-link.active { color: var(--bk-accent) !important; border-left: 2px solid #ffd43b !important; font-weight: inherit !important; }
 body.quarto-dark .sidebar-navigation .sidebar-link.active .chapter-number { color: #ffd43b !important; }
 
 // ---- no color of the base themes: the hover color of darkly is green, of cosmo is blue ----
@@ -406,7 +406,7 @@ body.quarto-dark div.sourceCode code { color: #9cdcfe !important; }
 // the table of contents at the right: smaller text, closer lines, and a title that wraps under its title, not under
 // its number (the number has a fixed width)
 #TOC a.nav-link { display: block; font-size: .84rem; line-height: 1.3; padding-top: .28rem; padding-bottom: .28rem;
-  padding-left: 2.95rem !important; text-indent: -2.45rem; }
+  padding-left: 2.95rem !important; text-indent: -2.45rem; border-left: 2px solid transparent !important; }
 #TOC a.nav-link .header-section-number { display: inline-block; width: 2.2rem; text-indent: 0; }
 #TOC ul ul a.nav-link { padding-left: 3.55rem !important; text-indent: -3.05rem; font-size: .8rem; }
 #TOC ul ul a.nav-link .header-section-number { width: 2.8rem; }
