@@ -16,9 +16,13 @@ give 18 links and 4 nodes more than `driving.edges` and `driving.nodes`.
 | Check | the CSV files pass the schemas of the specification, and Path4GMNS loads them and finds a route. `--check` checks the values: link ends, lengths, lane numbers, movements. [How each output is checked](../concepts/checks.md) |
 
 ```bash
-pip install "duckosm[sumo]"                      # optional: without netconvert, the movements have no lanes
-duckosm gmns monaco.duckdb                       # -> monaco_gmns.duckdb
-duckosm gmns monaco.duckdb --to-csv gmns/        # also the CSV files
+pip install "duckosm[sumo]"                      # optional: without netconvert, movements have no lanes
+
+# Input: Level 2 routable database (monaco.duckdb)
+# Output: Level 3 GMNS database (monaco_gmns.duckdb by default, or with -o)
+duckosm gmns monaco.duckdb                       # -> creates monaco_gmns.duckdb
+duckosm gmns monaco.duckdb -o out/gmns.duckdb    # custom output file path
+duckosm gmns monaco.duckdb --to-csv gmns/        # also exports standard GMNS CSVs into gmns/
 ```
 
 ## Macro, meso and micro
@@ -32,9 +36,9 @@ duckosm gmns monaco.duckdb --to-csv gmns/        # also the CSV files
 | micro (`--micro`) | a cell of about 7 m of one lane, a lane change, or a lane-to-lane turn | simulators that move each vehicle cell by cell and lane by lane |
 
 ```bash
-duckosm gmns monaco.duckdb --meso --micro                  # -> monaco_gmns.duckdb with meso_driving, micro_driving
-duckosm gmns monaco.duckdb --meso --meso-mode cycling      # the meso network of cycling
-duckosm gmns-viz monaco_gmns.duckdb                        # draws the meso and micro networks
+duckosm gmns monaco.duckdb --meso --micro                  # creates monaco_gmns.duckdb with meso_driving & micro_driving
+duckosm gmns monaco.duckdb -o out/gmns.duckdb --meso      # writes to custom output path
+duckosm gmns-viz monaco_gmns.duckdb                        # draws the meso and micro networks in an interactive HTML viewer
 ```
 
 ## The tables
