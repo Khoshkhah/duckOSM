@@ -206,7 +206,7 @@ nav:
       - The Rust engine: concepts/rust-engine.md
   - Compare:
       - Overview: compare/index.md
-      - Speed on France: compare/speed.md
+      - Benchmarks: compare/speed.md
       - duckOSM for routing users: compare/for-routing-users.md
       - duckOSM and OSMnx: concepts/osmnx.md
       - duckOSM for GIS users: compare/for-gis-users.md
