@@ -57,16 +57,16 @@ The routable network of each mode: edges with their `edge_id`, nodes, and the le
 
 ### 3. GMNS network
 
-The multi-resolution network in the GMNS standard, from macro (links) to micro (lanes, movements, and cells), powering simulation and Graph Neural Networks.
+The multi-resolution network in the GMNS standard, from macro (links) to micro (lanes, movements, and cells). Level 3 GMNS DuckDB (`<area>_gmns.duckdb`) is the common interchange foundation for downstream traffic simulation (SUMO, MATSim), rail infrastructure (railML), and Graph Neural Networks (PyG HeteroData).
 
 | Read by | Export | Command |
 |---|---|---|
 | DTALite, Path4GMNS | [GMNS](gmns.md) tables: macro | `duckosm gmns` |
-| PyTorch Geometric, GNNs | [PyG HeteroData](../reference/sdk/ml.md): heterogeneous urban graph tensors | `duckosm.ml.to_pyg()` |
+| PyTorch Geometric, GNNs | [PyG HeteroData](../reference/sdk/ml.md): heterogeneous urban graph tensors from GMNS | `duckosm.ml.to_pyg()` |
 | SUMO | [SUMO](sumo.md) plain XML and `.netccfg` (netconvert makes the `.net.xml`) | `duckosm sumo` |
-| MATSim, BEAM, eqasim | [MATSim](matsim.md) `network.xml`, lanes and signals | `duckosm matsim`, `matsim-lanes` |
+| MATSim, BEAM, eqasim | [MATSim](matsim.md) `network.xml`, lanes and signals from GMNS | `duckosm matsim`, `matsim-lanes` |
 | DTALite, Path4GMNS | [GMNS meso and micro](gmns.md#meso-and-micro-networks) | `duckosm gmns --meso --micro` |
-| Rail planning: OpenTrack, RailSys | [railML 2.4](railml.md) | `duckosm railml` |
+| Rail planning: OpenTrack, RailSys | [railML 2.4](railml.md) rail topology | `duckosm railml` |
 
 ### 4. HD map
 

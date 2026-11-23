@@ -33,9 +33,11 @@ GMNS structures the network across three scales:
 
 ## The bridge to simulation and AI
 
-The GMNS DuckDB database serves as the common interchange format for downstream models:
+The GMNS DuckDB database (`<area>_gmns.duckdb`) serves as the Level 3 multi-resolution foundation for downstream simulation and machine learning:
 
-* **Traffic Simulation:** Directly generates ready-to-run network configurations for [SUMO](../sumo.md) and [MATSim](../matsim.md), complete with lane counts, turning permissions, and traffic signal timing.
+* **SUMO Simulation:** Directly compiles network XML (`.nod.xml`, `.edg.xml`, `.con.xml`, `.add.xml`) and `.netccfg` from GMNS links, lanes, junction turning movements, and signal groupings.
+* **MATSim Simulation:** Generates macro `network.xml` and micro `lanes.xml` plus signal control files (`matsim-lanes`) directly from GMNS link and lane tables.
+* **railML Infrastructure:** Bridges railway tracks, switches, signals, and stations into standardized rail planning models (OpenTrack, RailSys).
 * **Graph Machine Learning:** Converts GMNS nodes, links, and lane movements directly into PyTorch Geometric heterogeneous tensors (`HeteroData`) for traffic prediction, speed estimation, and spatial GNNs.
 * **Consistent IDs:** Every GMNS link, SUMO edge, and MATSim link preserves the exact same duckOSM **`edge_id`**, making it trivial to join simulation results back to the original OSM roads.
 

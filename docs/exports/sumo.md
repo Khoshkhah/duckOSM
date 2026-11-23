@@ -19,6 +19,8 @@ duckosm sumo monaco.duckdb --netconvert --join-junctions    # merges nearby comp
 
 ## What goes in
 
+SUMO network files are compiled from the Level 3 GMNS multi-resolution schema: junction topology (`node`), road links (`link`), physical lanes (`lane`), turning movements with restrictions (`movement`), and signal groups (`signal_controller`).
+
 | SUMO item | From duckOSM |
 |---|---|
 | edge id | `edge_id` |

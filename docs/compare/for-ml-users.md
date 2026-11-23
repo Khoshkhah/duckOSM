@@ -35,6 +35,10 @@ net.driving.map(color_by=pd.Series(predicted.detach().numpy(), index=data.edge_i
 The `edge_id` is the same on each rebuild. So labels joined by `edge_id` (traffic counts, speeds) stay correct after an
 OSM update.
 
+## Heterogeneous graphs from Level 3 GMNS
+
+While Level 2 exports homogenous turn and junction graphs, Level 3 GMNS DuckDB (`<area>_gmns.duckdb`) provides the full multi-relational urban topology: intersections (`node`), road sections (`link`), physical lanes (`lane`), turning connections (`movement`), and signals (`signal_controller`). In graph learning, these map directly to heterogeneous graph models (`HeteroData` in PyTorch Geometric) for lane-level speed forecasting, signal control RL, and spatial network embeddings.
+
 ## duckOSM and city2graph
 
 [city2graph](https://github.com/c2g-dev/city2graph) makes graphs for graph neural networks from GeoDataFrames:
