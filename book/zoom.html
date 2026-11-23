@@ -117,3 +117,21 @@ window.addEventListener("load", () => {
   });
 })();
 </script>
+
+<script>
+// The left panel keeps its scroll position from chapter to chapter (each chapter is a new page). Without this, the panel
+// opens at the top, and then Quarto scrolls the open chapter to the top of the panel: the panel jumps. This runs before
+// Quarto's DOMContentLoaded code, so Quarto sees the open chapter on the screen and does not scroll.
+(() => {
+  const nav = document.getElementById("quarto-sidebar");
+  if (!nav) return;
+  const KEY = "duckosm-book-sidebar-scroll";
+  try {
+    const saved = sessionStorage.getItem(KEY);
+    if (saved !== null) nav.scrollTop = +saved;
+  } catch (e) {}
+  const save = () => { try { sessionStorage.setItem(KEY, String(nav.scrollTop)); } catch (e) {} };
+  window.addEventListener("pagehide", save);
+  nav.addEventListener("click", save);
+})();
+</script>

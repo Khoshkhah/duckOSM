@@ -107,13 +107,13 @@ figure figcaption, .figure-caption { font-size: .82rem; color: var(--bk-muted); 
 .sidebar-navigation .sidebar-item-container .sidebar-link { display: flex; gap: .55rem; align-items: baseline; padding: .42rem .65rem;
   border-radius: 7px; color: var(--bk-muted); font-size: .92rem; font-weight: 500; }
 .sidebar-navigation .sidebar-link:hover { background: var(--bk-surface-2); color: var(--bk-text); }
-.sidebar-navigation .sidebar-link.active { background: var(--bk-accent-soft); color: var(--bk-accent); font-weight: 600; }
+.sidebar-navigation .sidebar-link.active { background: var(--bk-accent-soft); color: var(--bk-accent); }   // same weight: no new line breaks
 .sidebar-navigation .sidebar-link .chapter-number { color: var(--bk-faint); font-weight: 600; min-width: 1.1rem; }
 .sidebar-navigation .sidebar-link.active .chapter-number { color: var(--bk-accent); }
 
 // ---- the right panel: the sections of the chapter ----
 #TOC .nav-link, #toc-title { color: var(--bk-muted); }
-#TOC .nav-link.active { color: var(--bk-accent); font-weight: 600; }
+#TOC .nav-link.active { color: var(--bk-accent); }
 #toc-title { font-weight: 700; text-transform: uppercase; letter-spacing: .06em; font-size: .72rem; }
 nav[role=doc-toc] ul ul .nav-link { font-size: .78rem; }
 
@@ -191,7 +191,7 @@ h3 .header-section-number { color: var(--bk-text) !important; }
 // the open chapter and the active section: ink text and a yellow bar
 .sidebar-navigation .sidebar-link.active { box-shadow: inset 3px 0 0 #ffd43b; }
 .sidebar-navigation .sidebar-link.active .chapter-number { color: var(--bk-text) !important; }
-#TOC .nav-link.active, nav[role=doc-toc] .nav-link.active { color: var(--bk-text) !important; border-left: 2px solid #ffd43b !important; font-weight: 600; }
+#TOC .nav-link.active, nav[role=doc-toc] .nav-link.active { color: var(--bk-text) !important; border-left: 2px solid #ffd43b !important; }
 body.quarto-dark .sidebar-navigation .sidebar-link.active .chapter-number { color: #ffd43b !important; }
 
 // ---- no color of the base themes: the hover color of darkly is green, of cosmo is blue ----
@@ -458,3 +458,8 @@ main div.sourceCode:not(.cell-code) > pre { max-height: 22rem; overflow-y: auto 
 #quarto-margin-sidebar::-webkit-scrollbar-thumb, #TOC::-webkit-scrollbar-thumb { background: var(--bk-line); border-radius: 3px; }
 // the sidebar: some space under the last chapter, so it does not touch the bottom of the window
 #quarto-sidebar .sidebar-menu-container { padding-bottom: 2.5rem; }
+
+// thin scroll bars on the left and the right panels
+#quarto-sidebar, #quarto-margin-sidebar { scrollbar-width: thin; scrollbar-color: var(--bk-line) transparent; }
+#quarto-sidebar::-webkit-scrollbar, #quarto-margin-sidebar::-webkit-scrollbar { width: 6px; }
+#quarto-sidebar::-webkit-scrollbar-thumb, #quarto-margin-sidebar::-webkit-scrollbar-thumb { background: var(--bk-line); border-radius: 3px; }
