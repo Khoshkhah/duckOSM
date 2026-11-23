@@ -5,12 +5,12 @@ GMNS database of `duckosm gmns`, because it has the lanes and the turns of each 
 
 ```mermaid
 flowchart LR
-  gmns[("monaco_gmns.duckdb<br/>(3D lane geometry)")] --> ll2["Lanelet2 (.osm)"]
+  gmns[("<area>_gmns.duckdb<br/>(3D geometry)")] --> ll2["Lanelet2 (.osm)"]
   gmns --> xodr["OpenDRIVE (.xodr)"]
   gmns --> lr["Lane-level routing"]
 ```
 
-| Read by | Output | Command |
+| Read by | Export | Command |
 |---|---|---|
 | Your own lane router | [Lane-level routing](../lane-routing.md): a lane graph | `duckosm lane-graph`, `route-lanes` |
 | Autoware, lanelet2 | [Lanelet2](../lanelet2.md): `.osm` | `duckosm lanelet2` |

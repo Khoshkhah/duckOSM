@@ -163,19 +163,19 @@ nav:
           - osm2pgsql tables: exports/osm2pgsql.md
           - Vector tiles (PMTiles): exports/pmtiles.md
       - 2. Routable network:
-          - exports/network/index.md
+          - exports/routable-network/index.md
           - The turn graph: exports/turn-graph.md
           - GeoPackage / shapefile: exports/gis.md
           - networkx: exports/networkx.md
       - 3. GMNS network:
-          - exports/simulation/index.md
+          - exports/gmns-network/index.md
           - GMNS: exports/gmns.md
           - GMNS meso and micro: exports/gmns-meso-micro.md
           - MATSim: exports/matsim.md
           - SUMO: exports/sumo.md
           - railML: exports/railml.md
       - 4. HD map:
-          - exports/lanes/index.md
+          - exports/hd-map/index.md
           - Lane-level routing: exports/lane-routing.md
           - Lanelet2: exports/lanelet2.md
           - OpenDRIVE: exports/opendrive.md
