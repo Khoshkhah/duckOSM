@@ -3,26 +3,67 @@
 How duckOSM compares with the specialized tools that engineers and researchers use for road networks, GIS, simulation, planning, and graph machine learning. Each category has its own dedicated comparison guide.
 
 ```mermaid
-flowchart LR
-  subgraph Inputs ["Input Source"]
-    PBF["OpenStreetMap (.osm.pbf)"]
+flowchart TB
+  PBF[("<b>OpenStreetMap Source</b><br/><code>region.osm.pbf</code>")]
+
+  subgraph Legacy ["⚠️ Traditional Approach: 4 Isolated Silos"]
+    direction TB
+    L_GIS["<b>GIS & Vector (QuackOSM, ogr2ogr)</b><br/>Flat geometry · Lost directions & turn bans"]
+    L_SIM["<b>Traffic Simulation (netconvert, MATSim)</b><br/>Heuristic node cuts · Artificial bottleneck queues"]
+    L_PLAN["<b>Transport Planning (osm2gmns)</b><br/>Loose CSVs · Broken pedestrian & transit links"]
+    L_HD["<b>Autonomous Driving (JOSM, manual)</b><br/>Isolated lanelet IDs · No shared topology"]
+    L_OUT["❌ <b>Siloed & Incompatible Outputs</b><br/>Disconnected IDs · Cross-domain joins impossible"]
+
+    L_GIS --> L_OUT
+    L_SIM --> L_OUT
+    L_PLAN --> L_OUT
+    L_HD --> L_OUT
   end
 
-  subgraph Legacy ["Fragmented Legacy Tools"]
-    L1["OSMnx / QuackOSM<br/>(Slow Overpass queries, transient IDs)"]
-    L2["SUMO netconvert / MATSim<br/>(Heuristic cuts, dropped signals)"]
-    L3["osm2gmns<br/>(Loose CSVs, broken footway links)"]
-    L4["CommonRoad / Lanelet2<br/>(Manual drawing, isolated IDs)"]
+  subgraph Unified ["✨ duckOSM: Unified Multi-Resolution Pipeline"]
+    direction TB
+    U_L2[("<b>Level 2 Routable DuckDB</b><br/>Persistent 64-bit <code>edge_id</code> · Full turn bans · Multimodal parity")]
+    U_L3[("<b>Level 3 GMNS DuckDB</b><br/>Macro, meso & micro schemas · Continuous corridors (<code>chains</code>)")]
+    
+    subgraph U_EXP ["Zero-Copy Multi-Domain Exports (All sharing edge_id)"]
+      direction LR
+      E_GIS["<b>GIS & Spatial</b><br/>GeoParquet · PostGIS · PMTiles"]
+      E_SIM["<b>Simulation</b><br/>SUMO XML · MATSim network & lanes"]
+      E_HD["<b>HD Maps & AI</b><br/>OpenDRIVE · CommonRoad · PyG HeteroData"]
+    end
+
+    U_JOIN["✅ <b>Unified Intelligence via Standard SQL</b><br/>Simulation traces, ML tensors & GIS layers join directly on <code>edge_id</code>"]
+
+    U_L2 ==>|Topological expansion| U_L3
+    U_L3 ==> E_GIS & E_SIM & E_HD
+    E_GIS & E_SIM & E_HD ==> U_JOIN
   end
 
-  subgraph Unified ["duckOSM Unified Pipeline"]
-    U1["Level 2 Routable DuckDB<br/>Stable 64-bit edge_id · Turn bans · Multimodal parity"]
-    U2["Level 3 GMNS DuckDB<br/>Macro · Meso · Micro schemas · Chains"]
-    U3["Level 4 HD Maps & ML<br/>OpenDRIVE · CommonRoad · PyG HeteroData"]
-  end
+  PBF -.->|Re-parsed separately 4 times| L_GIS
+  PBF -.-> L_SIM
+  PBF -.-> L_PLAN
+  PBF -.-> L_HD
 
-  PBF --> Legacy
-  PBF --> Unified
+  PBF ==>|Single high-speed parse (duckosm build)| U_L2
+
+  %% Custom Aesthetics & Semantic Styling
+  classDef pbf fill:#e7f5ff,stroke:#1971c2,stroke-width:2.5px,color:#0c4a6e
+  classDef legacy fill:#ffffff,stroke:#ff8787,stroke-width:1.5px,stroke-dasharray: 4 3,color:#801313
+  classDef silo fill:#ffe3e3,stroke:#fa5252,stroke-width:2px,color:#991b1b
+  classDef duckdb fill:#fff9db,stroke:#f59f00,stroke-width:2.5px,color:#262626
+  classDef exports fill:#ffffff,stroke:#ced4da,stroke-width:1.5px,color:#212529
+  classDef success fill:#ebfbee,stroke:#37b24d,stroke-width:2px,color:#2b8a3e
+
+  class PBF pbf
+  class L_GIS,L_SIM,L_PLAN,L_HD legacy
+  class L_OUT silo
+  class U_L2,U_L3 duckdb
+  class E_GIS,E_SIM,E_HD exports
+  class U_JOIN success
+
+  style Legacy fill:#fff8f8,stroke:#ffc9c9,stroke-width:1.5px,stroke-dasharray: 5 4
+  style Unified fill:#f8fcfa,stroke:#b2f2bb,stroke-width:2px
+  style U_EXP fill:#ffffff,stroke:#e9ecef,stroke-width:1px
 ```
 
 ## Master Tool Comparison
