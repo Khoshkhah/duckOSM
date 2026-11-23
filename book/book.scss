@@ -659,7 +659,7 @@ h3 .header-section-number {
 nav[role=doc-toc] .nav-link.active {
   color: var(--bk-accent) !important;
   border-left: 2px solid #ffd43b !important;
-  font-weight: inherit !important;
+  font-weight: 500 !important;
 }
 
 body.quarto-dark .sidebar-navigation .sidebar-link.active .chapter-number {
@@ -1486,22 +1486,35 @@ body.quarto-dark div.sourceCode code {
   padding-left: 2.95rem !important;
   text-indent: -2.45rem;
   border-left: 2px solid transparent !important;
+  font-weight: 500 !important;
 }
 
 #TOC a.nav-link .header-section-number {
   display: inline-block;
   width: 2.2rem;
   text-indent: 0;
+  font-weight: 500 !important;
 }
 
 #TOC ul ul a.nav-link {
   padding-left: 3.55rem !important;
   text-indent: -3.05rem;
   font-size: .8rem;
+  font-weight: 500 !important;
 }
 
 #TOC ul ul a.nav-link .header-section-number {
   width: 2.8rem;
+  font-weight: 500 !important;
+}
+
+nav[role=doc-toc] ul.collapse {
+  display: none !important;
+}
+
+nav[role=doc-toc] ul.collapse.show,
+nav[role=doc-toc] ul:not(.collapse) {
+  display: block !important;
 }
 
 // the sidebar: smaller chapter links, a thin scroll bar, and no line under the title

@@ -195,10 +195,7 @@
     window.__duckosm_reinit = function () {
       if (typeof initLightboxBadges === "function") initLightboxBadges();
       if (typeof window.__duckosm_applyMaps === "function") window.__duckosm_applyMaps();
-      try {
-        const spy = window.bootstrap?.ScrollSpy?.getInstance(document.body);
-        if (spy) spy.refresh();
-      } catch (e) {}
+      if (typeof window.__duckosm_initToc === "function") window.__duckosm_initToc();
     };
     window.addEventListener("load", () => {
       apply();
@@ -206,7 +203,7 @@
     });
   })();
 </script>
-<!-- Maintain sidebar scroll position and enable instant SPA chapter navigation (zero sidebar refresh) -->
+<!-- Maintain sidebar scroll position, instant SPA chapter navigation, and right panel TOC subsection controller -->
 <script>
 (function () {
   const KEY = "duckosm-book-sidebar-scroll";
@@ -236,6 +233,100 @@
       sessionStorage.setItem(KEY, desc.get.call(sb));
     }, { passive: true });
   }
+
+  // --- Right Panel TOC & Subsection Controller ---
+  function walkTocHierarchy(toc) {
+    if (!toc) return;
+    const allSubUls = toc.querySelectorAll("ul ul");
+    allSubUls.forEach((ul) => {
+      const hasActiveChild = !!ul.querySelector("a.nav-link.active");
+      const prevA = ul.previousElementSibling;
+      const parentIsActive = prevA && prevA.matches("a.nav-link") && prevA.classList.contains("active");
+
+      if (hasActiveChild || parentIsActive) {
+        ul.classList.remove("collapse");
+        ul.classList.add("show");
+      } else {
+        ul.classList.add("collapse");
+        ul.classList.remove("show");
+      }
+    });
+  }
+
+  function getTocItems(toc) {
+    if (!toc) return [];
+    const links = Array.from(toc.querySelectorAll("a.nav-link"));
+    const items = [];
+    for (const link of links) {
+      const href = link.getAttribute("data-scroll-target") || link.getAttribute("href") || "";
+      const id = href.replace(/^.*#/, "");
+      if (!id) continue;
+      const target = document.getElementById(id) || document.querySelector(`[data-anchor-id="${id}"]`);
+      if (target) {
+        items.push({ link, target });
+      }
+    }
+    return items;
+  }
+
+  function initTocController() {
+    const toc = document.querySelector("#quarto-margin-sidebar nav[role='doc-toc'], #TOC");
+    if (!toc) return;
+
+    function updateActiveOnScroll() {
+      const items = getTocItems(toc);
+      if (!items.length) return;
+
+      const scrollPos = window.scrollY || window.pageYOffset;
+      let activeItem = null;
+
+      // When scrolled near the bottom of the page, activate the last section
+      if (window.innerHeight + scrollPos >= document.body.offsetHeight - 50) {
+        activeItem = items[items.length - 1];
+      } else {
+        for (let i = items.length - 1; i >= 0; i--) {
+          const item = items[i];
+          const top = item.target.getBoundingClientRect().top + scrollPos;
+          if (scrollPos >= top - 110) {
+            activeItem = item;
+            break;
+          }
+        }
+      }
+
+      if (!activeItem && items.length) {
+        activeItem = items[0];
+      }
+
+      if (activeItem) {
+        items.forEach(({ link }) => {
+          link.classList.toggle("active", link === activeItem.link);
+        });
+        walkTocHierarchy(toc);
+      }
+    }
+
+    if (!window.__duckosm_toc_scroll_bound) {
+      window.__duckosm_toc_scroll_bound = true;
+      let scheduled = false;
+      window.addEventListener("scroll", () => {
+        if (!scheduled) {
+          scheduled = true;
+          requestAnimationFrame(() => {
+            if (window.__duckosm_activeTocUpdater) {
+              window.__duckosm_activeTocUpdater();
+            }
+            scheduled = false;
+          });
+        }
+      }, { passive: true });
+    }
+
+    window.__duckosm_activeTocUpdater = updateActiveOnScroll;
+    updateActiveOnScroll();
+  }
+
+  window.__duckosm_initToc = initTocController;
 
   function getFilename(href) {
     if (!href) return "";
@@ -322,10 +413,22 @@
         history.pushState({ url }, doc.title, url);
       }
 
-      // 7. Scroll main window to top
-      window.scrollTo(0, 0);
+      // 7. Scroll to target hash or top
+      const parsedUrl = new URL(url, window.location.href);
+      if (parsedUrl.hash) {
+        const hashId = decodeURIComponent(parsedUrl.hash.slice(1));
+        const hashEl = document.getElementById(hashId) || document.querySelector(`[data-anchor-id="${hashId}"]`);
+        if (hashEl) {
+          const top = hashEl.getBoundingClientRect().top + (window.scrollY || window.pageYOffset) - 75;
+          window.scrollTo({ top: Math.max(0, top), behavior: "instant" });
+        } else {
+          window.scrollTo(0, 0);
+        }
+      } else {
+        window.scrollTo(0, 0);
+      }
 
-      // 8. Re-initialize interactive widgets on the newly injected content
+      // 8. Re-initialize interactive widgets and right TOC
       if (window.__duckosm_reinit) {
         window.__duckosm_reinit();
       }
@@ -337,7 +440,7 @@
     }
   }
 
-  // Intercept clicks on internal book links (left sidebar, prev/next buttons, breadcrumbs)
+  // Intercept clicks on internal book links (left sidebar, right TOC subsections, prev/next buttons, breadcrumbs)
   document.addEventListener("click", (e) => {
     const a = e.target.closest("a");
     if (!a || !a.href) return;
@@ -349,12 +452,32 @@
     const targetUrl = new URL(a.href, window.location.href);
     if (targetUrl.origin !== window.location.origin) return;
 
-    // Same-page anchor click -> let native smooth scrolling handle it
+    // A. Right TOC subsection click
+    const isTocLink = !!a.closest("#quarto-margin-sidebar, #TOC");
+    if (isTocLink && targetUrl.hash) {
+      const targetId = decodeURIComponent(targetUrl.hash.slice(1));
+      const targetEl = document.getElementById(targetId) || document.querySelector(`[data-anchor-id="${targetId}"]`);
+      if (targetEl) {
+        e.preventDefault();
+        const top = targetEl.getBoundingClientRect().top + (window.scrollY || window.pageYOffset) - 75;
+        window.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+        history.replaceState(null, "", targetUrl.hash);
+
+        const toc = a.closest("#quarto-margin-sidebar nav[role='doc-toc'], #TOC");
+        if (toc) {
+          toc.querySelectorAll("a.nav-link").forEach((l) => l.classList.toggle("active", l === a));
+          walkTocHierarchy(toc);
+        }
+        return;
+      }
+    }
+
+    // B. Same-page anchor click elsewhere -> let browser smooth scrolling handle it
     if (targetUrl.pathname === window.location.pathname && targetUrl.search === window.location.search) {
       return;
     }
 
-    // Only intercept links within /book/
+    // C. Only intercept links within /book/
     if (!targetUrl.pathname.includes("/book/")) return;
 
     const isSidebarLink = !!a.closest("#quarto-sidebar");
@@ -369,7 +492,19 @@
 
   // Handle browser Back / Forward buttons
   window.addEventListener("popstate", (e) => {
+    if (!window.location.pathname.includes("/book/")) {
+      window.location.reload();
+      return;
+    }
     navigateTo(window.location.href, false);
   });
+
+  // Run on initial page load
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initTocController);
+  } else {
+    initTocController();
+  }
+  window.addEventListener("load", initTocController);
 })();
 </script>
