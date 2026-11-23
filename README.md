@@ -107,8 +107,8 @@ All outputs come from one `.osm.pbf` file, in five levels, and all take your OSM
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/images/levels-dark.svg">
-    <img src="https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/images/levels-light.svg" alt="The five levels of duckOSM's outputs: 0 OSM file (pbfcut), 1 OSM data from .osm.pbf (QuackOSM, GDAL, Geofabrik, PMTiles), 2 routable network in DuckDB (GeoPackage, networkx), 3 GMNS network in GMNS DuckDB (GMNS, GNNs, MATSim, SUMO), 4 HD map with 3D lane geometry, experimental (Lanelet2, OpenDRIVE)" width="900">
+    <source media="(prefers-color-scheme: dark)" srcset="images/levels-dark.svg">
+    <img src="images/levels-light.svg" alt="The five levels of duckOSM's outputs: 0 OSM file (pbfcut), 1 OSM data from .osm.pbf (QuackOSM, GDAL, Geofabrik, PMTiles), 2 routable network in DuckDB (GeoPackage, networkx), 3 GMNS network in GMNS DuckDB (GMNS, GNNs, MATSim, SUMO), 4 HD map with 3D lane geometry, experimental (Lanelet2, OpenDRIVE)" width="900">
   </picture>
 </p>
 
@@ -147,20 +147,6 @@ duckosm.to_gis(db, "monaco.gpkg")           # GeoPackage for QGIS
 ```
 
 All functions: [Python SDK](https://khoshkhah.github.io/duckOSM/reference/python/) and [Rust SDK](https://khoshkhah.github.io/duckOSM/reference/rust/).
-
-## Speed and memory
-
-Mac mini (Apple M6, 12 cores, 16 GB). Built with Rust and DuckDB, processing large areas tile-by-tile (`--tile-zoom 9`) to keep memory bounded:
-
-| Task | Area (source .osm.pbf) | Time | Peak Memory | Output |
-|---|---|---|---|---|
-| Routable network (`build`) | France (5.1 GB) | 3 min 36 s | 1.6 GB | 1.2 GB |
-| OSM feature tables (`quack`) | France (5.1 GB) | 2 min 30 s | 3.8 GB | 2.9 GB |
-| GMNS network (`gmns`) | Kentucky (148 MB) | 12 min | 3.9 GB | 5.8 GB |
-| MATSim simulation (`matsim`) | France (5.1 GB) | 46 s | 10.0 GB | 923 MB |
-| GIS layers (`export-gis`) | France (5.1 GB) | 6.9 s | 7.4 GB | 3.6 GB |
-
-Full benchmarks and comparisons: [Speed on France](https://khoshkhah.github.io/duckOSM/compare/speed/).
 
 ## Learn with the notebook manual
 

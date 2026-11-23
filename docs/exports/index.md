@@ -16,7 +16,7 @@ The levels go from the raw OSM data to the most detailed network. Each level is 
 <a class="lv" href="#0-osm-file"><span class="n">0</span><b>OSM file</b><span class="db-tag">.osm.pbf</span><span class="desc">Exact boundary cut with your fixes</span><span class="tools">pbfcut</span></a>
 <a class="lv" href="#1-osm-data"><span class="n">1</span><b>OSM data</b><span class="db-tag">from .osm.pbf</span><span class="desc">Flat tables of all OSM objects</span><span class="tools">QuackOSM · GDAL · Geofabrik · PMTiles</span></a>
 <a class="lv" href="#2-routable-network"><span class="n">2</span><b>Routable network</b><span class="db-tag">DuckDB</span><span class="desc">Drive, walk, bike<br>Edges, edge_id, turns</span><span class="tools">GeoPackage · networkx</span></a>
-<a class="lv" href="#3-gmns-network"><span class="n">3</span><b>GMNS network</b><span class="db-tag">GMNS DuckDB</span><span class="desc">Multi-scale: links, lanes, zones</span><span class="tools">GMNS · GNNs · MATSim · SUMO</span></a>
+<a class="lv" href="#3-gmns-network"><span class="n">3</span><b>GMNS network</b><span class="db-tag">GMNS DuckDB</span><span class="desc">Macro, meso, micro<br>links, lanes, turns</span><span class="tools">GMNS · GNNs · MATSim · SUMO</span></a>
 <a class="lv" href="#4-hd-map"><span class="n">4</span><b>HD map</b><span class="db-tag">3D geometry</span><span class="desc">Lane shape in 3D (experimental)</span><span class="tools">Lanelet2 · OpenDRIVE</span></a>
 </div>
 

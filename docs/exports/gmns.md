@@ -116,18 +116,4 @@ Driving network, with netconvert. Input is the Level 2 routable database (`<area
 
 Large areas run tile-by-tile (`--tile-zoom 9`), keeping peak memory bounded by the tile rather than the whole region.
 
-## duckOSM and osm2gmns
-
-[osm2gmns](https://github.com/jiawlu/OSM2GMNS) is the most used OSM-to-GMNS tool.
-
-| | duckOSM | osm2gmns 0.7 |
-|---|---|---|
-| Ids | `edge_id`, the same after each build | numbered from 0 on each run |
-| OSM fixes | yes | no |
-| Lanes | each lane with its shape, and from the OSM tags its turns, its use (bus, bike) and its width | each lane with its shape |
-| Turns | the legal turns, with the OSM turn restrictions | from the geometry |
-| Complex junctions | as in OSM | merged into one |
-| Meso and micro | included, with stable `edge_id` | mature |
-| Columns that only one has | `geom`, `meso_type`, the lane ranges, `width`, `cell_k` | `zone_id`, `activity_type`, `is_boundary`, a micro `capacity` |
-
 All options: [Command line](../reference/cli.md#gmns).
