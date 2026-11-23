@@ -8,20 +8,20 @@ module is `duckosm.ml` ([reference](../reference/sdk/ml.md)). The notebook
 pip install "duckosm[ml]"      # torch and torch_geometric
 ```
 
-## Your code and duckOSM
+## Traditional approach vs duckOSM
 
-| Your code today | duckOSM |
-|---|---|
-| OSMnx graph → `torch_geometric.utils.from_networkx(G)` | `duckosm.ml.to_pyg(net.driving)` (Level 2 homogenous graph) |
-| node ids → index, by hand | `data.node_id`, `data.edge_id`: the index of each node and arc goes back to the network |
-| one-hot of `highway`, by hand | `features=["highway"]` gives `highway=primary`, … (`data.edge_attr_names`) |
-| a line graph for edge tasks (`nx.line_graph`) | `graph="turns"`: each edge is a node, each legal turn an arc (turn restrictions in) |
-| junction features (coordinates, degree, elevation) | `node_features=["lon", "lat", "in_degree", "out_degree", "degree", "ele"]` |
-| `dgl.from_networkx(G)` | `duckosm.ml.to_dgl(net.driving)` |
-| multi-relational graphs (lanes, signals, roads) by hand | Level 3 GMNS DuckDB: direct mapping to `HeteroData` across 3 tiers |
-| another library | `duckosm.ml.graph_arrays(net.driving)`: the same arrays as numpy |
-| separate disconnected graphs for walk/bike/drive | `net.walking`, `net.cycling`, or `gmns_all`: shared multimodal crossing nodes intact |
-| visualize predictions on map by hand | `net.driving.map(color_by=predicted_series)` keyed directly by `edge_id` |
+| Task | Traditional approach | duckOSM |
+|---|---|---|
+| Road graph for PyTorch Geometric | OSMnx → `torch_geometric.utils.from_networkx(G)` | `duckosm.ml.to_pyg(net.driving)` (Level 2 homogenous graph) |
+| Align node & edge indices | Manual index remapping (`0..N-1`) | `data.node_id`, `data.edge_id`: indices map directly back to network |
+| Categorical feature encoding | Manual one-hot encoding (`pd.get_dummies`) | `features=["highway"]` auto-creates 0/1 columns (`data.edge_attr_names`) |
+| Edge-level tasks (line graph) | `nx.line_graph` (ignores turn restrictions) | `graph="turns"`: legal turns only, respecting turn bans & signals |
+| Junction features & elevation | Manual degree & DEM calculation | `node_features=["lon", "lat", "in_degree", "out_degree", "degree", "ele"]` |
+| Road graph for DGL | `dgl.from_networkx(G)` | `duckosm.ml.to_dgl(net.driving)` |
+| Multi-relational urban graphs | Custom ETL stitching links, lanes, signals | Level 3 GMNS DuckDB: direct mapping to `HeteroData` across 3 tiers |
+| Custom frameworks / NumPy | Manual tensor/graph array extraction | `duckosm.ml.graph_arrays(net.driving)`: zero-copy NumPy arrays |
+| Multimodal transport graphs | Separate queries with disconnected nodes | `net.walking`, `net.cycling`, or `gmns_all`: shared multimodal crossing nodes |
+| Visualize predictions on map | Manual GeoPandas merge and plotting | `net.driving.map(color_by=predicted_series)` keyed directly by `edge_id` |
 
 | `graph` | A node is | An arc is | For |
 |---|---|---|---|
