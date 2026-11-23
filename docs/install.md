@@ -63,13 +63,9 @@ Optional. Add them in brackets, for example `pip install "duckosm[sumo]"`.
 | `networkx` | networkx | `to_networkx()`, `to_networkx_nodes()`, `write_graph()`. `routing` is its old name, for one more release |
 | `rustworkx` | rustworkx | `to_rustworkx()` |
 | `levels` | roadstyle | the old Python level functions; not needed by `duckosm levels` (Rust) |
-| `viz` | mapstyle, lanestyle | map functions in Python |
+| `viz` | roadstyle, mapstyle, lanestyle, matplotlib | map functions in Python |
 
 `route()`, the exports, `export-graph` to GraphML and `duckosm elevation` need no extra. No duckOSM command needs osmium or GDAL.
-
-## Not ported to Rust yet
-
-`build` (in part) and `levels`. They work, and they move to Rust next.
 
 ## Where files go
 

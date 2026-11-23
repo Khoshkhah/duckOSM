@@ -45,8 +45,7 @@ Mac mini (Apple M6, 12 cores, 16 GB).
 | | `to_networkx()` | 16 s | 5.6 GB | |
 | France (~35 GB `.duckdb`) | both | not run: the Mac mini has too little free disk | | |
 
-`export-graph` writes the GraphML file while DuckDB reads the rows, so its memory stays near DuckDB's limit of 2 GB. Before
-this change, Kentucky needed 9.3 GB. The file has the same bytes.
+`export-graph` writes the GraphML file while DuckDB reads the rows, so its memory stays near DuckDB's limit of 2 GB.
 
 networkx keeps each node and arc as a Python object, so it is for a city or a region: France needs about 27 GB. For a
 country, use rustworkx, petgraph or [`duckosm route`](../guides/route.md).

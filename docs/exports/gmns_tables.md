@@ -30,7 +30,7 @@ In the GMNS database (`<area>_gmns.duckdb`), **every table belongs to a schema**
 
 #### Macro schemas (`duckosm gmns`)
 * **`gmns_driving` (16 tables):** Driving network for cars, buses, and trucks. Includes lanes, turns, signals, curb parking, crosswalks, and intersection turn curves.
-* **`gmns_walking` (14 tables):** Pedestrian network for sidewalks, paths, and crosswalks. Tracks parallel roads via `link_along` and connects footways to road crossings.
+* **`gmns_walking` (15 tables):** Pedestrian network for sidewalks, paths, and crosswalks. Tracks parallel roads via `link_along`, connects footways to road crossings, and lists unpaired lanes in `lane_check`.
 * **`gmns_cycling` (13 tables):** Bicycle network for cycleways and bikeable roads. Tracks parallel roads via `link_along`.
 * **`gmns_all` (5 tables):** Created with `--combined`. Merges shared streets across modes into one link with `allowed_uses = 'auto,bike,walk'`. Lanes and turns stay in the mode schemas.
 
@@ -58,7 +58,7 @@ In the GMNS database (`<area>_gmns.duckdb`), **every table belongs to a schema**
 | [`crossing`](#crossing) | ➕ | — | ✅ | — | — | pedestrian crossing painted on a roadway |
 | [`lane_crossing`](#lane_crossing) | ➕ | — | ✅ | — | — | specific vehicular road lanes crossed by a crossing |
 | [`link_along`](#link_along) | ➕ | — | ✅ *(ref)* | ✅ | ✅ | footpath or cycle track running parallel to a road |
-| [`lane_check`](#lane_check) | ➕ | — | optional | — | — | diagnostic log of unmapped lane arrows or disconnected turns |
+| [`lane_check`](#lane_check) | ➕ | — | optional | ✅ | optional | diagnostic log of unmapped lane arrows or disconnected turns |
 
 ### Table matrix: meso and micro schemas
 
@@ -265,7 +265,7 @@ end of each footway to the nearest road lane, where they meet at a node.
 
 ## lane_check
 
-What the lanes cannot get, in place of a guess. Most rows are OSM data to check, in
+What the lanes cannot get, in place of a guess. In `gmns_driving` and `gmns_cycling`, the table exists only when netconvert ran. `gmns_walking` always has it. Most rows are OSM data to check, in
 [Fix the OSM data](../guides/edit-osm-data.md).
 
 | Column | Type | Holds |

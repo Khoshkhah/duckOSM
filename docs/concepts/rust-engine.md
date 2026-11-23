@@ -24,13 +24,4 @@ that needs a [Rust toolchain](https://rustup.rs). [Install](../install.md).
 
 The speed of each output: [Compare](../compare/index.md).
 
-## Not ported to Rust yet
-
-These commands still run code that is not ported to Rust yet. They give the same tables, and each port keeps them equal.
-
-| Command | Not ported yet |
-|---|---|
-| `duckosm build` with a config file | the validation, the report and the multimodal graph. Its network steps run in Rust. `duckosm FILE` is the whole build in Rust |
-| `duckosm levels` | the whole command |
-
 The engine reference and modules: [Rust SDK](../reference/rust.md).

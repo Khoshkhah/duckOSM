@@ -10,7 +10,7 @@ r = route_multimodal_points(con, (7.4155, 43.7285), (7.4400, 43.7480))   # (lon,
 [(leg["mode"], round(leg["time_s"])) for leg in r["legs"]]                # walking, driving, walking
 ```
 
-The functions and the commands: [Route](../guides/route.md#the-functions).
+The functions and the commands: [Route](../guides/route.md#all-functions-and-commands).
 
 ## Where the tables come from
 

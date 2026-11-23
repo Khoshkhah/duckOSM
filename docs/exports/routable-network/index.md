@@ -12,5 +12,6 @@ flowchart LR
 | Read by | Output | Command |
 |---|---|---|
 | Your own router | [The turn graph](../turn-graph.md): the table `edge_graph` in the database | `route()`, `Router` ([Route](../../guides/route.md)) |
+| QGIS, a map style | [Base-map layers](../base-map.md): water, land use, buildings, POIs, in the database | `duckosm build` |
 | QGIS, ArcGIS, FME | [GeoPackage or shapefile](../gis.md): the network as GIS layers | `duckosm export-gis` |
 | networkx | [networkx](../networkx.md): a networkx graph, GraphML or gpickle | `to_networkx()`, `duckosm export-graph` |

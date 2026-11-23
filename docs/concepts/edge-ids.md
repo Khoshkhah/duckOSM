@@ -35,7 +35,7 @@ a crossing footway too), and each end of a road. So a way that is in two modes h
 ## Merged edges
 
 A chain of edges that is one road (the same `highway`, `name`, `oneway`, `maxspeed`, `lanes` and other tags) is
-joined into one edge. Roads are not joined across OSM ways; chains of footways and paths are.
+joined into one edge. Roads are joined across OSM ways. A path is not joined at a node of `main.global_junctions`.
 
 ### `edge_id_map`
 

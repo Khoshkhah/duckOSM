@@ -33,7 +33,7 @@ larger one has no raw tables.
 | `infrastructure` | `id` | all of the area |
 | `ocp` (operation control point) | `id` (`ocp_<node id>`), `name` | a station or a halt |
 | `ocp/geoCoord` | `coord` (longitude latitude), `epsgCode` 4326 | the position of the station |
-| `track` | `id`, `type` (the OSM `railway` value) | one track |
+| `track` | `id`, `type` (`mainTrack` for `rail`, `subway`, `light_rail`; else `secondaryTrack`) | one track |
 | `trackBegin`, `trackEnd` | `id`, `pos` (metres from the track start) | the two ends of a track |
 | `connection` | `id`, `ref` (the connection at the other track) | two tracks that join |
 | `bufferStop`, `openEnd` | `id` | a track end with a buffer stop, or with nothing |

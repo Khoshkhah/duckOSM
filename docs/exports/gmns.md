@@ -56,7 +56,7 @@ To get one road section between two junctions, use Level 2 [`driving.chains`](..
 ### Macro schemas (`duckosm gmns`)
 
 * **`gmns_driving` (16 tables):** The vehicular road network for cars, trucks, and buses. Models lanes (`lane`), lane-level turns with restrictions (`movement`), signals (`signal_controller`), on-street parking (`curb_seg`), crosswalks spanning road lanes (`crossing`, `lane_crossing`), and smooth intersection curves (`lane_connector`).
-* **`gmns_walking` (14 tables):** Sidewalks, footpaths, stairs, plazas, and crosswalks. Tracks parallel roadways via `link_along` and connects footways to road crossings via `lane_connector`.
+* **`gmns_walking` (15 tables):** Sidewalks, footpaths, stairs, plazas, and crosswalks. Tracks parallel roadways via `link_along`, connects footways to road crossings via `lane_connector`, and lists unpaired lanes in `lane_check`.
 * **`gmns_cycling` (13 tables):** Cycleways, protected bike paths, shared lanes, and bikeable roads. Tracks parallel roadways via `link_along`.
 * **`gmns_all` (5 tables, via `--combined`):** Merges shared physical streets across driving, walking, and cycling into a single link with unioned `allowed_uses = 'auto,bike,walk'` (`link_id` = `edge_id`). Lanes and turns stay in the mode schemas.
 

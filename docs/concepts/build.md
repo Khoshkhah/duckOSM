@@ -42,6 +42,3 @@ How to cut: [Prepare an area](../guides/prepare-area.md).
 | `features.*`, `raw.*` | the base-map layers, and the raw OSM tables they are made from |
 
 Every table and column: [Database schema](../reference/database.md).
-
-`duckosm build` with a config file still runs some steps that are not ported to Rust yet: the validation, the report
-and the multimodal graph. The network steps run in Rust in both commands.
