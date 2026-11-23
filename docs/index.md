@@ -71,7 +71,7 @@ All outputs, by level: [Export](exports/index.md). Speed against other tools: [C
 
     The open standard (General Modeling Network Specification) for links, lanes, and turning movements.
     The universal bridge from OSM to simulation models and Graph Neural Networks.
-    [GMNS tables](exports/gmns.md)
+    [GMNS network](exports/gmns.md)
 
 -   :material-car-multiple:{ .lg .middle } **Traffic simulation**
 

@@ -50,7 +50,7 @@ Mac mini (Apple M6, 12 cores, 16 GB).
 |---|---|---|---|
 | Monaco (38 MB `.duckdb`) | 0.03 s | 18.6 MB | 0.1 MB |
 | Kentucky (~1.2 GB `.duckdb`) | 0.22 s | 394 MB | 4.8 MB |
-| France (~35 GB `.duckdb`) | not run: the build with the raw tables needs more disk than the Mac mini has free | | |
+| France (~35 GB `.duckdb`) | not run | (needs raw tables on disk) | |
 
 ## Limits
 
