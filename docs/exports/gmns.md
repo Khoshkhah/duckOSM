@@ -114,7 +114,7 @@ Driving network, with netconvert. Input is the Level 2 routable database (`<area
 | Île-de-France (2.2 GB `.duckdb`), 15 tiles | WSL (20 cores, 23 GB) | 23 min | 8.5 GB | 2.6 GB |
 | France (~35 GB `.duckdb`) | | not run | (estimated ~150 GB) | |
 
-Large areas run tile-by-tile (`--tile-zoom 9`), keeping peak memory bounded by the tile rather than the whole region. For benchmarks and tile architecture details, see [GMNS by tiles](../design/gmns_by_tiles.md).
+Large areas run tile-by-tile (`--tile-zoom 9`), keeping peak memory bounded by the tile rather than the whole region.
 
 ## duckOSM and osm2gmns
 
@@ -130,5 +130,4 @@ Large areas run tile-by-tile (`--tile-zoom 9`), keeping peak memory bounded by t
 | Meso and micro | included, with stable `edge_id` | mature |
 | Columns that only one has | `geom`, `meso_type`, the lane ranges, `width`, `cell_k` | `zone_id`, `activity_type`, `is_boundary`, a micro `capacity` |
 
-All options: [Command line](../reference/cli.md#gmns). The design and the audit against the specification:
-[gmns_spec_conformance](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/gmns_spec_conformance.md).
+All options: [Command line](../reference/cli.md#gmns).
