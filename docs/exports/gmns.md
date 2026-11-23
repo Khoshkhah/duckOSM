@@ -39,8 +39,10 @@ duckosm gmns-viz monaco_gmns.duckdb                        # draws the meso and 
 
 ## The tables
 
-One schema for each mode: `gmns_driving`, `gmns_walking`, `gmns_cycling`. The CSV files have only the columns of the
-specification. The geometries and the lane connectors stay in the DuckDB file.
+The GMNS database (`<area>_gmns.duckdb`) organizes tables by mode: `gmns_driving`, `gmns_walking`, and `gmns_cycling`.
+
+* **In DuckDB (`.duckdb`):** Stores all GMNS tables with native spatial geometries (`geom`) for fast spatial SQL queries and map rendering, plus extension tables like `lane_connector` and `crossing`.
+* **In CSV (`--to-csv`):** Exports the standard specification tables with WKT text geometries (`geometry`), ready for DTALite and Path4GMNS.
 
 | Table | Holds |
 |---|---|
