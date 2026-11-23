@@ -100,5 +100,3 @@ France, driving (25.9 million edges), on a Mac mini (Apple M6, 12 cores, 16 GB):
 |---|---|---|
 | Load the network (once) | 11 to 16 s | |
 | One route, Paris to Marseille | 3.7 s | 6.4 GB at the peak |
-
-More measurements: [routing details](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/route_details.md).

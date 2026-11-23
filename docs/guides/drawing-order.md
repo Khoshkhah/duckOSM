@@ -30,8 +30,7 @@ from [roadstyle](https://khoshkhah.github.io/roadstyle/guides/levels/), the same
 | `visualization.level_unmatched` | edits for a road that is not in the file now; the next build tries them again |
 
 `duckosm levels` writes the level area folder next to the file (`monaco.levels/`) again from the tables at each run, for
-[`duckosm gmns-map`](../reference/cli.md#gmns-map). Do not edit the folder: the tables are the master. The files of the folder:
-[the design of the levels](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/levels.md).
+[`duckosm gmns-map`](../reference/cli.md#gmns-map). Do not edit the folder: the tables are the master.
 
 ## Read it
 

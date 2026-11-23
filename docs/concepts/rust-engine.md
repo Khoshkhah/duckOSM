@@ -33,6 +33,4 @@ These commands still run code that is not ported to Rust yet. They give the same
 | `duckosm build` with a config file | the validation, the report and the multimodal graph. Its network steps run in Rust. `duckosm FILE` is the whole build in Rust |
 | `duckosm levels` | the whole command |
 
-The plan and the state of each port:
-[All of duckOSM in Rust](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/all_in_rust.md). The design of the
-engine: [the Rust documents](https://github.com/Khoshkhah/duckOSM/tree/main/docs/rust).
+The engine reference and modules: [Rust SDK](../reference/rust.md).

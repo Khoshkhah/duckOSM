@@ -41,8 +41,7 @@ kind, rename the column, for example `SELECT osm_id AS way_id`. The table shows 
 rows.
 
 The page adds `extra.edits` (the changes of the [fixes file](edit-osm-data.md), `--fixes`) and `extra.boundary_h3` (the
-H3 cells of the boundary, resolutions 0 to 11). All columns and rules:
-[the design of the page](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/ask_page.md).
+H3 cells of the boundary, resolutions 0 to 11).
 
 ## Examples
 

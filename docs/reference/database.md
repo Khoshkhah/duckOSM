@@ -181,7 +181,6 @@ mapped to edges. [Turn restrictions](../concepts/networks.md#turn-restrictions).
 
 Driving only. The OSM turn restrictions with a via **way**: they forbid or make necessary a path of edges, not one turn.
 One row for each edge path. `edge_graph` cannot hold them. The exports that can show a path use them.
-[Design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/turn_permissions.md).
 
 | Column | Type | Description |
 |---|---|---|
@@ -251,8 +250,7 @@ For each merged edge, the edges that it was made from. It can be empty, when no 
 
 ### `lane_profile` {#lane_profile}
 
-Every driving edge's lanes, and every bus-only edge's (`private_edges` with `access = 'bus'`), decided once
-([design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/gmns_lane_profile.md)): one row per lane, left to right.
+Every driving edge's lanes, and every bus-only edge's (`private_edges` with `access = 'bus'`), decided once: one row per lane, left to right.
 
 | Column | Type | Meaning |
 |---|---|---|

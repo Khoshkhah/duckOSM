@@ -66,5 +66,3 @@ A trip is a sequence of edges and transfers, and its time is the sum of their `c
 default), a trip starts and ends on foot and has one vehicle leg at most. Each leg follows the turn restrictions of its
 mode. A vehicle waits at each shared junction, so a trip can take a car anywhere: use it to compare modes, not as a real
 trip planner. Public transport is not included, because OSM has no timetables.
-
-Design: [turns across modes](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/multimodal_edge_graph.md).

@@ -58,8 +58,8 @@ Notes on some layers:
 
 | Layer | Note |
 |---|---|
-| `ocean` | Overture's polygons are made from OSM's coastline. The build reads them for the box of the area (plus 10 %, at least 500 m), from Overture's public files, so it needs the network. `source` names the Overture release; `osm_id` and `name` are NULL. `options.sea: false` turns it off. [Design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/sea.md) |
-| `paved` | not a Shortbread layer. The same ways (a pedestrian area, a pier) also stay lines in `streets`. [Design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/missing_polygons.md) |
+| `ocean` | Overture's polygons are made from OSM's coastline. The build reads them for the box of the area (plus 10 %, at least 500 m), from Overture's public files, so it needs the network. `source` names the Overture release; `osm_id` and `name` are NULL. `options.sea: false` turns it off. |
+| `paved` | not a Shortbread layer. The same ways (a pedestrian area, a pier) also stay lines in `streets`. |
 | `traffic` | not a Shortbread layer. On a crossing, `bearing` is the direction of the road under it, in degrees from north, so a map can draw the zebra marking across the road. NULL on traffic signals, and on a crossing that is on no road |
 | `streets` | all OSM ways with a `highway` tag, for drawing, not for routing. The routable roads are in the [mode schemas](database.md#mode-schema) |
 
