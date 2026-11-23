@@ -54,10 +54,11 @@ The routable network of each mode: edges with their `edge_id`, nodes, and the le
 | networkx | [a networkx graph](networkx.md), GraphML; gpickle only from Python (`write_graph()`) | `to_networkx()`, `duckosm export-graph` |
 | rustworkx | [a rustworkx graph](networkx.md): an API like networkx with a Rust engine, faster for large areas | `to_rustworkx()` |
 | petgraph (Rust) | [a petgraph graph](../reference/rust.md) | `duckosm_route::graphs::to_petgraph()` |
+| Rail planning: OpenTrack, RailSys | [railML 2.4](railml.md): the rail tracks, switches and stations, from `raw.*` | `duckosm railml` |
 
 ### 3. GMNS network
 
-The multi-resolution network in the GMNS standard, from macro (links) to micro (lanes, movements, and cells), with the simulation exports. `matsim-lanes` and the HD map exports read the GMNS db (`<area>_gmns.duckdb`). SUMO, MATSim `network.xml` and railML read the Level 2 db.
+The multi-resolution network in the GMNS standard, from macro (links) to micro (lanes, movements, and cells), with the simulation exports. `matsim-lanes` and the HD map exports read the GMNS db (`<area>_gmns.duckdb`). SUMO and MATSim `network.xml` read the Level 2 db.
 
 | Read by | Export | Command |
 |---|---|---|
@@ -65,7 +66,6 @@ The multi-resolution network in the GMNS standard, from macro (links) to micro (
 | SUMO | [SUMO](sumo.md) plain XML and `.netccfg` (netconvert makes the `.net.xml`) | `duckosm sumo` |
 | MATSim, BEAM, eqasim | [MATSim](matsim.md) `network.xml` (Level 2 db); lanes and signals (GMNS db) | `duckosm matsim`, `matsim-lanes` |
 | DTALite, Path4GMNS | [GMNS meso and micro](gmns.md#meso-and-micro-networks) | `duckosm gmns --meso --micro` |
-| Rail planning: OpenTrack, RailSys | [railML 2.4](railml.md) rail topology | `duckosm railml` |
 
 ### 4. HD map
 

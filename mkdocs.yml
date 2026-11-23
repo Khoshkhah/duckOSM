@@ -167,12 +167,12 @@ nav:
           - The turn graph: exports/turn-graph.md
           - GeoPackage / shapefile: exports/gis.md
           - networkx: exports/networkx.md
+          - railML: exports/railml.md
       - 3. GMNS network:
           - exports/gmns-network/index.md
           - GMNS: exports/gmns.md
           - MATSim: exports/matsim.md
           - SUMO: exports/sumo.md
-          - railML: exports/railml.md
       - 4. HD map:
           - exports/hd-map/index.md
           - Lane-level routing: exports/lane-routing.md
