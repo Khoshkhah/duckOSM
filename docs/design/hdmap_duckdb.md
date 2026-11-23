@@ -1,6 +1,7 @@
-# HD map tables in DuckDB (`hd_<mode>`)
+# HD map database (`<area>_hdmap.duckdb`)
 
-Status: design, waits for sign-off (2026-11-23). No code yet.
+Status: design, waits for sign-off (2026-11-23). No code yet. Changed on 2026-11-23: a database of its own, not a
+schema in the GMNS database (Kaveh).
 
 ## The problem
 
@@ -25,22 +26,24 @@ The result:
 
 ## The proposal
 
-One step, `duckosm hdmap <gmns_db>`, writes the schema `hd_<mode>` into the GMNS database. The schema holds the lane
-map once: lanelets, shared borders, the relations between lanelets, junctions, markings and traffic rules. Each
+One step, `duckosm hdmap <gmns_db>`, writes a new database, `<area>_hdmap.duckdb`. It does not change the GMNS
+database. The HD map database holds the lane map once: lanelets, shared borders, the relations between lanelets, junctions, markings and traffic rules. Each
 exporter reads these tables and only writes its file format. The geometry, the ids and the rules then agree in each
 file.
 
 ```
-<area>.duckdb (Level 2) --duckosm gmns--> <area>_gmns.duckdb (Level 3)
-                                              gmns_<mode>.*   lanes, connectors, movements, crossings
-                                              hd_<mode>.*     --duckosm hdmap-->  (Level 4, this design)
-                                                  |--> to_lanelet2   (.osm)
-                                                  |--> to_commonroad (.xml)
-                                                  |--> to_opendrive  (.xodr)
-                                                  '--> lane_graph, route_lanes, surfaces
+<area>.duckdb (Level 2) --duckosm gmns--> <area>_gmns.duckdb (Level 3) --duckosm hdmap--> <area>_hdmap.duckdb (Level 4)
+       |                                    lanes, connectors,                               driving.lanelet, driving.boundary, ...
+       '-- ground (elevation_metadata) ---- movements, crossings                                 |--> to_lanelet2   (.osm)
+                                                                                                 |--> to_commonroad (.xml)
+                                                                                                 |--> to_opendrive  (.xodr)
+                                                                                                 '--> lane_graph, route_lanes, surfaces
 ```
 
-Only `driving` gets the schema by default (`--mode` for others), because the lane connectors come from SUMO's
+The step reads the GMNS database with `ATTACH ... (READ_ONLY)`. The HD map database is complete without it: each
+row holds its own geometry, width and speed, so a user can copy the HD map database alone.
+
+Only `driving` is in the HD map database by default (`--mode` for others), because the lane connectors come from SUMO's
 netconvert for driving only.
 
 ## What the formats need
@@ -48,7 +51,7 @@ netconvert for driving only.
 The data models of the formats are close. Each format has a lane piece with a left and a right border, links to the
 next and to the side pieces, and rules that point to the lane pieces.
 
-| Item | Lanelet2 | OpenDRIVE 1.7 / 1.8 | CommonRoad 2020a | This schema |
+| Item | Lanelet2 | OpenDRIVE 1.7 / 1.8 | CommonRoad 2020a | This design |
 |---|---|---|---|---|
 | lane piece | `lanelet` relation (left and right way) | `lane` in a `laneSection` of a `road`, by width from the reference line | `lanelet` (left, center, right vertices) | `lanelet` |
 | border | `linestring` way, `type`, `subtype` (`line_thin`/`dashed`, `curbstone`, `virtual`) | `roadMark` of a lane | `lineMarking` of a border | `boundary` |
@@ -71,11 +74,12 @@ Formats that I looked at and do not copy:
 | Overture transportation | segments and connectors only, with lane rules as properties. It has no lane geometry |
 | ASAM OSI | an interface between simulators while they run, not a store of a map |
 
-## Rules of the schema
+## Rules of the database
 
 | Rule | |
 |---|---|
-| Place | schema `hd_<mode>` in the GMNS database, the same file as `gmns_<mode>` and `lane_<mode>` |
+| Place | a database of its own, `<area>_hdmap.duckdb` (`--out` to change it), next to the GMNS database. One schema for each mode, with the name of the mode (`driving`), as in the Level 2 database |
+| Source | `meta` records the path and the `version_number` of the GMNS database. A new run writes the whole database again |
 | Ids | text keys from the GMNS keys: `lane_id` (`<edge_id>_<lane_num>`) and `connector_id` (`<from_lane_id>><to_lane_id>`). No sequence |
 | Integer ids | `num_id = (hash(<text key>) >> 1)::BIGINT`, the formula of `edge_id` (`edge_id.py`). It holds while the `duckdb<2` pin holds. A test makes sure that each `num_id` is unique |
 | Geometry | DuckDB `GEOMETRY`, EPSG:4326 (longitude, latitude), as in the GMNS tables. The exporters project to `meta.utm_crs` |
@@ -91,6 +95,7 @@ One row.
 | Column | Type | Holds |
 |---|---|---|
 | `mode` | VARCHAR | `driving` |
+| `gmns_db`, `gmns_version` | VARCHAR | the path of the GMNS database and its `config.version_number` |
 | `utm_crs` | VARCHAR | the metric CRS of the area, for example `EPSG:32632`. Each exporter uses it, so each file has the same projection |
 | `ground_id` | VARCHAR | the `sha256` of the ground in `main.elevation_metadata` of the Level 2 database. Empty when the area has no ground |
 | `vertical_datum`, `ground_product` | VARCHAR | from the same row, for example `EGM2008`, `DTM` |
@@ -254,20 +259,23 @@ column `geom_z` can come without a change to the other columns.
 | `lane_graph`, `route_lanes` | `lanelet_relation` | |
 | `surfaces` | `lanelet` (width, `geom`) | |
 
-Each exporter runs `duckosm hdmap` first when the GMNS database has no `hd_<mode>` schema, as `route_lanes` does with
-the lane graph today. OpenDRIVE without `--junctions` keeps its read of the Level 2 database.
+Each exporter, the lane graph and `surfaces` take the HD map database in place of the GMNS database. When a user gives
+a GMNS database, the function first writes the HD map database to a temporary folder, as `to_opendrive` does with
+the GMNS step today. The lane graph table (`lane_<mode>.lane_edges`) goes into the HD map database, not into the GMNS
+database. OpenDRIVE without `--junctions` keeps its read of the Level 2 database.
 
 The Rust exporters (`rust/duckosm-export/src/lanelet2.rs`, `opendrive.rs`) can read the same tables later. This design
 does not change them.
 
-Parquet: the step adds no flag. `COPY hd_driving.lanelet TO 'lanelet.parquet'` writes GeoParquet 1.0 metadata when
+Parquet: the step adds no flag. `COPY driving.lanelet TO 'lanelet.parquet'` writes GeoParquet 1.0 metadata when
 `spatial` is loaded (tested on DuckDB 1.5.3).
 
 ## Rejected alternatives
 
 | Alternative | Why not |
 |---|---|
-| One `hdmap` schema for all modes | the lanes and the movements differ by mode, and GMNS is one schema for each mode |
+| The tables as a schema `hd_<mode>` in the GMNS database | the GMNS database gets heavy, and it mixes a standard (GMNS) with a model of our own. Kaveh's decision (2026-11-23) |
+| One schema for all modes | the lanes and the movements differ by mode, and GMNS is one schema for each mode |
 | The tables in the Level 2 database | the lanes need the GMNS step (netconvert). Level 4 reads Level 3, as today |
 | Store the OpenDRIVE model (reference line, lane widths as polynomials in `s`) | `ST_*` cannot query it, and Lanelet2 and CommonRoad need the borders as lines. Widths from borders is easy; borders from polynomials is the hard way |
 | Store the Lanelet2 model as OSM primitives (point, way, relation tables) | the shared nodes are a rule of the file format. A `GEOMETRY` line is the border; the exporter makes the nodes |
@@ -293,12 +301,12 @@ Parquet: the step adds no flag. `COPY hd_driving.lanelet TO 'lanelet.parquet'` w
 2. Tests: `tests/test_hdmap_tables.py`.
 3. Exporters read the tables: Lanelet2 and CommonRoad first, then OpenDRIVE, then the lane graph. One PR each, or one
    PR if they stay small.
-4. Docs: `docs/reference/database.md` (the `hd_<mode>` tables), `docs/exports/lanelet2.md`, `opendrive.md`,
+4. Docs: `docs/reference/hdmap-database.md` (a new page: the tables of the HD map database), `docs/exports/lanelet2.md`, `opendrive.md`,
    `lane-routing.md`, `docs/reference/sdk/hdmap.md`, `docs/compare/for-hdmap-users.md`.
 
 ## Questions for Kaveh
 
-1. Schema name `hd_<mode>`, in the GMNS database: OK?
+1. File name `<area>_hdmap.duckdb`, one schema for each mode (`driving`): OK?
 2. Stop lines, traffic lights and yield rules in the first PR, or lanelets, borders and relations first?
 3. Line types from the table above (few OSM tags): OK as a default, or leave all borders `line_thin` `dashed` until the
    data is better?
