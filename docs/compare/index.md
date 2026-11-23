@@ -40,7 +40,7 @@ flowchart LR
 | **osm2gmns, path4gmns, AequilibraE** | Transport planning networks | Multi-resolution GMNS DuckDB schemas (`gmns_*`, `meso_*`, `micro_*`); multimodal parity; CSV export | [duckOSM for planning users](for-planning-users.md) |
 | **CommonRoad, Lanelet2, scenariogeneration** | Lane maps for automated driving | Automated derivation from GMNS physical lanes; OpenDRIVE 1.4 (`.xodr`), CommonRoad XML, Lanelet2 | [duckOSM for HD map users](for-hdmap-users.md) |
 | **PyTorch Geometric, DGL, city2graph** | Road graphs for Machine Learning | Homogenous turn & junction graphs with `edge_id`, plus Level 3 GMNS 3-tier `HeteroData` graphs | [duckOSM for ML users](for-ml-users.md) |
-| **All Tools** | Country-scale speed & memory | Detailed benchmarks on France (5.1 GB) and Kentucky (282 MB) | [Benchmarks](speed.md) |
+| **All Tools** | Country- and city-scale benchmarks | Detailed scale profiles & speed benchmarks across Monaco (611 KB), Kentucky (282 MB), and France (5.1 GB) | [Benchmarks](speed.md) |
 
 ## Why a Single Unified Network?
 
