@@ -8,6 +8,7 @@ pub mod gis_debug;
 pub mod geos;
 pub mod lanelet2;
 pub mod gmns;
+pub mod gmns_chains;
 pub mod gmns_check;
 pub mod gmns_lanes;
 pub mod gmns_meso;

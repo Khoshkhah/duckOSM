@@ -96,6 +96,10 @@ enum Cmd {
         /// The output file (default: <name>_network.xml[.gz]).
         #[arg(short, long)]
         out: Option<PathBuf>,
+        /// Driving only: one link for each chain of driving.chains (GMNS db: gmns_driving.chains); its id is the chain_id and
+        /// its attribute edge_ids lists the duckOSM edges.
+        #[arg(long)]
+        merge: bool,
     },
     /// Export an ASAM OpenDRIVE .xodr from a built duckOSM db: roads with a reference line in a metric CRS and the driving
     /// lanes. Phase 1 (default): geometry and lanes. --junctions adds the junctions and their connecting roads (a GMNS db).
@@ -137,6 +141,9 @@ enum Cmd {
         /// The output folder.
         #[arg(short, long = "out", default_value = ".")]
         out_dir: PathBuf,
+        /// Driving only: the links of gmns_driving.chains, as `duckosm matsim --merge`.
+        #[arg(long)]
+        merge: bool,
     },
     /// Export a built network to SUMO, with the duckOSM edge_id as the SUMO edge id. Writes <out-dir>/<name>.{nod,edg,con}.xml
     /// (with the traffic lights and stop signs of OSM), <name>.add.xml (the bus stops) and the netconvert config <name>.netccfg.
@@ -309,10 +316,10 @@ fn stem(db: &Path) -> String {
 pub fn run(args: &[String]) -> Result<()> {
     let cli = Cli::parse_from(std::iter::once("duckosm".to_string()).chain(args.iter().cloned()));
     match cli.cmd {
-        Cmd::Matsim { db, mode, crs, no_gzip, out, .. } => {
+        Cmd::Matsim { db, mode, crs, no_gzip, out, merge, .. } => {
             check_db(&db)?;
             let out = out.unwrap_or_else(|| format!("{}_network.xml{}", stem(&db), if no_gzip { "" } else { ".gz" }).into());
-            let s = crate::matsim::to_matsim(&db, &out, &mode, crs.as_deref(), !no_gzip)?;
+            let s = crate::matsim::to_matsim(&db, &out, &mode, crs.as_deref(), !no_gzip, merge)?;
             println!("wrote {} — {} nodes, {} links (CRS {})", out.display(), s.nodes, s.links, s.crs);
         }
         Cmd::ExportGis { db, modes, fmt, out, no_boundary, name, .. } => {
@@ -338,11 +345,11 @@ pub fn run(args: &[String]) -> Result<()> {
             let extra = if junctions { format!(" + {} connecting roads, {} junctions", s.connecting_roads, s.junctions) } else { String::new() };
             println!("wrote {} — {} roads{extra} (CRS {})", out.display(), s.roads, s.crs);
         }
-        Cmd::MatsimLanes { gmns_db, mode, no_signals, cycle, out_dir, .. } => {
+        Cmd::MatsimLanes { gmns_db, mode, no_signals, cycle, out_dir, merge, .. } => {
             if !gmns_db.exists() {
                 return Err(format!("{}: no such file", gmns_db.display()));
             }
-            let s = crate::matsim_lanes::to_matsim_lanes(&gmns_db, &out_dir, &mode, !no_signals, cycle)?;
+            let s = crate::matsim_lanes::to_matsim_lanes(&gmns_db, &out_dir, &mode, !no_signals, cycle, merge)?;
             let mut msg = format!("wrote lanes.xml ({} assignments)", s.lanes_links);
             if let Some(n) = s.signal_systems {
                 msg.push_str(&format!(" + signals ({n} systems)"));

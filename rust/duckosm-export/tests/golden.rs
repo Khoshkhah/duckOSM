@@ -67,10 +67,10 @@ fn same(got: &Path, golden: &str) {
 #[test]
 fn matsim_equals_python() {
     let o = out("monaco_network.xml.gz");
-    duckosm_export::matsim::to_matsim(db(), &o, "driving", None, true).unwrap();
+    duckosm_export::matsim::to_matsim(db(), &o, "driving", None, true, false).unwrap();
     same(&o, "monaco_network.xml.gz");
     let o = out("monaco_all_network.xml");
-    duckosm_export::matsim::to_matsim(db(), &o, "all", Some("EPSG:3035"), false).unwrap();
+    duckosm_export::matsim::to_matsim(db(), &o, "all", Some("EPSG:3035"), false, false).unwrap();
     same(&o, "monaco_all_network.xml.gz");
 }
 
@@ -182,7 +182,7 @@ fn opendrive_equals_python() {
 #[test]
 fn matsim_lanes_equals_python() {
     let d = out("matsim_lanes");
-    let s = duckosm_export::matsim_lanes::to_matsim_lanes(gmns(), &d, "driving", true, 90).unwrap();
+    let s = duckosm_export::matsim_lanes::to_matsim_lanes(gmns(), &d, "driving", true, 90, false).unwrap();
     assert!(s.lanes_links > 0 && s.signal_systems.unwrap() > 0);
     for f in ["lanes", "signalSystems", "signalGroups", "signalControl"] {
         same(&d.join(format!("{f}.xml")), &format!("matsim_lanes_{f}.xml.gz"));

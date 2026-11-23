@@ -54,7 +54,11 @@ fn sumo_allow(allowed: Option<&str>) -> Option<String> {
 
 /// Export the mode `mode` of the GMNS db `db` to SUMO in `out_dir`. `config`: a .netccfg of the user (else the built-in
 /// options). `netconvert`: also run netconvert (the .net.xml, and the .tll.xml of the signals).
-pub fn to_sumo_gmns(db: &Path, out_dir: &Path, mode: &str, net_name: &str, connections: bool, config: Option<&Path>, netconvert: bool) -> Result<Summary> {
+///
+/// `merge`: driving only, one SUMO edge for each chain of `gmns_driving.chains` (its id `chain_id`, its edges in
+/// `<param key="edge_ids">`).
+#[allow(clippy::too_many_arguments)]
+pub fn to_sumo_gmns(db: &Path, out_dir: &Path, mode: &str, net_name: &str, connections: bool, config: Option<&Path>, netconvert: bool, merge: bool) -> Result<Summary> {
     let con = open(db)?;
     let sch = format!("gmns_{mode}");
     if !has_table(&con, &sch, "link")? {
@@ -198,6 +202,13 @@ pub fn to_sumo_gmns(db: &Path, out_dir: &Path, mode: &str, net_name: &str, conne
         f.finish()?;
     }
     eprintln!("SUMO[{mode}] from GMNS: {n_lights} traffic lights, {n_stops} stop signs, {n_conns} connections");
+    // one edge for each chain: the same step as the duckOSM input, on the files just written
+    if merge {
+        let chains = crate::sumo_merge::Chains::read_gmns(&con)?;
+        let before = n_edges;
+        (n_nodes, n_edges) = crate::sumo_merge::merge_files(&chains, &nod_path, &edg_path, use_conns.then_some(con_path.as_path()), None)?;
+        eprintln!("SUMO[{mode}] from GMNS: merge: {} chains join {before} edges into {n_edges}", chains.len());
+    }
 
     // the netconvert options: the built-in ones, as the duckOSM input
     let mut opts: Vec<(String, String)> = DEFAULT_NETCFG.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();

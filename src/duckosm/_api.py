@@ -92,16 +92,17 @@ def to_gis(con, out, modes=None, fmt: str = "gpkg", boundary: bool = True, name:
     return _paths(r, ("path", "dir"))
 
 
-def to_matsim(source, out_path, mode="driving", crs=None, gzip=True):
-    """See :func:`duckosm.matsim.to_matsim`."""
+def to_matsim(source, out_path, mode="driving", crs=None, gzip=True, merge=False):
+    """See :func:`duckosm.matsim.to_matsim`. ``merge=True``: driving only, one link for each chain (``driving.chains``;
+    a GMNS db: ``gmns_driving.chains``), its edges in the link attribute ``edge_ids``."""
     if not isinstance(mode, str):
         mode = ",".join(mode)
-    return json.loads(_rust().to_matsim(_db(source), str(out_path), mode, crs, gzip))
+    return json.loads(_rust().to_matsim(_db(source), str(out_path), mode, crs, gzip, merge))
 
 
-def to_matsim_lanes(gmns_db, out_dir=".", mode="driving", signals=True, cycle_s=90):
-    """See :func:`duckosm.matsim_lanes.to_matsim_lanes`."""
-    return json.loads(_rust().to_matsim_lanes(_db(gmns_db), str(out_dir), mode, signals, int(cycle_s)))
+def to_matsim_lanes(gmns_db, out_dir=".", mode="driving", signals=True, cycle_s=90, merge=False):
+    """See :func:`duckosm.matsim_lanes.to_matsim_lanes`. ``merge=True``: the links of ``to_matsim(merge=True)``."""
+    return json.loads(_rust().to_matsim_lanes(_db(gmns_db), str(out_dir), mode, signals, int(cycle_s), merge))
 
 
 def to_opendrive(source, out_path, mode="driving", crs=None, junctions=False):

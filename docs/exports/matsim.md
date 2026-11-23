@@ -37,6 +37,23 @@ so a trip can change mode with no transfer links.
 The node coordinates are in metres, in the UTM zone of the data (`--crs` gives another). After
 [`duckosm elevation`](../guides/elevation.md), each node also has a `z`.
 
+## Fewer links (`--merge`) { #fewer-links-merge }
+
+duckOSM cuts roads where footways and cycleways cross them, so that the modes meet. A MATSim network of cars only does not
+need these cuts. `--merge` (`to_matsim(..., merge=True)`) writes one link for each chain of
+[`driving.chains`](../reference/database.md#chains) (a GMNS db: [`gmns_driving.chains`](gmns_tables.md#chains)): the edges of
+one road between two real junctions. On Monaco, 2,840 links become 1,775.
+
+```bash
+duckosm matsim monaco_gmns.duckdb --merge                  # one link for each chain
+duckosm matsim-lanes monaco_gmns.duckdb --merge            # lanes.xml and signals on those links
+```
+
+* **Ids:** a merged link has the id `chain_id`, and lists its edges in its attribute `edge_ids`. `duckosm.sim.edge_map` reads
+  it, so the results still join on `edge_id`. A chain of one edge keeps the `edge_id`.
+* **Lanes:** give `--merge` to `matsim-lanes` too, so that `lanes.xml` names the same links.
+* **Scope:** the driving network only (`-m driving`).
+
 ## Lanes and signals
 
 `network.xml` alone has no turns: MATSim lets a car take each link at a junction, banned turns too. For the legal turns,
