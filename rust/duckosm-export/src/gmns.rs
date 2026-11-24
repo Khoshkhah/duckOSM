@@ -994,8 +994,6 @@ struct LaneRow {
     oneway: bool,
     tags: Tags,
     osm_id: i64,
-    bus: bool,
-    bike: Option<bool>,
     way_end: bool,
     wkt: Option<String>,
     target: i64,
@@ -1691,7 +1689,8 @@ fn build_movement(c: &Ctx, sch: &str, mode: &str, uses: &str) -> Result<()> {
 }
 
 /// The geometry of the lanes, as `_build_lane_curb` places them: the runs of pieces, the paired carriageways, the tapers at a
-/// joint and the carriageways that leave a two-way road in OSM's V.
+/// joint and the carriageways that leave a two-way road in OSM's V. The facts of the whole area are small (no lines, no tags):
+/// the lines come one chunk of runs at a time (`LaneChunk`).
 struct LaneGeo {
     lane_geometry: bool,
     side_sign: f64,
@@ -1700,14 +1699,22 @@ struct LaneGeo {
     opp_total: HashMap<i64, f64>,
     runs: Vec<Vec<i64>>,
     wh: HashMap<i64, (usize, usize)>,
-    merged: HashMap<usize, String>,
+    closed: HashSet<usize>,
+    /// the runs whose pieces all have a line: they have a merged line
+    has_merged: HashSet<usize>,
     gaps: HashMap<i64, f64>,
     run_profiles: HashMap<usize, Vec<(f64, f64)>>,
     run_place: Vec<Option<f64>>,
     taper: HashMap<i64, [f64; 4]>,
     vfix: HashMap<i64, (i64, bool)>,
-    run_geoms: HashMap<i64, Vec<Vec<P>>>,
+}
+
+/// The lines of one chunk of runs: each edge's line (also of the two-way roads that a V edge follows), the merged line of each
+/// run, and the lanes of each run of two or more pieces from the run's one offset curve.
+struct LaneChunk {
     wkt_of: HashMap<i64, Option<String>>,
+    merged: HashMap<usize, String>,
+    run_geoms: HashMap<i64, Vec<Vec<P>>>,
 }
 
 /// The points of a `LINESTRING (...)` text, as Python's `_w.loads(wkt).coords`.
@@ -1715,52 +1722,42 @@ fn pts_of(w: &str) -> Vec<P> {
     shp::wkt_points(w)
 }
 
-impl LaneGeo {
-    #[allow(clippy::too_many_arguments)]
-    fn new(
-        c: &Ctx,
-        rows: &[LaneRow],
-        prof: &HashMap<i64, Vec<(i64, String, Option<f64>, Option<String>)>>,
-        rules: &Rules,
-        contra: &HashSet<i64>,
-        bus_of: &HashMap<i64, &str>,
-        lane_geometry: bool,
-        pair: bool,
-    ) -> Result<LaneGeo> {
-        let side_sign = if rules.drive_side == "right" { -1.0 } else { 1.0 };
-        let order: Vec<i64> = rows.iter().map(|r| r.edge_id).collect();
-        let mut info: HashMap<i64, lanes::Info> = HashMap::new();
-        let (mut w_of, mut place_of) = (HashMap::new(), HashMap::new());
-        let tags_of: HashMap<i64, &Tags> = rows.iter().map(|r| (r.edge_id, &r.tags)).collect();
-        for r in rows {
-            let oneway = r.oneway && !contra.contains(&r.osm_id);
-            let w_each: Vec<f64> = if !prof.is_empty() {
-                prof[&r.edge_id].iter().map(|x| x.2.unwrap_or(0.0)).collect()
-            } else {
-                rules.lane_widths(&r.tags, r.lanes, r.is_rev, bus_of.contains_key(&r.edge_id), oneway).2
-            };
-            let foot = rules.is_foot(&r.tags);
-            let place = if oneway || foot || side_sign < 0.0 { lanes::placement(rules.pick(&r.tags, "placement", r.is_rev), &w_each) } else { None };
-            place_of.insert(r.edge_id, place);
-            let (h0, h1) = r.wkt.as_deref().map(|w| lanes::headings(&pts_of(w))).unwrap_or((0.0, 0.0));
-            info.insert(
-                r.edge_id,
-                lanes::Info {
-                    osm_id: r.osm_id,
-                    is_rev: r.is_rev,
-                    source: r.source,
-                    target: r.target,
-                    oneway: oneway || foot,
-                    widths: w_each.clone(),
-                    name: r.name.clone(),
-                    roundabout: tag(&r.tags, "junction") == Some("roundabout"),
-                    h0,
-                    h1,
-                    opp: -1.0,
-                },
-            );
-            w_of.insert(r.edge_id, w_each);
+/// A line text that can be part of a merged run line.
+fn usable_wkt(w: Option<&str>) -> bool {
+    w.is_some_and(|w| !w.is_empty() && w.find('(').is_some() && w.rfind(')').is_some())
+}
+
+/// The merged line of a run from the texts of its pieces: the coordinate texts joined, a shared joint once. None: a piece has
+/// no line.
+fn merged_text(ws: &[Option<&str>]) -> Option<String> {
+    let mut cs: Vec<String> = Vec::new();
+    for w in ws {
+        let w = w.filter(|w| !w.is_empty())?;
+        let (a, b) = (w.find('(')?, w.rfind(')')?);
+        let c: Vec<String> = w[a + 1..b].split(',').map(|p| p.trim().to_string()).collect();
+        if !cs.is_empty() && c[0] == *cs.last().unwrap() {
+            cs.extend_from_slice(&c[1..]);
+        } else {
+            cs.extend(c);
         }
+    }
+    Some(format!("LINESTRING ({})", cs.join(", ")))
+}
+
+/// The small facts of one edge for `LaneGeo::new`.
+struct EdgeFacts {
+    place: Option<f64>,
+    foot: bool,
+    level: i64,
+    has_wkt: bool,
+    length_m: f64,
+}
+
+impl LaneGeo {
+    /// `order`: the edges in the order of the rows; `facts`: each edge's small facts; `lines`: the query of the edges' lines.
+    fn new(c: &Ctx, order: Vec<i64>, info: HashMap<i64, lanes::Info>, w_of: HashMap<i64, Vec<f64>>, facts: &HashMap<i64, EdgeFacts>, rules: &Rules, lane_geometry: bool, pair: bool) -> Result<LaneGeo> {
+        let side_sign = if rules.drive_side == "right" { -1.0 } else { 1.0 };
+        let mut info = info;
         // a two-way road's line is the middle of both directions: the other direction's total width
         let mut by_ends: HashMap<(i64, i64, i64), i64> = HashMap::new();
         for e in &order {
@@ -1774,49 +1771,52 @@ impl LaneGeo {
                 opp_total.insert(*e, w_of[o].iter().sum::<f64>());
             }
         }
+        drop(by_ends);
         for e in &order {
             let t = shp::py_round(opp_total.get(e).copied().unwrap_or(-1.0), 2);
             info.get_mut(e).unwrap().opp = t;
         }
         let (runs, wh, closed) = lanes::chain_runs(&order, &info);
-        let wkt_of: HashMap<i64, Option<String>> = rows.iter().map(|r| (r.edge_id, r.wkt.clone())).collect();
-        let mut merged: HashMap<usize, String> = HashMap::new();
-        'runs: for (i, run) in runs.iter().enumerate() {
-            let mut cs: Vec<String> = Vec::new();
-            for e in run {
-                let Some(w) = wkt_of[e].as_deref().filter(|w| !w.is_empty()) else { continue 'runs };
-                let (Some(a), Some(b)) = (w.find('('), w.rfind(')')) else { continue 'runs };
-                let c: Vec<String> = w[a + 1..b].split(',').map(|p| p.trim().to_string()).collect();
-                if !cs.is_empty() && c[0] == *cs.last().unwrap() {
-                    cs.extend_from_slice(&c[1..]);
-                } else {
-                    cs.extend(c);
-                }
-            }
-            merged.insert(i, format!("LINESTRING ({})", cs.join(", ")));
-        }
-        // the paired carriageways, one level at a time
+        let has_merged: HashSet<usize> = (0..runs.len()).filter(|&i| runs[i].iter().all(|e| facts[e].has_wkt)).collect();
+        // the paired carriageways, one level at a time: the merged lines of the one-way runs only
         let mut run_profiles = HashMap::new();
         let mut run_gaps: HashMap<usize, f64> = HashMap::new();
-        let cand: Vec<(usize, Vec<P>, f64)> = runs
-            .iter()
-            .enumerate()
-            .filter(|(i, run)| merged.contains_key(i) && info[&run[0]].oneway && !rules.is_foot(tags_of[&run[0]]))
-            .map(|(i, run)| (i, pts_of(&merged[&i]), w_of[&run[0]].iter().sum::<f64>() / 2.0))
-            .collect();
-        let lv_of: HashMap<usize, i64> = cand
-            .iter()
-            .map(|(i, _, _)| {
-                let t = tags_of[&runs[*i][0]];
-                let g = |k: &str| t.get(k).cloned();
-                (*i, level(&g("layer"), &g("bridge"), &g("tunnel")))
-            })
-            .collect();
-        let mut lvs: Vec<i64> = lv_of.values().copied().collect::<HashSet<_>>().into_iter().collect();
-        lvs.sort();
-        for lv in lvs.into_iter().filter(|_| lane_geometry && pair) {
-            let group: Vec<(usize, Vec<P>, f64)> = cand.iter().filter(|x| lv_of[&x.0] == lv).cloned().collect();
-            run_gaps.extend(lanes::paired_gaps(&group, side_sign, &mut run_profiles));
+        let cand_runs: Vec<usize> = (0..runs.len()).filter(|i| has_merged.contains(i) && info[&runs[*i][0]].oneway && !facts[&runs[*i][0]].foot).collect();
+        if lane_geometry && pair && !cand_runs.is_empty() {
+            c.exec("CREATE OR REPLACE TEMP TABLE _pg(edge_id BIGINT, run BIGINT, seq BIGINT)")?;
+            {
+                let mut app = c.con.appender("_pg").map_err(|e| e.to_string())?;
+                for &i in &cand_runs {
+                    for (k, e) in runs[i].iter().enumerate() {
+                        app.append_row(duckdb::params![e, i as i64, k as i64]).map_err(|e| e.to_string())?;
+                    }
+                }
+                app.flush().map_err(|e| e.to_string())?;
+            }
+            let mut texts: HashMap<usize, Vec<Option<String>>> = HashMap::new();
+            let sql = "SELECT p.run, x.wkt FROM _pg p JOIN _lc x USING (edge_id) ORDER BY p.run, p.seq";
+            let mut st = c.con.prepare(sql).map_err(|e| format!("{e}\n{sql}"))?;
+            for r in st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, Option<String>>(1)?))).map_err(|e| e.to_string())? {
+                let (i, w) = r.map_err(|e| e.to_string())?;
+                texts.entry(i as usize).or_default().push(w);
+            }
+            drop(st);
+            c.exec("DROP TABLE _pg")?;
+            let cand: Vec<(usize, Vec<P>, f64)> = cand_runs
+                .iter()
+                .filter_map(|&i| {
+                    let ws: Vec<Option<&str>> = texts.get(&i)?.iter().map(|w| w.as_deref()).collect();
+                    Some((i, pts_of(&merged_text(&ws)?), w_of[&runs[i][0]].iter().sum::<f64>() / 2.0))
+                })
+                .collect();
+            drop(texts);
+            let lv_of: HashMap<usize, i64> = cand.iter().map(|(i, _, _)| (*i, facts[&runs[*i][0]].level)).collect();
+            let mut lvs: Vec<i64> = lv_of.values().copied().collect::<HashSet<_>>().into_iter().collect();
+            lvs.sort();
+            for lv in lvs {
+                let group: Vec<(usize, Vec<P>, f64)> = cand.iter().filter(|x| lv_of[&x.0] == lv).cloned().collect();
+                run_gaps.extend(lanes::paired_gaps(&group, side_sign, &mut run_profiles));
+            }
         }
         let mut gaps = HashMap::new();
         for (i, run) in runs.iter().enumerate() {
@@ -1829,7 +1829,7 @@ impl LaneGeo {
         if !gaps.is_empty() {
             eprintln!("GMNS[{}]: {} one-way edges placed with their opposite carriageway", rules.mode, gaps.len());
         }
-        let run_place: Vec<Option<f64>> = runs.iter().map(|run| run.iter().find_map(|e| place_of[e])).collect();
+        let run_place: Vec<Option<f64>> = runs.iter().map(|run| run.iter().find_map(|e| facts[e].place)).collect();
         let mut g = LaneGeo {
             lane_geometry,
             side_sign,
@@ -1838,17 +1838,15 @@ impl LaneGeo {
             opp_total,
             runs,
             wh,
-            merged,
+            closed,
+            has_merged,
             gaps,
             run_profiles,
             run_place,
             taper: HashMap::new(),
             vfix: HashMap::new(),
-            run_geoms: HashMap::new(),
-            wkt_of,
         };
         // a two-way road's centring changes over a taper at a plain joint
-        let len_of: HashMap<i64, f64> = rows.iter().map(|r| (r.edge_id, r.length_m.unwrap_or(0.0))).collect();
         let (mut at_src, mut at_tgt): (HashMap<i64, Vec<i64>>, HashMap<i64, Vec<i64>>) = (HashMap::new(), HashMap::new());
         let mut roads_at: HashMap<i64, HashSet<i64>> = HashMap::new();
         for e in &order {
@@ -1881,10 +1879,10 @@ impl LaneGeo {
             let half_l = ds.abs() * lanes::LANE_TAPER_PER_M / 2.0;
             let te = g.taper.entry(*e).or_insert([0.0; 4]);
             te[2] = ds / 2.0;
-            te[3] = half_l.min(len_of[e] / 2.0);
+            te[3] = half_l.min(facts[e].length_m / 2.0);
             let tf = g.taper.entry(f).or_insert([0.0; 4]);
             tf[0] = -ds / 2.0;
-            tf[1] = half_l.min(len_of[&f] / 2.0);
+            tf[1] = half_l.min(facts[&f].length_m / 2.0);
         }
         // a carriageway leaves a two-way road in OSM's V: its lanes go straight on from the two-way road's lanes
         for e in &order {
@@ -1920,36 +1918,49 @@ impl LaneGeo {
                 g.vfix.insert(on[0], (*e, at_end));
             }
         }
-        g.lane_geometry = lane_geometry;
         if !lane_geometry {
             return Ok(g);
-        }
-        // the lanes of each run of two or more pieces, from the run's one offset curve. The runs are independent: on all
-        // cores (one core took most of this step: Kentucky 59 s)
-        use rayon::prelude::*;
-        let work: Vec<(usize, Vec<Vec<P>>, Vec<f64>, bool)> = g
-            .runs
-            .iter()
-            .enumerate()
-            .filter(|(i, run)| run.len() > 1 && g.merged.contains_key(i))
-            .map(|(i, run)| (i, run.iter().map(|e| pts_of(g.wkt_of[e].as_deref().unwrap_or(""))).collect(), g.offsets(run[0]), closed.contains(&i)))
-            .collect();
-        let done: Vec<(usize, Option<Vec<Vec<Vec<P>>>>)> =
-            work.into_par_iter().map(|(i, pieces, offs, cl)| lanes::run_lane_wkts(&pieces, &offs, cl).map(|r| (i, r))).collect::<Result<_>>()?;
-        for (i, per_piece) in done {
-            if let Some(per_piece) = per_piece {
-                for (e, l) in g.runs[i].iter().zip(per_piece) {
-                    g.run_geoms.insert(*e, l);
-                }
-            }
         }
         c.exec("CREATE OR REPLACE TEMP TABLE _lane_runs(link_id BIGINT, run_id BIGINT, seq BIGINT, n BIGINT, closed BOOLEAN)")?;
         let mut app = c.con.appender("_lane_runs").map_err(|e| e.to_string())?;
         for (e, (i, k)) in &g.wh {
-            app.append_row(duckdb::params![e, *i as i64, *k as i64, g.runs[*i].len() as i64, closed.contains(i)]).map_err(|e| e.to_string())?;
+            app.append_row(duckdb::params![e, *i as i64, *k as i64, g.runs[*i].len() as i64, g.closed.contains(i)]).map_err(|e| e.to_string())?;
         }
         app.flush().map_err(|e| e.to_string())?;
         Ok(g)
+    }
+
+    /// The lines of the runs of chunk `ch` (`CHUNK_RUNS` runs from run `ch * CHUNK_RUNS`): `wkt_of` has the line of each of
+    /// their edges and of the two-way roads that their V edges follow.
+    fn chunk(&self, ch: usize, wkt_of: HashMap<i64, Option<String>>) -> Result<LaneChunk> {
+        use rayon::prelude::*;
+        let ids: Vec<usize> = (ch * CHUNK_RUNS..((ch + 1) * CHUNK_RUNS).min(self.runs.len())).filter(|i| self.has_merged.contains(i)).collect();
+        let merged: HashMap<usize, String> = ids
+            .iter()
+            .filter_map(|&i| {
+                let ws: Vec<Option<&str>> = self.runs[i].iter().map(|e| wkt_of.get(e).and_then(|w| w.as_deref())).collect();
+                Some((i, merged_text(&ws)?))
+            })
+            .collect();
+        let mut run_geoms = HashMap::new();
+        if self.lane_geometry {
+            // the lanes of each run of two or more pieces, from the run's one offset curve; the runs are independent: on all cores
+            let work: Vec<(usize, Vec<Vec<P>>, Vec<f64>, bool)> = ids
+                .iter()
+                .filter(|&&i| self.runs[i].len() > 1 && merged.contains_key(&i))
+                .map(|&i| (i, self.runs[i].iter().map(|e| pts_of(wkt_of.get(e).and_then(|w| w.as_deref()).unwrap_or(""))).collect(), self.offsets(self.runs[i][0]), self.closed.contains(&i)))
+                .collect();
+            let done: Vec<(usize, Option<Vec<Vec<Vec<P>>>>)> =
+                work.into_par_iter().map(|(i, pieces, offs, cl)| lanes::run_lane_wkts(&pieces, &offs, cl).map(|r| (i, r))).collect::<Result<_>>()?;
+            for (i, per_piece) in done {
+                if let Some(per_piece) = per_piece {
+                    for (e, l) in self.runs[i].iter().zip(per_piece) {
+                        run_geoms.insert(*e, l);
+                    }
+                }
+            }
+        }
+        Ok(LaneChunk { wkt_of, merged, run_geoms })
     }
 
     fn centring(&self, e: i64) -> Option<f64> {
@@ -1988,31 +1999,31 @@ impl LaneGeo {
     }
 
     /// The geometry of lane `i` of the edge `r`, as WKT.
-    fn lane(&self, r: &LaneRow, i: usize) -> Result<Option<String>> {
+    fn lane(&self, ch: &LaneChunk, r: &LaneRow, i: usize) -> Result<Option<String>> {
         if !self.lane_geometry {
             return Ok(None);
         }
         let e = r.edge_id;
         let Some(w) = r.wkt.as_deref() else { return Ok(None) };
         let line = pts_of(w);
-        let geom: Vec<P> = match self.run_geoms.get(&e) {
+        let geom: Vec<P> = match ch.run_geoms.get(&e) {
             Some(g) => g[i].clone(),
             None => crate::lanelet2::offset_lonlat(&line, self.offsets(e)[i])?,
         };
-        Ok(Some(match self.finish(r, i, geom.clone())? {
+        Ok(Some(match self.finish(ch, r, i, geom.clone())? {
             Some(g) => g,
             None => lanes::wkt(&geom),
         }))
     }
 
     /// The moves after the offset: along a varying gap, over a taper, and straight on through OSM's V. None: no move.
-    fn finish(&self, r: &LaneRow, i: usize, mut geom: Vec<P>) -> Result<Option<String>> {
+    fn finish(&self, ch: &LaneChunk, r: &LaneRow, i: usize, mut geom: Vec<P>) -> Result<Option<String>> {
         let e = r.edge_id;
         let ri = self.wh[&e].0;
         let mut moved = false;
         if let (Some(g0), Some(prof)) = (self.gaps.get(&e), self.run_profiles.get(&ri)) {
             if self.run_place[ri].is_none() {
-                if let Some(g) = lanes::vary(&geom, &pts_of(&self.merged[&ri]), prof, *g0, self.side_sign) {
+                if let Some(g) = lanes::vary(&geom, &pts_of(&ch.merged[&ri]), prof, *g0, self.side_sign) {
                     geom = g;
                     moved = true;
                 }
@@ -2025,8 +2036,8 @@ impl LaneGeo {
             }
         }
         if let Some(&(two, leaves)) = self.vfix.get(&e) {
-            let le = crate::lanelet2::offset_lonlat(&pts_of(self.wkt_of[&two].as_deref().unwrap_or("")), self.offsets(two)[i])?;
-            let lf = pts_of(self.wkt_of[&e].as_deref().unwrap_or(""));
+            let le = crate::lanelet2::offset_lonlat(&pts_of(ch.wkt_of[&two].as_deref().unwrap_or("")), self.offsets(two)[i])?;
+            let lf = pts_of(ch.wkt_of[&e].as_deref().unwrap_or(""));
             let n = le.len();
             let (a, b) = if leaves { (le[n - 2], le[n - 1]) } else { (le[1], le[0]) };
             let kx = lanes::kx_of(b.1);
@@ -2046,104 +2057,231 @@ impl LaneGeo {
     }
 }
 
+/// The number of runs in one chunk of `build_lane_curb`.
+const CHUNK_RUNS: usize = 50_000;
+
+/// The columns of `_lc` that make a `LaneRow`, in its order.
+const LANE_COLS: &str = "edge_id, is_rev, lanes, length_m, source, oneway, tags, osm_id, way_end, wkt, target, name";
+
+fn lane_row(r: &duckdb::Row) -> duckdb::Result<LaneRow> {
+    Ok(LaneRow {
+        edge_id: r.get(0)?,
+        is_rev: r.get::<_, Option<bool>>(1)?.unwrap_or(false),
+        lanes: r.get(2)?,
+        length_m: r.get(3)?,
+        source: r.get(4)?,
+        oneway: r.get::<_, Option<bool>>(5)?.unwrap_or(false),
+        tags: tags_of(r.get(6)?),
+        osm_id: r.get(7)?,
+        way_end: r.get::<_, Option<bool>>(8)?.unwrap_or(false),
+        wkt: r.get(9)?,
+        target: r.get(10)?,
+        name: r.get(11)?,
+    })
+}
+
 /// `_build_lane_curb`: the lanes of each link (from `driving.lane_profile` in driving, else from the tags) and `curb_seg` from the
-/// parking tags. The lane geometry is not ported yet: `geom` is NULL.
+/// parking tags.
+///
+/// By run (docs/design/gmns_streaming.md, step 2): DuckDB keeps the rows with their tags and lines (`_lc`). One pass over the rows
+/// makes the small facts of each edge, and from them the runs, the paired carriageways, the tapers and the V edges. Then the runs
+/// go in chunks of `CHUNK_RUNS`: each chunk reads only its rows and lines, makes its lanes on all cores, and writes them.
 #[allow(clippy::too_many_arguments)]
 fn build_lane_curb(c: &Ctx, sch: &str, mode: &str, uses: &str, has_raw: bool, drive_side: &str, lane_geometry: bool, pair: bool) -> Result<()> {
+    use rayon::prelude::*;
     let raw_join = if has_raw { "LEFT JOIN s.raw.ways w ON w.osm_id = abs(e.osm_id)" } else { "" };
     let tagcol = if has_raw { "w.tags" } else { "NULL::MAP(VARCHAR, VARCHAR)" };
     let endcol = if has_raw { "e.target IS NOT DISTINCT FROM (CASE WHEN e.is_reverse THEN w.refs[1] ELSE w.refs[-1] END)" } else { "true" };
     let oneway_sel = if c.src_cols(mode, "edges")?.contains("oneway") { "e.oneway" } else { "false" };
-    let mut rows: Vec<LaneRow> = Vec::new();
-    for src in ["_edges_car", "_edges_bus"] {
-        let sql = format!(
-            "SELECT e.edge_id, e.is_reverse::BOOLEAN, COALESCE(li.lanes, e.lanes)::BIGINT, e.length_m::DOUBLE, e.source, ({oneway_sel})::BOOLEAN AS oneway,
-             {tagcol} AS tags, e.osm_id, e._bus, e._bike, ({endcol})::BOOLEAN AS way_end, ST_AsText(e.geometry), e.target, e.name
+    // the rows of the car edges, then of the bus edges, each in the order of its query
+    for (part, src) in ["_edges_car", "_edges_bus"].iter().enumerate() {
+        let sel = format!(
+            "SELECT {part} AS part, row_number() OVER () AS k, e.edge_id, e.is_reverse::BOOLEAN AS is_rev, COALESCE(li.lanes, e.lanes)::BIGINT AS lanes,
+             e.length_m::DOUBLE AS length_m, e.source, ({oneway_sel})::BOOLEAN AS oneway, {tagcol} AS tags, e.osm_id, e._bus AS bus, e._bike AS bike,
+             ({endcol})::BOOLEAN AS way_end, ST_AsText(e.geometry) AS wkt, e.target, e.name
              FROM {src} e {raw_join} LEFT JOIN _lanes_inf li ON li.edge_id = e.edge_id"
         );
-        let mut st = c.con.prepare(&sql).map_err(|e| format!("{e}\n{sql}"))?;
-        let got = st
-            .query_map([], |r| {
-                Ok(LaneRow {
-                    edge_id: r.get(0)?,
-                    is_rev: r.get::<_, Option<bool>>(1)?.unwrap_or(false),
-                    lanes: r.get(2)?,
-                    length_m: r.get(3)?,
-                    source: r.get(4)?,
-                    oneway: r.get::<_, Option<bool>>(5)?.unwrap_or(false),
-                    tags: tags_of(r.get(6)?),
-                    osm_id: r.get(7)?,
-                    bus: r.get::<_, Option<bool>>(8)?.unwrap_or(false),
-                    bike: r.get(9)?,
-                    way_end: r.get::<_, Option<bool>>(10)?.unwrap_or(false),
-                    wkt: r.get(11)?,
-                    target: r.get(12)?,
-                    name: r.get(13)?,
-                })
-            })
-            .map_err(|e| e.to_string())?
-            .collect::<std::result::Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?;
-        rows.extend(got);
+        c.exec(&if part == 0 { format!("CREATE OR REPLACE TEMP TABLE _lc AS {sel}") } else { format!("INSERT INTO _lc {sel}") })?;
     }
     // driving: every edge's lanes from driving.lane_profile, decided once in the build
-    type Lane = (i64, String, Option<f64>, Option<String>);
-    let mut prof: HashMap<i64, Vec<Lane>> = HashMap::new();
-    if mode == "driving" && c.exists("driving", "lane_profile")? {
-        let sql = "SELECT edge_id, lane_num::BIGINT, use, width_m::DOUBLE, turn FROM s.driving.lane_profile ORDER BY edge_id, lane_num";
-        let mut st = c.con.prepare(sql).map_err(|e| format!("{e}\n{sql}"))?;
-        let it = st.query_map([], |r| Ok((r.get::<_, i64>(0)?, (r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))).map_err(|e| e.to_string())?;
-        for x in it {
-            let (e, l) = x.map_err(|e| e.to_string())?;
-            prof.entry(e).or_default().push(l);
-        }
-        let missing: Vec<i64> = rows.iter().map(|r| r.edge_id).filter(|e| !prof.contains_key(e)).collect();
+    let has_prof = mode == "driving" && c.exists("driving", "lane_profile")? && c.count("SELECT count(*) FROM s.driving.lane_profile")? > 0;
+    let mut w_prof: HashMap<i64, Vec<f64>> = HashMap::new();
+    if has_prof {
+        let missing: Vec<i64> = {
+            let sql = "SELECT edge_id FROM _lc ANTI JOIN s.driving.lane_profile p USING (edge_id) ORDER BY part, k";
+            let mut st = c.con.prepare(sql).map_err(|e| format!("{e}\n{sql}"))?;
+            let v = st.query_map([], |r| r.get(0)).map_err(|e| e.to_string())?.collect::<std::result::Result<Vec<i64>, _>>().map_err(|e| e.to_string())?;
+            v
+        };
         if !missing.is_empty() {
-            return Err(format!(
-                "driving.lane_profile has no lanes for {} edge(s), e.g. {:?}: build the db again",
-                missing.len(),
-                &missing[..missing.len().min(5)]
-            ));
+            return Err(format!("driving.lane_profile has no lanes for {} edge(s), e.g. {:?}: build the db again", missing.len(), &missing[..missing.len().min(5)]));
+        }
+        let sql = "SELECT edge_id, width_m::DOUBLE FROM s.driving.lane_profile ORDER BY edge_id, lane_num";
+        let mut st = c.con.prepare(sql).map_err(|e| format!("{e}\n{sql}"))?;
+        for x in st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, Option<f64>>(1)?))).map_err(|e| e.to_string())? {
+            let (e, w) = x.map_err(|e| e.to_string())?;
+            w_prof.entry(e).or_default().push(w.unwrap_or(0.0));
         }
     }
-    let bus_of: HashMap<i64, &str> = rows.iter().filter(|r| r.bus).map(|r| (r.edge_id, if r.bike == Some(true) { "bus,bike" } else { "bus" })).collect();
+    let bus_of: HashMap<i64, &str> = {
+        let sql = "SELECT edge_id, bike FROM _lc WHERE coalesce(bus, false)";
+        let mut st = c.con.prepare(sql).map_err(|e| format!("{e}\n{sql}"))?;
+        let v = st
+            .query_map([], |r| Ok((r.get::<_, i64>(0)?, if r.get::<_, Option<bool>>(1)? == Some(true) { "bus,bike" } else { "bus" })))
+            .map_err(|e| e.to_string())?
+            .collect::<std::result::Result<_, _>>()
+            .map_err(|e| e.to_string())?;
+        v
+    };
     // a one-way street with a bus lane the other way is two-way on the road
-    let bus_ways: HashSet<i64> = rows.iter().filter(|r| r.bus && r.oneway).map(|r| r.osm_id).collect();
-    let car_ways: HashSet<i64> = rows.iter().filter(|r| !r.bus).map(|r| r.osm_id).collect();
-    let contra: HashSet<i64> = bus_ways.intersection(&car_ways).copied().collect();
+    let contra: HashSet<i64> = {
+        let sql = "SELECT osm_id FROM _lc WHERE coalesce(bus, false) AND coalesce(oneway, false) INTERSECT SELECT osm_id FROM _lc WHERE NOT coalesce(bus, false)";
+        let mut st = c.con.prepare(sql).map_err(|e| format!("{e}\n{sql}"))?;
+        let v = st.query_map([], |r| r.get(0)).map_err(|e| e.to_string())?.collect::<std::result::Result<_, _>>().map_err(|e| e.to_string())?;
+        v
+    };
     let rules = Rules { mode, drive_side };
-    let geo = LaneGeo::new(c, &rows, &prof, &rules, &contra, &bus_of, lane_geometry, pair)?;
+    let side_sign = if drive_side == "right" { -1.0 } else { 1.0 };
+    // the small facts of every edge, in the order of the rows; the tags and the lines stay in DuckDB
+    let mut order: Vec<i64> = Vec::new();
+    let mut info: HashMap<i64, lanes::Info> = HashMap::new();
+    let mut w_of: HashMap<i64, Vec<f64>> = HashMap::new();
+    let mut facts: HashMap<i64, EdgeFacts> = HashMap::new();
+    {
+        let sql = format!("SELECT {LANE_COLS} FROM _lc ORDER BY part, k");
+        let mut st = c.con.prepare(&sql).map_err(|e| format!("{e}\n{sql}"))?;
+        for r in st.query_map([], lane_row).map_err(|e| e.to_string())? {
+            let r = r.map_err(|e| e.to_string())?;
+            let oneway = r.oneway && !contra.contains(&r.osm_id);
+            let w_each: Vec<f64> = if has_prof { w_prof.get(&r.edge_id).cloned().unwrap_or_default() } else { rules.lane_widths(&r.tags, r.lanes, r.is_rev, bus_of.contains_key(&r.edge_id), oneway).2 };
+            let foot = rules.is_foot(&r.tags);
+            let place = if oneway || foot || side_sign < 0.0 { lanes::placement(rules.pick(&r.tags, "placement", r.is_rev), &w_each) } else { None };
+            let (h0, h1) = r.wkt.as_deref().map(|w| lanes::headings(&pts_of(w))).unwrap_or((0.0, 0.0));
+            let g = |k: &str| r.tags.get(k).cloned();
+            facts.insert(r.edge_id, EdgeFacts { place, foot, level: level(&g("layer"), &g("bridge"), &g("tunnel")), has_wkt: usable_wkt(r.wkt.as_deref()), length_m: r.length_m.unwrap_or(0.0) });
+            info.insert(
+                r.edge_id,
+                lanes::Info {
+                    osm_id: r.osm_id,
+                    is_rev: r.is_rev,
+                    source: r.source,
+                    target: r.target,
+                    oneway: oneway || foot,
+                    widths: w_each.clone(),
+                    name: r.name.clone(),
+                    roundabout: tag(&r.tags, "junction") == Some("roundabout"),
+                    h0,
+                    h1,
+                    opp: -1.0,
+                },
+            );
+            w_of.insert(r.edge_id, w_each);
+            order.push(r.edge_id);
+        }
+    }
+    drop(w_prof);
+    let geo = LaneGeo::new(c, order, info, w_of, &facts, &rules, lane_geometry, pair)?;
+    drop(facts);
+    // the chunk of each edge, and the two-way roads that the V edges of a chunk follow
+    c.exec("CREATE OR REPLACE TEMP TABLE _lane_edge(edge_id BIGINT, ch BIGINT); CREATE OR REPLACE TEMP TABLE _lane_extra(edge_id BIGINT, ch BIGINT)")?;
+    {
+        let mut app = c.con.appender("_lane_edge").map_err(|e| e.to_string())?;
+        let mut extra = c.con.appender("_lane_extra").map_err(|e| e.to_string())?;
+        for (i, run) in geo.runs.iter().enumerate() {
+            let ch = (i / CHUNK_RUNS) as i64;
+            for e in run {
+                app.append_row(duckdb::params![e, ch]).map_err(|e| e.to_string())?;
+                if let Some((two, _)) = geo.vfix.get(e) {
+                    extra.append_row(duckdb::params![two, ch]).map_err(|e| e.to_string())?;
+                }
+            }
+        }
+        app.flush().map_err(|e| e.to_string())?;
+        extra.flush().map_err(|e| e.to_string())?;
+    }
+    let prof_sql = if has_prof {
+        "CREATE OR REPLACE TEMP TABLE _lpc AS SELECT le.ch, p.edge_id, p.lane_num::BIGINT AS lane_num, p.use, p.width_m::DOUBLE AS width_m, p.turn
+           FROM s.driving.lane_profile p JOIN _lane_edge le USING (edge_id) ORDER BY le.ch, p.edge_id, p.lane_num;"
+    } else {
+        ""
+    };
+    c.exec(&format!(
+        "CREATE OR REPLACE TEMP TABLE _lcc AS SELECT le.ch, x.* FROM _lc x JOIN _lane_edge le USING (edge_id) ORDER BY le.ch, x.part, x.k;
+         CREATE OR REPLACE TEMP TABLE _lcx AS SELECT DISTINCT p.ch, x.edge_id, x.wkt FROM _lc x JOIN _lane_extra p USING (edge_id) ORDER BY p.ch;
+         {prof_sql}
+         DROP TABLE _lc; DROP TABLE _lane_edge; DROP TABLE _lane_extra"
+    ))?;
     c.exec("CREATE OR REPLACE TEMP TABLE _lane_rows(lane_id VARCHAR, link_id BIGINT, lane_num BIGINT, allowed_uses VARCHAR, width DOUBLE, turn VARCHAR, geom_wkt VARCHAR)")?;
     c.exec("CREATE OR REPLACE TEMP TABLE _curb_rows(curb_seg_id VARCHAR, link_id BIGINT, ref_node_id BIGINT, start_lr DOUBLE, end_lr DOUBLE, regulation VARCHAR)")?;
-    {
+    type Lane = (i64, String, Option<f64>, Option<String>);
+    let n_chunks = geo.runs.len().div_ceil(CHUNK_RUNS);
+    for ch in 0..n_chunks {
+        let rows: Vec<LaneRow> = {
+            let sql = format!("SELECT {LANE_COLS} FROM _lcc WHERE ch = {ch} ORDER BY part, k");
+            let mut st = c.con.prepare(&sql).map_err(|e| format!("{e}\n{sql}"))?;
+            let v = st.query_map([], lane_row).map_err(|e| e.to_string())?.collect::<std::result::Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+            v
+        };
+        let mut prof: HashMap<i64, Vec<Lane>> = HashMap::new();
+        if has_prof {
+            let sql = format!("SELECT edge_id, lane_num, use, width_m, turn FROM _lpc WHERE ch = {ch} ORDER BY edge_id, lane_num");
+            let mut st = c.con.prepare(&sql).map_err(|e| format!("{e}\n{sql}"))?;
+            for x in st.query_map([], |r| Ok((r.get::<_, i64>(0)?, (r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))).map_err(|e| e.to_string())? {
+                let (e, l) = x.map_err(|e| e.to_string())?;
+                prof.entry(e).or_default().push(l);
+            }
+        }
+        let mut wkt_of: HashMap<i64, Option<String>> = rows.iter().map(|r| (r.edge_id, r.wkt.clone())).collect();
+        {
+            let sql = format!("SELECT edge_id, wkt FROM _lcx WHERE ch = {ch}");
+            let mut st = c.con.prepare(&sql).map_err(|e| format!("{e}\n{sql}"))?;
+            for x in st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, Option<String>>(1)?))).map_err(|e| e.to_string())? {
+                let (e, w) = x.map_err(|e| e.to_string())?;
+                wkt_of.entry(e).or_insert(w);
+            }
+        }
+        let chunk = geo.chunk(ch, wkt_of)?;
+        // the lanes and the curbs of each row, on all cores, written in the order of the rows
+        type Out = (Vec<(String, i64, i64, String, Option<f64>, Option<String>, Option<String>)>, Vec<(String, i64, i64, Option<f64>, String)>);
+        let outs: Vec<Out> = rows
+            .par_iter()
+            .map(|r| -> Result<Out> {
+                let one = r.oneway && !contra.contains(&r.osm_id);
+                let these: Vec<Lane> = if has_prof { prof.get(&r.edge_id).cloned().unwrap_or_default() } else { rules.rule_lanes(r, one, &bus_of, uses) };
+                let mut ls = Vec::with_capacity(these.len());
+                for (i, (n, u, w, t)) in these.into_iter().enumerate() {
+                    ls.push((format!("{}_{n}", r.edge_id), r.edge_id, n, u, w, t, geo.lane(&chunk, r, i)?));
+                }
+                let mut cs = Vec::new();
+                for side in ["left", "right", "both"] {
+                    let val = or(tag(&r.tags, &format!("parking:{side}")), tag(&r.tags, &format!("parking:lane:{side}")));
+                    if let Some(v) = val.filter(|v| !v.is_empty() && !["no", "separate", "none"].contains(v)) {
+                        cs.push((format!("{}_{side}", r.edge_id), r.edge_id, r.source, r.length_m, v.to_string()));
+                    }
+                }
+                Ok((ls, cs))
+            })
+            .collect::<Result<_>>()?;
         let mut lanes = c.con.appender("_lane_rows").map_err(|e| e.to_string())?;
         let mut curbs = c.con.appender("_curb_rows").map_err(|e| e.to_string())?;
-        for r in &rows {
-            let one = r.oneway && !contra.contains(&r.osm_id);
-            let these: Vec<Lane> = match prof.get(&r.edge_id) {
-                Some(p) if !prof.is_empty() => p.clone(),
-                _ => rules.rule_lanes(r, one, &bus_of, uses),
-            };
-            for (i, (n, u, w, t)) in these.into_iter().enumerate() {
-                let g = geo.lane(r, i)?;
-                lanes.append_row(duckdb::params![format!("{}_{n}", r.edge_id), r.edge_id, n, u, w, t, g]).map_err(|e| e.to_string())?;
+        for (ls, cs) in &outs {
+            for (id, lk, n, u, w, t, g) in ls {
+                lanes.append_row(duckdb::params![id, lk, n, u, w, t, g]).map_err(|e| e.to_string())?;
             }
-            for side in ["left", "right", "both"] {
-                let val = or(tag(&r.tags, &format!("parking:{side}")), tag(&r.tags, &format!("parking:lane:{side}")));
-                if let Some(v) = val.filter(|v| !v.is_empty() && !["no", "separate", "none"].contains(v)) {
-                    curbs.append_row(duckdb::params![format!("{}_{side}", r.edge_id), r.edge_id, r.source, 0.0, r.length_m, v]).map_err(|e| e.to_string())?;
-                }
+            for (id, lk, node, len, v) in cs {
+                curbs.append_row(duckdb::params![id, lk, node, 0.0, len, v]).map_err(|e| e.to_string())?;
             }
         }
         lanes.flush().map_err(|e| e.to_string())?;
         curbs.flush().map_err(|e| e.to_string())?;
     }
+    let drop_prof = if has_prof { "DROP TABLE _lpc;" } else { "" };
     c.exec(&format!(
         "CREATE TABLE {sch}.lane AS SELECT lane_id, link_id, lane_num, allowed_uses, NULL::VARCHAR AS r_barrier,
            NULL::VARCHAR AS l_barrier, width, turn, ST_GeomFromText(geom_wkt) AS geom FROM _lane_rows;
          CREATE TABLE {sch}.curb_seg AS SELECT curb_seg_id, link_id, ref_node_id, start_lr, end_lr, regulation, NULL::INTEGER AS width
            FROM _curb_rows;
-         DROP TABLE _lane_rows; DROP TABLE _curb_rows"
+         DROP TABLE _lane_rows; DROP TABLE _curb_rows; DROP TABLE _lcc; DROP TABLE _lcx; {drop_prof}"
     ))
 }
 
