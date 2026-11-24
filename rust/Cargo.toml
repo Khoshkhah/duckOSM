@@ -12,7 +12,7 @@ roadstyle-local = { git = "https://github.com/Khoshkhah/roadstyle.git", rev = "5
 roadstyle-serve = { git = "https://github.com/Khoshkhah/roadstyle.git", rev = "53135c49e3c575bb3f0edb3c2b0816f80f484586" }
 
 [workspace.package]
-version = "0.8.0"   # the version of the Python package duckosm (tests/test_wheel.py checks that they are equal)
+version = "0.9.0"   # the version of the Python package duckosm (tests/test_wheel.py checks that they are equal)
 edition = "2021"
 license = "MIT"
 authors = ["Kaveh Khoshkhah"]
