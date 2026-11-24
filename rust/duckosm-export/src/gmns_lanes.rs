@@ -199,14 +199,17 @@ pub fn paired_gaps(edges: &[(usize, Vec<P>, f64)], side_sign: f64, profiles: &mu
         }
     }
     let reach = half.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-    for (i, a) in lines.iter().enumerate() {
+    // each line on its own: on all cores, the results in the order of the lines
+    use rayon::prelude::*;
+    let one = |i: usize| -> Option<(usize, f64, Vec<(f64, f64)>)> {
+        let a = &lines[i];
         if lens[i] < STEP {
-            continue;
+            return None;
         }
         // tree.query(A.buffer(d)): the lines whose envelope meets the envelope of the buffer
         let be = envelope(&crate::offset::buffer_ring(a, half[i] + reach));
         if !cells(be).filter_map(|k| grid.get(&k)).flatten().any(|&j| j != i && envs_meet(envs[j], be)) {
-            continue;
+            return None;
         }
         let (mut found, mut prof) = (Vec::new(), Vec::new());
         let nk = (lens[i] / STEP).floor() as i64 + 1;
@@ -240,17 +243,22 @@ pub fn paired_gaps(edges: &[(usize, Vec<P>, f64)], side_sign: f64, profiles: &mu
             }
             prof.push((s, best.unwrap_or(2.0 * half[i])));
         }
-        if found.len() >= 3 {
-            gaps.insert(edges[i].0, shp::median(&found));
-            let g: Vec<f64> = prof.iter().map(|x| x.1).collect();
-            let sm = (0..prof.len())
-                .map(|k| {
-                    let w = &g[k.saturating_sub(1)..(k + 2).min(g.len())];
-                    (prof[k].0, w.iter().sum::<f64>() / w.len() as f64)
-                })
-                .collect();
-            profiles.insert(edges[i].0, sm);
+        if found.len() < 3 {
+            return None;
         }
+        let g: Vec<f64> = prof.iter().map(|x| x.1).collect();
+        let sm = (0..prof.len())
+            .map(|k| {
+                let w = &g[k.saturating_sub(1)..(k + 2).min(g.len())];
+                (prof[k].0, w.iter().sum::<f64>() / w.len() as f64)
+            })
+            .collect();
+        Some((i, shp::median(&found), sm))
+    };
+    let got: Vec<Option<(usize, f64, Vec<(f64, f64)>)>> = (0..lines.len()).into_par_iter().map(one).collect();
+    for (i, m, sm) in got.into_iter().flatten() {
+        gaps.insert(edges[i].0, m);
+        profiles.insert(edges[i].0, sm);
     }
     gaps
 }

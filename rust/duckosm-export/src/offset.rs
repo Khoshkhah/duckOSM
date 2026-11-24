@@ -254,6 +254,21 @@ pub fn buffer_ring(pts: &[P], d: f64) -> Vec<P> {
 
 /// The buffer of a line by `d` (> 0), as shapely's `line.buffer(d)` (round joins, 16 segments for a quarter circle; `flat`:
 /// `cap_style="flat"`, else round caps): GEOS `BufferOp` of a line.
+/// The envelope of `line_buffer(pts, d, true)` from the raw flat-capped outline, without the polygon. None: a closed line or
+/// fewer than two points (then the polygon is needed). Every point of the outline is on the edge of the buffer.
+pub fn flat_buffer_envelope(pts: &[P], d: f64) -> Option<(f64, f64, f64, f64)> {
+    let mut clean: Vec<P> = Vec::with_capacity(pts.len());
+    for p in pts {
+        if p.0.is_finite() && p.1.is_finite() && clean.last() != Some(p) {
+            clean.push(*p);
+        }
+    }
+    if clean.len() < 2 || d <= 0.0 || (clean.len() >= 4 && clean.first() == clean.last()) {
+        return None;
+    }
+    Some(buffer_ring_cap(&clean, d, true).iter().fold((f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY), |e, p| (e.0.min(p.0), e.1.min(p.1), e.2.max(p.0), e.3.max(p.1))))
+}
+
 pub fn line_buffer(pts: &[P], d: f64, flat: bool) -> Result<Vec<crate::geos::Polygon>, String> {
     let mut clean: Vec<P> = Vec::with_capacity(pts.len());
     for p in pts {
@@ -268,7 +283,7 @@ pub fn line_buffer(pts: &[P], d: f64, flat: bool) -> Result<Vec<crate::geos::Pol
     crate::geos::buffer_polygons(&curves)
 }
 
-fn buffer_ring_cap(pts: &[P], d: f64, flat: bool) -> Vec<P> {
+pub(crate) fn buffer_ring_cap(pts: &[P], d: f64, flat: bool) -> Vec<P> {
     let mut g = Gen::new(d);
     let tol = d / SIMPLIFY_FACTOR;
     let s1 = simplify(pts, tol);

@@ -113,12 +113,13 @@ it turns red, and the lanes that its turns lead into turn green.
 
 ## Speed and memory
 
-Driving network, with netconvert. Input is the Level 2 routable database (`<area>.duckdb`):
+Driving network, with the lane rules (the default). Input is the Level 2 routable database (`<area>.duckdb`):
 
 | Area (input DuckDB) | Machine | Time | Memory | Output GMNS DuckDB |
 |---|---|---|---|---|
 | Monaco (38 MB `.duckdb`) | Mac mini (M6, 16 GB) | 0.8 s | 145 MB | 8.4 MB |
-| Kentucky (~1.2 GB `.duckdb`), driving | Mac mini (M6, 16 GB) | 2.5 min | 2.2 GB (Rust) + 2 GB (DuckDB) | 6.7 GB |
+| Kentucky (2.2 GB `.duckdb`) | Mac mini (M6, 16 GB) | 70 s | 1.75 GB (Rust) + 2 GB (DuckDB) | 6.7 GB |
+| Île-de-France (2.0 GB `.duckdb`) | Mac mini (M6, 16 GB) | 65 s | | 3.0 GB |
 | France (~35 GB `.duckdb`) | | not run | (estimated ~150 GB) | |
 
 Each step works in chunks (a chunk of junctions, of road runs or of lanes), so the memory stays about the same on a large
