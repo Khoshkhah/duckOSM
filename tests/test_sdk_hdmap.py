@@ -16,7 +16,7 @@ def gmns(tmp_path_factory):
     d = tmp_path_factory.mktemp("hdmap")
     net = duckosm.build(pbf=DATA / "monaco.osm.pbf", boundary=DATA / "monaco.geojson", modes=["driving"],
                         output=d / "monaco.duckdb", progress=False)
-    duckosm.planning.to_gmns(net.driving, d / "gmns.duckdb")
+    duckosm.planning.to_gmns(net.driving, d / "gmns.duckdb", lane_source="netconvert")   # the fixture needs netconvert: its lanes
     return d / "gmns.duckdb"
 
 
@@ -42,7 +42,8 @@ def test_to_opendrive_junctions_from_a_network(gmns, tmp_path):
     """junctions=True with a mode view: the GMNS file is made in a temporary folder; the same numbers as from the GMNS file."""
     net = duckosm.Network(gmns.parent / "monaco.duckdb")
     a = duckosm.hdmap.to_opendrive(net.driving, tmp_path / "a.xodr", junctions=True)
-    b = duckosm.hdmap.to_opendrive(gmns, tmp_path / "b.xodr", mode="driving", junctions=True)
+    own = duckosm.planning.to_gmns(net.driving, tmp_path / "gmns.duckdb")["path"]   # the default lanes, as to_opendrive makes them
+    b = duckosm.hdmap.to_opendrive(own, tmp_path / "b.xodr", mode="driving", junctions=True)
     assert a == b and a["junctions"] > 0
 
 
