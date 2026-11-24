@@ -14,6 +14,8 @@ clap = { version = "4", features = ["derive"] }
 duckosm-core = { path = "../duckosm-core", default-features = false }
 flate2 = "1"
 geo = { version = "0.33", default-features = false }
+# the lane lines of the GMNS runs on all cores
+rayon = "1.12"
 # the map tiles of GMNS by tiles: the tile grid of the tile cut (the rev of duckosm-core)
 pbfcut = { git = "https://github.com/Khoshkhah/pbfcut.git", rev = "2facc00595ff6397660d76211ca255098affab38" }
 # the join of the layer files into one GeoPackage (the version of duckosm-build)

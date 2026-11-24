@@ -253,17 +253,11 @@ fn build_gmns(source: &Path, out: &Path, name: &str, o: &GmnsOptions) -> Result<
         let sch = format!("gmns_{mode}");
         let uses = mode_use(mode);
         c.exec(&format!("CREATE SCHEMA {sch}"))?;
-        eprintln!("@STEP build_fixed {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64());
         build_fixed(&c, &sch, &name, mode, uses)?;
-        eprintln!("@STEP edge_view {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64());
         edge_view(&c, mode, has_raw)?;
-        eprintln!("@STEP build_node {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64());
         build_node(&c, &sch, mode)?;
-        eprintln!("@STEP infer_lanes {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64());
         infer_lanes(&c, mode, has_raw)?;
-        eprintln!("@STEP build_link {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64());
         build_link(&c, &sch, mode, uses, has_raw)?;
-        eprintln!("@STEP build_geometry {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64());
         build_geometry(&c, &sch)?;
         for (col, typ) in [("along_link_id", "BIGINT"), ("along_mode", "VARCHAR"), ("along_gap_m", "DOUBLE"), ("along_kind", "VARCHAR")] {
             c.exec(&format!("ALTER TABLE {sch}.link ADD COLUMN {col} {typ}"))?;
@@ -275,17 +269,12 @@ fn build_gmns(source: &Path, out: &Path, name: &str, o: &GmnsOptions) -> Result<
         if mode != "driving" {
             along = sidewalk_parents(&c, &sch, has_raw, drive_side)?;
         }
-        eprintln!("@STEP build_lane_curb {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64());
         build_lane_curb(&c, &sch, mode, uses, has_raw, drive_side, o.lane_geometry, o.pair_carriageways)?;
         if o.walk_frame && mode != "driving" && o.lane_geometry {
-            eprintln!("@STEP crate::gmns_walk::walk_frame {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64());
             crate::gmns_walk::walk_frame(&c, &sch, drive_side, &along, o.walk_clearance_m)?; // before the lane connectors
-            eprintln!("@STEP crate::gmns_walk::walk_kerb {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64());
             crate::gmns_walk::walk_kerb(&c, &sch, o.walk_clearance_m)?;
-            eprintln!("@STEP crate::gmns_walk::walk_join {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64());
             crate::gmns_walk::walk_join(&c, &sch)?;
         }
-        eprintln!("@STEP build_movement {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64());
         build_movement(&c, &sch, mode, uses)?;
         if mode == "driving" || mode == "cycling" {
             // which lane goes to which, from SUMO netconvert; driving: also the paths through the junctions and geom_cut. GMNS does
@@ -311,39 +300,29 @@ fn build_gmns(source: &Path, out: &Path, name: &str, o: &GmnsOptions) -> Result<
                 } else {
                     HashSet::new()
                 };
-                eprintln!("@STEP crate::gmns_lane_rules::lanes_from_rules {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64());
                 crate::gmns_lane_rules::lanes_from_rules(&c, &sch, mode, o.lane_geometry && mode == "driving", drive_side, &ring)?;
             } else {
-                eprintln!("@STEP crate::gmns_sumo::lanes_from_sumo {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64());
                 crate::gmns_sumo::lanes_from_sumo(&c, source, &sch, mode, o.lane_geometry && mode == "driving", drive_side)?;
             }
             if o.lane_geometry {
-                eprintln!("@STEP meet_lanes {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64());
                 meet_lanes(&c, &sch)?;
             }
         } else {
-            eprintln!("@STEP walk_lanes {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64());
             walk_lanes(&c, &sch)?;
         }
         if mode == "driving" {
-            eprintln!("@STEP crate::crossings::build_crossings {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64());
             crate::crossings::build_crossings(&c, &sch, has_raw)?; // zebra crossings on the driving lanes
         }
         c.exec(&format!(
             "CREATE TABLE {sch}.signal_controller AS SELECT 'sig_' || node_id::VARCHAR AS controller_id, node_id, 'signal' AS control_type
              FROM {sch}.node WHERE ctrl_type = 'signal'"
         ))?;
-        eprintln!("@STEP build_location {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64());
         build_location(&c, &sch, mode, has_raw, stops.is_some())?;
         if let Some(s) = &stops {
-            eprintln!("@STEP crate::gtfs::add_transit_stops {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64());
             crate::gtfs::add_transit_stops(&c, &sch, mode, s, drive_side, o.gtfs_max_m)?;
         }
-        eprintln!("@STEP apply_signs {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64());
         apply_signs(&c, &sch, mode, has_raw)?;
-        eprintln!("@STEP node_types {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64());
         node_types(&c, &sch, has_raw)?;
-        eprintln!("@STEP build_zone {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64());
         build_zone(&c, &sch, name.strip_suffix("_gmns").unwrap_or(&name))?;
         let mut counts = Vec::new();
         for t in ["node", "link", "lane", "movement", "signal_controller", "curb_seg"] {
@@ -1945,14 +1924,22 @@ impl LaneGeo {
         if !lane_geometry {
             return Ok(g);
         }
-        // the lanes of each run of two or more pieces, from the run's one offset curve
-        for (i, run) in g.runs.clone().iter().enumerate() {
-            if run.len() > 1 && g.merged.contains_key(&i) {
-                let pieces: Vec<Vec<P>> = run.iter().map(|e| pts_of(g.wkt_of[e].as_deref().unwrap_or(""))).collect();
-                if let Some(per_piece) = lanes::run_lane_wkts(&pieces, &g.offsets(run[0]), closed.contains(&i))? {
-                    for (e, l) in run.iter().zip(per_piece) {
-                        g.run_geoms.insert(*e, l);
-                    }
+        // the lanes of each run of two or more pieces, from the run's one offset curve. The runs are independent: on all
+        // cores (one core took most of this step: Kentucky 59 s)
+        use rayon::prelude::*;
+        let work: Vec<(usize, Vec<Vec<P>>, Vec<f64>, bool)> = g
+            .runs
+            .iter()
+            .enumerate()
+            .filter(|(i, run)| run.len() > 1 && g.merged.contains_key(i))
+            .map(|(i, run)| (i, run.iter().map(|e| pts_of(g.wkt_of[e].as_deref().unwrap_or(""))).collect(), g.offsets(run[0]), closed.contains(&i)))
+            .collect();
+        let done: Vec<(usize, Option<Vec<Vec<Vec<P>>>>)> =
+            work.into_par_iter().map(|(i, pieces, offs, cl)| lanes::run_lane_wkts(&pieces, &offs, cl).map(|r| (i, r))).collect::<Result<_>>()?;
+        for (i, per_piece) in done {
+            if let Some(per_piece) = per_piece {
+                for (e, l) in g.runs[i].iter().zip(per_piece) {
+                    g.run_geoms.insert(*e, l);
                 }
             }
         }

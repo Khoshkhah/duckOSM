@@ -334,17 +334,72 @@ pub(crate) fn build_crossings(c: &Ctx, sch: &str, has_raw: bool) -> Result<()> {
     const M: f64 = 111320.0;
     let to_m = |lon: f64, lat: f64| ((lon - x0) * kx * M, (lat - y0) * M);
     let to_ll = |x: f64, y: f64| (x / (kx * M) + x0, y / M + y0);
+    let ref_ids: Vec<i64> = ways.iter().flat_map(|w| w.4.iter().copied()).collect::<HashSet<_>>().into_iter().collect();
+    let mut node_xy: HashMap<i64, P> = HashMap::new();
+    if !ref_ids.is_empty() {
+        c.exec("CREATE OR REPLACE TEMP TABLE _refs(osm_id BIGINT)")?;
+        let mut app = c.con.appender("_refs").map_err(|e| e.to_string())?;
+        for r in &ref_ids {
+            app.append_row([r]).map_err(|e| e.to_string())?;
+        }
+        app.flush().map_err(|e| e.to_string())?;
+        drop(app);
+        let sql = "SELECT n.osm_id, n.lon, n.lat FROM s.raw.nodes n JOIN _refs r USING (osm_id)";
+        let mut st = c.con.prepare(sql).map_err(|e| e.to_string())?;
+        for r in st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, f64>(1)?, r.get::<_, f64>(2)?))).map_err(|e| e.to_string())? {
+            let (o, lon, lat) = r.map_err(|e| e.to_string())?;
+            node_xy.insert(o, to_m(lon, lat));
+        }
+        drop(st);
+        c.exec("DROP TABLE _refs")?;
+    }
+    // every lane needs the envelope of its surface, because the order of the lane tree (as shapely's STRtree) depends on all
+    // envelopes. Only the lanes near a crossing keep their surface: the surfaces of all lanes of the area took most of the
+    // memory of this step. The surfaces are made on all cores (one core: Kentucky 105 s).
+    const HOT_M: f64 = 50.0;
+    let mut hot: HashSet<(i64, i64)> = HashSet::new();
+    let mut heat = |e: (f64, f64, f64, f64)| hot.extend(cells((e.0 - HOT_M, e.1 - HOT_M, e.2 + HOT_M, e.3 + HOT_M)));
+    for w in &ways {
+        let pts: Vec<P> = w.4.iter().filter_map(|r| node_xy.get(r).copied()).collect();
+        if pts.len() >= 2 {
+            heat(shp_env(&pts));
+        }
+    }
+    for n in &nodes {
+        let p = to_m(n.1, n.2);
+        heat((p.0, p.1, p.0, p.1));
+    }
+    use rayon::prelude::*;
+    // each lane: None (too short), Some(None) (the buffer failed), or its line, envelope and (near a crossing) surface
+    type Made = Option<Option<(Vec<P>, (f64, f64, f64, f64), Option<(MultiPolygon<f64>, Vec<crate::geos::Polygon>)>)>>;
+    let made: Vec<Made> = lanes
+        .par_iter()
+        .map(|(_, _, w, wkt, ..)| {
+            let g: Vec<P> = shp::wkt_points(wkt).into_iter().map(|(x, y)| to_m(x, y)).collect();
+            if shp::length(&g) < 0.5 {
+                return None;
+            }
+            let mut failed = 0;
+            let Some(gp) = surface(&g, w / 2.0, &mut failed) else { return Some(None) };
+            let poly = mp(&gp);
+            let env = env_of(&poly);
+            let (e, h) = (shp_env(&g), w / 2.0);
+            let near = cells((e.0 - h, e.1 - h, e.2 + h, e.3 + h)).any(|k| hot.contains(&k));
+            Some(Some((g, env, near.then_some((poly, gp)))))
+        })
+        .collect();
     let mut unbuffered = 0;
     let mut l = Lanes { id: vec![], link: vec![], way: vec![], width: vec![], level: vec![], conn: vec![], geom: vec![], poly: vec![], gpoly: vec![], env: vec![], tree: vec![], rank: vec![], grid: HashMap::new() };
-    for (lid, lk, w, wkt, osm, ly, br, tu, is_conn) in &lanes {
-        let g: Vec<P> = shp::wkt_points(wkt).into_iter().map(|(x, y)| to_m(x, y)).collect();
-        if shp::length(&g) < 0.5 {
+    for ((lid, lk, w, _, osm, ly, br, tu, is_conn), m) in lanes.iter().zip(made) {
+        let Some(m) = m else { continue };
+        let Some((g, env, surf)) = m else {
+            unbuffered += 1;
             continue;
-        }
-        let Some(gp) = surface(&g, w / 2.0, &mut unbuffered) else { continue };
-        let poly = mp(&gp);
+        };
+        // a lane far from every crossing: no query reaches it, it keeps only its envelope (for the order of the tree)
+        let (poly, gp) = surf.unwrap_or_else(|| (MultiPolygon::new(vec![]), vec![]));
         l.gpoly.push(gp);
-        l.env.push(env_of(&poly));
+        l.env.push(env);
         l.id.push(lid.clone());
         l.link.push(*lk);
         l.way.push(*osm);
@@ -374,25 +429,6 @@ pub(crate) fn build_crossings(c: &Ctx, sch: &str, has_raw: bool) -> Result<()> {
         line: Vec<P>,
         only: Option<HashSet<usize>>,
         level: Option<i64>,
-    }
-    let ref_ids: Vec<i64> = ways.iter().flat_map(|w| w.4.iter().copied()).collect::<HashSet<_>>().into_iter().collect();
-    let mut node_xy: HashMap<i64, P> = HashMap::new();
-    if !ref_ids.is_empty() {
-        c.exec("CREATE OR REPLACE TEMP TABLE _refs(osm_id BIGINT)")?;
-        let mut app = c.con.appender("_refs").map_err(|e| e.to_string())?;
-        for r in &ref_ids {
-            app.append_row([r]).map_err(|e| e.to_string())?;
-        }
-        app.flush().map_err(|e| e.to_string())?;
-        drop(app);
-        let sql = "SELECT n.osm_id, n.lon, n.lat FROM s.raw.nodes n JOIN _refs r USING (osm_id)";
-        let mut st = c.con.prepare(sql).map_err(|e| e.to_string())?;
-        for r in st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, f64>(1)?, r.get::<_, f64>(2)?))).map_err(|e| e.to_string())? {
-            let (o, lon, lat) = r.map_err(|e| e.to_string())?;
-            node_xy.insert(o, to_m(lon, lat));
-        }
-        drop(st);
-        c.exec("DROP TABLE _refs")?;
     }
     let mut cands: Vec<Cand> = Vec::new();
     for (osm, ct, mk, wd, refs, ly, br, tu) in &ways {
