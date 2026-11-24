@@ -644,7 +644,7 @@ fn mode_summary(py: Python<'_>, db: PathBuf, modes: Vec<String>) -> PyResult<Vec
 
 /// `to_gmns`: the GMNS db `out` from the duckOSM db `source` (duckosm_export::gmns::to_gmns_with, as `duckosm gmns`).
 #[pyfunction]
-#[pyo3(signature = (source, out, modes, to_csv, lane_geometry, combined, drive_side, pair_carriageways, csv_extensions, gtfs, gtfs_max_m, walk_frame, walk_clearance_m, tile_zoom, lane_source))]
+#[pyo3(signature = (source, out, modes, to_csv, lane_geometry, combined, drive_side, pair_carriageways, csv_extensions, gtfs, gtfs_max_m, walk_frame, walk_clearance_m, lane_source))]
 #[allow(clippy::too_many_arguments)]
 fn to_gmns(
     py: Python<'_>,
@@ -661,7 +661,6 @@ fn to_gmns(
     gtfs_max_m: f64,
     walk_frame: bool,
     walk_clearance_m: f64,
-    tile_zoom: Option<u8>,
     lane_source: String,
 ) -> PyResult<String> {
     let o = duckosm_export::gmns::GmnsOptions {
@@ -676,7 +675,6 @@ fn to_gmns(
         gtfs_max_m,
         walk_frame,
         walk_clearance_m,
-        tile_zoom,
         lane_source,
     };
     let s = py.detach(|| duckosm_export::gmns::to_gmns_with(&source, &out, &o)).map_err(err)?;

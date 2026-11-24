@@ -180,7 +180,24 @@ pub fn paired_gaps(edges: &[(usize, Vec<P>, f64)], side_sign: f64, profiles: &mu
     let lens: Vec<f64> = lines.iter().map(|l| shp::length(l)).collect();
     let half: Vec<f64> = edges.iter().map(|e| e.2).collect();
     let envs: Vec<(f64, f64, f64, f64)> = lines.iter().map(|l| envelope(l)).collect();
-    let tree = shp::strtree_order(&envs);
+    // shapely's tree order, for the order of the candidates; a grid finds them (a scan of all lines for each line grows
+    // with the square of the count: 72 s for Kentucky)
+    const CELL: f64 = 250.0;
+    let mut rank = vec![0usize; envs.len()];
+    for (k, &j) in shp::strtree_order(&envs).iter().enumerate() {
+        rank[j] = k;
+    }
+    let cells = |e: (f64, f64, f64, f64)| {
+        let c = |v: f64| (v / CELL).floor() as i64;
+        let (x0, y0, x1, y1) = (c(e.0), c(e.1), c(e.2), c(e.3));
+        (x0..=x1).flat_map(move |x| (y0..=y1).map(move |y| (x, y)))
+    };
+    let mut grid: HashMap<(i64, i64), Vec<usize>> = HashMap::new();
+    for (j, e) in envs.iter().enumerate() {
+        for k in cells(*e) {
+            grid.entry(k).or_default().push(j);
+        }
+    }
     let reach = half.iter().copied().fold(f64::NEG_INFINITY, f64::max);
     for (i, a) in lines.iter().enumerate() {
         if lens[i] < STEP {
@@ -188,8 +205,7 @@ pub fn paired_gaps(edges: &[(usize, Vec<P>, f64)], side_sign: f64, profiles: &mu
         }
         // tree.query(A.buffer(d)): the lines whose envelope meets the envelope of the buffer
         let be = envelope(&crate::offset::buffer_ring(a, half[i] + reach));
-        let cand: Vec<usize> = tree.iter().copied().filter(|&j| j != i && envs_meet(envs[j], be)).collect();
-        if cand.is_empty() {
+        if !cells(be).filter_map(|k| grid.get(&k)).flatten().any(|&j| j != i && envs_meet(envs[j], be)) {
             continue;
         }
         let (mut found, mut prof) = (Vec::new(), Vec::new());
@@ -199,6 +215,12 @@ pub fn paired_gaps(edges: &[(usize, Vec<P>, f64)], side_sign: f64, profiles: &mu
             let p = shp::interpolate(a, s);
             let (tx, ty) = tangent(a, lens[i], s);
             let mut best: Option<f64> = None;
+            // the lines near this point only: a line farther than half[i] + reach can not be the partner
+            let r = half[i] + reach;
+            let pe = (p.0 - r, p.1 - r, p.0 + r, p.1 + r);
+            let mut cand: Vec<usize> = cells(pe).filter_map(|k| grid.get(&k)).flatten().copied().filter(|&j| j != i && envs_meet(envs[j], pe)).collect();
+            cand.sort_unstable_by_key(|&j| rank[j]);
+            cand.dedup();
             for &j in &cand {
                 let b = &lines[j];
                 let sb = shp::project(b, p);

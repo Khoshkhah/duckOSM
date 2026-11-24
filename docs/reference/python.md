@@ -25,9 +25,14 @@ pip install "duckosm[viz]"
 | (none) | the core: build, data reads, routes, the exports | all |
 | `viz` | roadstyle, mapstyle, lanestyle, matplotlib | `net.map()`, `net.plot()`, `net.dashboard()`, `duckosm viz` |
 | `graph` | networkx, rustworkx | `duckosm.ml` |
-| `sim` | eclipse-sumo (`netconvert`) | `duckosm.sim.to_sumo` with the `.net.xml` |
+| `sim` | eclipse-sumo (`netconvert`), sumolib | `duckosm.sim.to_sumo` with the `.net.xml`, `duckosm.sim.sumo_net` |
+| `gis` | geopandas | `net.edges()`, `duckosm.gis` |
+| `analysis` | networkx, matplotlib, geopandas | `duckosm.analysis` |
+| `planning` | path4gmns, requests | `duckosm.planning.to_path4gmns` |
+| `hdmap` | commonroad-io | `duckosm.hdmap.to_commonroad` |
+| `ml` | torch, torch_geometric | `duckosm.ml.to_pyg` |
 | `widget` | anywidget | `duckosm.AreaPicker` |
-| `all` | all of the above | |
+| `all` | all of the above, but not `ml` | |
 
 The old extras `networkx`, `rustworkx`, `routing` and `sumo` stay.
 
@@ -234,7 +239,7 @@ others. Their mode default is `"driving"`, as before. `build` gives a `Network`,
 | Function | Main options | Returns | Command |
 |---|---|---|---|
 | `get(place=None, *, osm_id=None, bbox=None, h3_cell=None, boundary=None, point=None, dist_m=1000, out=None, name=None, fixes=None, cache=None, refresh=False, dry_run=False, progress=None)` | Give one of `place`, `osm_id`, `bbox` (a tuple `(west, south, east, north)`), `h3_cell`, `point` (`(lon, lat)`, with the box `dist_m` metres around it) and `boundary`. `out=None`: a new folder in the work folder. `dry_run=True`: download and write nothing; returns a dict with `name`, `boundary` and `extract`. `boundary`: a GeoJSON file, a GeoJSON dict, or an object with `__geo_interface__` (shapely, geopandas). `fixes`: the cut file has the [OSM fixes](../guides/edit-osm-data.md#the-fixes-file) in it. | an object with `pbf` and `boundary`, the `Path`s of the two files | [`duckosm get`](cli.md#get) |
-| `build(pbf=None, *, config=None, boundary=None, modes=None, output=None, source_db=None, h3_cell=None, fixes=None, features=None, levels=None, graph=None, h3_index=None, h3_resolution=None)` | `config` gives the settings of a [config file](../guides/build.md#the-config-file). An option that is not `None` overrides the file. Without a config file, `None` is the default of the command (`modes=["driving"]`, the switches on, `h3_resolution=8`). | a [`Network`](#network): the `.duckdb` file | [`duckosm build`](cli.md#build) |
+| `build(pbf=None, *, config=None, boundary=None, modes=None, output=None, source_db=None, h3_cell=None, fixes=None, features=None, levels=None, graph=None, h3_index=None, h3_resolution=None, dem=None, progress=None, **options)` | `config` gives the settings of a [config file](../guides/build.md#the-config-file). An option that is not `None` overrides the file. Without a config file, `None` is the default of the command (`modes=["driving"]`, the switches on, `h3_resolution=8`). | a [`Network`](#the-objects): the `.duckdb` file | [`duckosm build`](cli.md#build) |
 | `tiles(region=None, *, boundary=None, out=None, config=None, zoom=8, memory="2G", jobs=None, tile_threads=2, keep_tiles=False, build_args=[])` | `build_args`: the build options of each tile (the options after `--`) | the `Path` of the output folder | [`duckosm tiles`](cli.md#tiles) |
 | `quack(pbf, *, out=".", name="area", formats=None, gdal=False, fixes=None, threads=None, sort=True, tiles=None, tile_zoom=None)` | `formats`: `["geoparquet"]`, `["duckdb"]` or both. With `gdal=True`: `["gpkg"]` or `["geoparquet"]`. `fixes`: an [OSM fixes file](../guides/edit-osm-data.md#the-fixes-file). `tile_zoom`: make the table tile by tile (zoom 0 to 14). | a list of the `Path`s of the files that it wrote | [`duckosm quack`](cli.md#quack) |
 | `extract(source, db, *, name=None, osm_id=None, boundary=None)` | Give one of `name`, `osm_id` and `boundary`. | the `Path` of the new database | [`duckosm extract`](cli.md#extract) |

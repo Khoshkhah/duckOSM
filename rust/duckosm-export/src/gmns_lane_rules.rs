@@ -7,7 +7,7 @@
 //! decide only which lanes serve them). The output is the same as netconvert's: for each movement, its lane pairs.
 
 use crate::gmns::Ctx;
-use crate::gmns_sumo::{apply_rows, runs, Check};
+use crate::gmns_sumo::{runs, Check};
 use crate::shapely::{self as shp, P};
 use crate::Result;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -200,7 +200,6 @@ fn ring_pairs(net: &Net, role: RingRole, turn: &str, e: &[usize], l: &[usize], r
 /// One legal turn at a node, as the rules read it.
 struct Turn {
     mid: String,
-    node: i64,
     ib: i64,
     ob: i64,
     kind: &'static str,
@@ -319,76 +318,27 @@ fn signed_angle(a: P, b: P) -> f64 {
     (a.0 * b.1 - a.1 * b.0).atan2(a.0 * b.0 + a.1 * b.1).to_degrees()
 }
 
-/// The lane pairs (lane number in, lane number out) of each movement (`mvmt_id`) of the schema `sch`. `ring`: the links on a
-/// roundabout. Movements with no pair are not in the result.
-pub(crate) fn pairs(c: &Ctx, sch: &str, mode: &str, drive_side: &str, ring: &HashSet<i64>) -> Result<HashMap<String, Vec<(i64, i64)>>> {
-    let rhd = drive_side == "right";
-    let e = |x: duckdb::Error| x.to_string();
-    // the links: ends, class and line in local metres (each line around its own first point: only directions are used)
-    let mut links: HashMap<i64, (i64, i64, String, Vec<P>)> = HashMap::new();
-    let mut st = c.con.prepare(&format!("SELECT link_id, from_node_id, to_node_id, coalesce(facility_type, ''), geometry FROM {sch}.link")).map_err(e)?;
-    for r in st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?, r.get::<_, String>(3)?, r.get::<_, Option<String>>(4)?))).map_err(e)? {
-        let (id, f, t, hw, wkt) = r.map_err(e)?;
-        let pts = wkt.map(|w| shp::wkt_points(&w)).unwrap_or_default();
-        let l = if pts.is_empty() { vec![] } else { local(&pts, pts[0]) };
-        links.insert(id, (f, t, hw, l));
-    }
-    // the lanes, left to right (lane_num: a bike lane on the left is -1)
-    let mut net = Net { lanes: Vec::new(), of: HashMap::new() };
-    let mut st = c.con.prepare(&format!("SELECT link_id, lane_num, coalesce(allowed_uses, ''), turn FROM {sch}.lane ORDER BY link_id, lane_num")).map_err(e)?;
-    for r in st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, String>(2)?, r.get::<_, Option<String>>(3)?))).map_err(e)? {
-        let (link, num, uses, turn) = r.map_err(e)?;
-        let has = |u: &str| uses.split(',').any(|x| x.trim() == u);
-        // a bike lane is its own lane only in the driving network; in the cycling network each lane is a bike lane
-        let bike = mode == "driving" && has("bike") && !has("auto") && !has("bus");
-        let bus = has("bus") && !has("auto");
-        net.of.entry(link).or_default().push(net.lanes.len());
-        net.lanes.push(Lane { num, bus, bike, turn: turn.filter(|t| !t.is_empty()) });
-    }
-    // the legal turns, with their kind
-    let mut turns: Vec<Turn> = Vec::new();
-    let mut st = c.con.prepare(&format!("SELECT mvmt_id, node_id, ib_link_id, ob_link_id, type FROM {sch}.movement ORDER BY rowid")).map_err(e)?;
-    for r in st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?, r.get::<_, i64>(3)?, r.get::<_, Option<String>>(4)?))).map_err(e)? {
-        let (mid, node, ib, ob, typ) = r.map_err(e)?;
-        let (Some(a), Some(b)) = (links.get(&ib), links.get(&ob)) else { continue };
-        let angle = signed_angle(tangent(&a.3, true), tangent(&b.3, false));
-        // the turn type of GMNS wins (left and right from 30 degrees): the lanes follow the movement's own type; the angle
-        // decides only between straight and slight for a through, merge or diverge movement
-        let kind = match typ.as_deref() {
-            Some("uturn") => "u",
-            Some("left") => "left",
-            Some("right") => "right",
-            _ => match turn_kind(angle) {
-                "left" => "slight_left",
-                "right" => "slight_right",
-                "u" => "straight",
-                k => k,
-            },
-        };
-        turns.push(Turn { mid, node, ib, ob, kind, angle, fork: false });
-    }
-    // rule 3 of turn-rules, the fork, node by node: the twins (the other direction of a two-way road) do not count
+/// A link of one chunk: its from node, its to node, its class and its line in local metres (around its own first point:
+/// only directions are used).
+type Link = (i64, i64, String, Vec<P>);
+
+/// The lane pairs (lane number in, lane number out) of the movements `turns` of one junction. `links`: at least the links of
+/// these turns; `ring`: the links on a roundabout. Movements with no pair are not in the result.
+fn node_pairs(net: &Net, links: &HashMap<i64, Link>, turns: &mut [Turn], ring: &HashSet<i64>, rhd: bool) -> HashMap<String, Vec<(i64, i64)>> {
+    // rule 3 of turn-rules, the fork: the twins (the other direction of a two-way road) do not count
     let twin = |a: i64, b: i64| -> bool { links.get(&a).zip(links.get(&b)).is_some_and(|(x, y)| x.0 == y.1 && x.1 == y.0) };
-    let mut at: BTreeMap<i64, Vec<usize>> = BTreeMap::new();
-    for (i, t) in turns.iter().enumerate() {
-        at.entry(t.node).or_default().push(i);
-    }
-    let mut groups: Vec<(Vec<usize>, bool)> = Vec::new();
-    for idx in at.values() {
-        let ins: BTreeSet<i64> = idx.iter().map(|&i| turns[i].ib).collect();
-        let outs: BTreeSet<i64> = idx.iter().map(|&i| turns[i].ob).collect();
-        let real_out: Vec<i64> = outs.iter().copied().filter(|&o| !ins.iter().any(|&i| twin(i, o))).collect();
-        let real_in: Vec<i64> = ins.iter().copied().filter(|&i| !outs.iter().any(|&o| twin(i, o))).collect();
-        let diverge = ins.len() == 1 && real_out.len() >= 2;
-        let merge = outs.len() == 1 && real_in.len() >= 2;
-        if !(diverge || merge) {
-            continue;
-        }
-        let g: Vec<usize> = idx.iter().copied().filter(|&i| if diverge { real_out.contains(&turns[i].ob) } else { real_in.contains(&turns[i].ib) }).collect();
-        for &i in &g {
+    let ins: BTreeSet<i64> = turns.iter().map(|t| t.ib).collect();
+    let outs: BTreeSet<i64> = turns.iter().map(|t| t.ob).collect();
+    let real_out: Vec<i64> = outs.iter().copied().filter(|&o| !ins.iter().any(|&i| twin(i, o))).collect();
+    let real_in: Vec<i64> = ins.iter().copied().filter(|&i| !outs.iter().any(|&o| twin(i, o))).collect();
+    let diverge = ins.len() == 1 && real_out.len() >= 2;
+    let merge = outs.len() == 1 && real_in.len() >= 2;
+    let mut group: Vec<usize> = Vec::new();
+    if diverge || merge {
+        group = (0..turns.len()).filter(|&i| if diverge { real_out.contains(&turns[i].ob) } else { real_in.contains(&turns[i].ib) }).collect();
+        for &i in &group {
             turns[i].fork = true;
         }
-        groups.push((g, diverge));
     }
     let rank_of = |l: i64| links.get(&l).map(|x| rank(&x.2)).unwrap_or(10);
     let mut out: HashMap<String, Vec<(i64, i64)>> = HashMap::new();
@@ -403,13 +353,13 @@ pub(crate) fn pairs(c: &Ctx, sch: &str, mode: &str, drive_side: &str, ring: &Has
             }
         }
     }
-    for (g, diverge) in &groups {
-        let ts: Vec<&Turn> = g.iter().map(|&i| &turns[i]).collect();
-        for (mid, ps) in fan_pairs(&net, &ts, *diverge, rhd, &rank_of) {
-            put(&mut out, &net, &mid, ps);
+    if !group.is_empty() {
+        let ts: Vec<&Turn> = group.iter().map(|&i| &turns[i]).collect();
+        for (mid, ps) in fan_pairs(net, &ts, diverge, rhd, &rank_of) {
+            put(&mut out, net, &mid, ps);
         }
     }
-    for t in &turns {
+    for t in turns.iter() {
         let (e, l) = (net.end_lanes(t.ib, false), net.end_lanes(t.ob, false));
         let role = match (ring.contains(&t.ib), ring.contains(&t.ob)) {
             (true, true) => Some(RingRole::Ring),
@@ -420,37 +370,52 @@ pub(crate) fn pairs(c: &Ctx, sch: &str, mode: &str, drive_side: &str, ring: &Has
         // a fork turn that the fan rule left with no pair falls back on rules 2 and 3, as a plain turn
         if !t.fork || !out.contains_key(&t.mid) {
             let ps = match role {
-                Some(r) => ring_pairs(&net, r, t.kind, &e, &l, rhd),
-                None => plain_pairs(&net, t.kind, &e, &l, rhd),
+                Some(r) => ring_pairs(net, r, t.kind, &e, &l, rhd),
+                None => plain_pairs(net, t.kind, &e, &l, rhd),
             };
-            put(&mut out, &net, &t.mid, ps);
+            put(&mut out, net, &t.mid, ps);
         }
         // rule 20: the bike lanes go on to the bike lanes of the leaving link, from the kerb side; not on a roundabout
         let (eb, lb) = (net.end_lanes(t.ib, true), net.end_lanes(t.ob, true));
         if !eb.is_empty() && !lb.is_empty() && role != Some(RingRole::Ring) && t.kind != "u" {
-            put(&mut out, &net, &t.mid, pair_up(&eb, &lb, rhd, false));
+            put(&mut out, net, &t.mid, pair_up(&eb, &lb, rhd, false));
         }
     }
-    Ok(out)
+    out
 }
 
-/// The radius of each node's junction, in metres: half of the widest road at the node (both directions), plus 1 m, at least
-/// 2 m; 0 where the road only continues (two other ends or fewer). A first value: SimReady's Level 4 makes the real shape.
-fn junction_radius(c: &Ctx, sch: &str) -> Result<HashMap<i64, f64>> {
-    let sql = format!(
-        "WITH w AS (SELECT l.link_id, l.from_node_id AS a, l.to_node_id AS b, sum(coalesce(n.width, 3.25)) AS w
+/// The turn of the movement `mid` from link `a` into link `b`, with its kind. The turn type of GMNS wins (left and right from
+/// 30 degrees): the lanes follow the movement's own type; the angle decides only between straight and slight for a through,
+/// merge or diverge movement.
+fn turn_of(mid: String, ib: i64, ob: i64, typ: Option<&str>, a: &Link, b: &Link) -> Turn {
+    let angle = signed_angle(tangent(&a.3, true), tangent(&b.3, false));
+    let kind = match typ {
+        Some("uturn") => "u",
+        Some("left") => "left",
+        Some("right") => "right",
+        _ => match turn_kind(angle) {
+            "left" => "slight_left",
+            "right" => "slight_right",
+            "u" => "straight",
+            k => k,
+        },
+    };
+    Turn { mid, ib, ob, kind, angle, fork: false }
+}
+
+/// `_rad(node, r)`: the radius of each node's junction, in metres: half of the widest road at the node (both directions),
+/// plus 1 m, at least 2 m; 0 where the road only continues (two other ends or fewer). A first value: SimReady's Level 4
+/// makes the real shape.
+fn junction_radius(c: &Ctx, sch: &str) -> Result<()> {
+    c.exec(&format!(
+        "CREATE OR REPLACE TEMP TABLE _rad AS
+         WITH w AS (SELECT l.link_id, l.from_node_id AS a, l.to_node_id AS b, sum(coalesce(n.width, 3.25)) AS w
                     FROM {sch}.link l JOIN {sch}.lane n USING (link_id) GROUP BY ALL),
               road AS (SELECT least(a, b) AS a, greatest(a, b) AS b, sum(w) AS w FROM w GROUP BY ALL),
               ends AS (SELECT a AS node, b AS other, w FROM road UNION ALL SELECT b, a, w FROM road)
-         SELECT node, count(DISTINCT other), max(w) FROM ends GROUP BY node"
-    );
-    let mut st = c.con.prepare(&sql).map_err(|e| format!("{e}\n{sql}"))?;
-    let mut out = HashMap::new();
-    for r in st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, f64>(2)?))).map_err(|e| e.to_string())? {
-        let (n, k, w) = r.map_err(|e| e.to_string())?;
-        out.insert(n, if k <= 2 { 0.0 } else { (0.5 * w + 1.0).max(2.0) });
-    }
-    Ok(out)
+         SELECT node, CASE WHEN count(DISTINCT other) <= 2 THEN 0.0 ELSE greatest(0.5 * max(w) + 1.0, 2.0) END::DOUBLE AS r
+         FROM ends GROUP BY node"
+    ))
 }
 
 /// A cubic Hermite curve from `p0` (direction `t0`) to `p1` (direction `t1`), the tangents as long as the chord, 12 pieces.
@@ -473,153 +438,272 @@ fn wkt(pts: &[P]) -> String {
     format!("LINESTRING ({})", pts.iter().map(|p| format!("{:.8} {:.8}", p.0, p.1)).collect::<Vec<_>>().join(", "))
 }
 
+/// The number of junctions (nodes with movements) in one chunk of `lanes_from_rules`, and of lanes in one chunk of the cuts.
+const CHUNK_NODES: usize = 50_000;
+const CHUNK_LANES: i64 = 200_000;
+
+/// The points of a line as text with all their digits (Rust prints the shortest text that reads back as the same f64).
+fn exact(pts: &[P]) -> String {
+    pts.iter().map(|p| format!("{} {}", p.0, p.1)).collect::<Vec<_>>().join(",")
+}
+
+fn from_exact(t: &str) -> Vec<P> {
+    t.split(',')
+        .filter_map(|xy| {
+            let (x, y) = xy.split_once(' ')?;
+            Some((x.parse().ok()?, y.parse().ok()?))
+        })
+        .collect()
+}
+
+/// The rows of one query, each row mapped by `f`.
+fn rows<T>(c: &Ctx, sql: &str, f: impl FnMut(&duckdb::Row) -> duckdb::Result<T>) -> Result<Vec<T>> {
+    let mut st = c.con.prepare(sql).map_err(|e| format!("{e}\n{sql}"))?;
+    let v = st.query_map([], f).map_err(|e| e.to_string())?.collect::<std::result::Result<Vec<T>, _>>().map_err(|e| e.to_string());
+    v
+}
+
+/// `_cut(lane_id, wkt, pts)`: each lane cut at the junction radius of its two ends (`_rad`), in chunks of lanes, on all cores.
+/// `pts`: the points with all their digits (`exact`), for the lane connectors.
+fn lane_cuts(c: &Ctx, sch: &str) -> Result<()> {
+    use rayon::prelude::*;
+    c.exec("CREATE OR REPLACE TEMP TABLE _cut(lane_id VARCHAR, wkt VARCHAR, pts VARCHAR)")?;
+    let n = c.count(&format!("SELECT coalesce(max(rowid) + 1, 0) FROM {sch}.lane"))?;
+    let mut lo = 0;
+    while lo < n {
+        let hi = lo + CHUNK_LANES;
+        let got = rows(
+            c,
+            &format!(
+                "SELECT n.lane_id, coalesce(ra.r, 0.0), coalesce(rb.r, 0.0), ST_AsText(n.geom) FROM {sch}.lane n JOIN {sch}.link l USING (link_id)
+                 LEFT JOIN _rad ra ON ra.node = l.from_node_id LEFT JOIN _rad rb ON rb.node = l.to_node_id
+                 WHERE n.geom IS NOT NULL AND n.rowid >= {lo} AND n.rowid < {hi}"
+            ),
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, f64>(1)?, r.get::<_, f64>(2)?, r.get::<_, String>(3)?)),
+        )?;
+        let cut: Vec<(String, String, String)> = got
+            .into_par_iter()
+            .filter_map(|(lid, ra, rb, w)| {
+                let pts = shp::wkt_points(&w);
+                if pts.len() < 2 {
+                    return None;
+                }
+                let o = pts[0];
+                let (kx, ky) = (o.1.to_radians().cos() * 111_320.0, 111_320.0);
+                let loc: Vec<P> = pts.iter().map(|p| ((p.0 - o.0) * kx, (p.1 - o.1) * ky)).collect();
+                let n = shp::length(&loc);
+                // a lane shorter than its two cuts keeps its middle 10 %
+                let (s0, s1) = if ra + rb < 0.9 * n { (ra, n - rb) } else { (0.45 * n, 0.55 * n) };
+                let piece: Vec<P> = shp::substring(&loc, s0, s1).iter().map(|p| (o.0 + p.0 / kx, o.1 + p.1 / ky)).collect();
+                (piece.len() >= 2).then(|| (lid, wkt(&piece), exact(&piece)))
+            })
+            .collect();
+        let mut app = c.con.appender("_cut").map_err(|e| e.to_string())?;
+        for (lid, w, x) in &cut {
+            app.append_row(duckdb::params![lid, w, x]).map_err(|e| e.to_string())?;
+        }
+        app.flush().map_err(|e| e.to_string())?;
+        lo = hi;
+    }
+    Ok(())
+}
+
 /// `lanes_from_rules`: the lane pairs of SimReady's rules, written as `lanes_from_sumo` writes netconvert's: each movement one
 /// row for each run of lanes side by side (a bike lane its own row `<mvmt_id>-b<lane>`), `lane_check`, and with `geometry`
-/// `lane.geom_cut` and `lane_connector`. `source_ring`: the source db's roundabout edges of the mode.
+/// `lane.geom_cut` and `lane_connector`. `ring`: the source db's roundabout edges of the mode.
+///
+/// By junction (docs/design/gmns_streaming.md, step 1): each junction needs only its movements, their links and the lanes of
+/// these links. The junctions go in chunks of `CHUNK_NODES`, each chunk on all cores; only one chunk is in memory.
 pub(crate) fn lanes_from_rules(c: &Ctx, sch: &str, mode: &str, geometry: bool, drive_side: &str, ring: &HashSet<i64>) -> Result<()> {
+    use rayon::prelude::*;
     let e = |x: duckdb::Error| x.to_string();
-    let got = pairs(c, sch, mode, drive_side, ring)?;
-    c.exec(&format!("CREATE OR REPLACE TABLE {sch}.lane_check(kind VARCHAR, id VARCHAR, detail VARCHAR)"))?;
-    let mut check: Vec<Check> = Vec::new();
-    let mut use_of: BTreeMap<(i64, i64), String> = BTreeMap::new();
-    let mut lid_of: HashMap<(i64, i64), String> = HashMap::new();
-    let mut width_of: HashMap<String, f64> = HashMap::new();
-    let mut st = c.con.prepare(&format!("SELECT link_id, lane_num, coalesce(allowed_uses, ''), lane_id, coalesce(width, 3.25)::DOUBLE FROM {sch}.lane")).map_err(e)?;
-    for r in st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?, r.get::<_, f64>(4)?))).map_err(e)? {
-        let (lk, n, u, lid, w) = r.map_err(e)?;
-        use_of.insert((lk, n), u);
-        lid_of.insert((lk, n), lid.clone());
-        width_of.insert(lid, w);
-    }
-    let mut st = c.con.prepare(&format!("SELECT mvmt_id, ib_link_id, ob_link_id, type FROM {sch}.movement ORDER BY rowid")).map_err(e)?;
-    let mv: Vec<(String, i64, i64, String)> = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).map_err(e)?.collect::<std::result::Result<_, _>>().map_err(e)?;
-    // the movement rows, as lanes_from_sumo makes them: (old id, new id, lanes, bike row, kept as it was)
-    type Row = (String, String, Option<(i64, i64, i64, i64)>, bool, bool);
-    let mut rows: Vec<Row> = Vec::new();
-    let mut row_ends: Vec<(i64, i64, Option<(i64, i64, i64, i64)>, bool)> = Vec::new();
-    let mut lane_pairs: Vec<(String, i64, i64, i64, i64)> = Vec::new(); // (row id, ib, lane in, ob, lane out)
-    for (mid, ib, ob, typ) in &mv {
-        let ps = got.get(mid).cloned().unwrap_or_default();
-        if ps.is_empty() {
-            rows.push((mid.clone(), mid.clone(), None, false, true));
-            row_ends.push((*ib, *ob, None, false));
-            check.push(("no lane connection".into(), mid.clone(), format!("{typ} {ib} -> {ob}: the lane rules give no lane pair")));
-            continue;
-        }
-        let is_bike = |a: i64, b: i64| mode == "driving" && (use_of.get(&(*ib, a)).is_some_and(|u| u == "bike") || use_of.get(&(*ob, b)).is_some_and(|u| u == "bike"));
-        let bike: Vec<(i64, i64)> = ps.iter().copied().filter(|p| is_bike(p.0, p.1)).collect();
-        let motor: Vec<(i64, i64)> = ps.iter().copied().filter(|p| !bike.contains(p)).collect();
-        for (k, run) in runs(&motor).iter().enumerate() {
-            let m = if k == 0 { mid.clone() } else { format!("{mid}-{}", k + 1) };
-            let lanes = (run[0].0, run[run.len() - 1].0, run[0].1, run[run.len() - 1].1);
-            rows.push((mid.clone(), m.clone(), Some(lanes), false, false));
-            row_ends.push((*ib, *ob, Some(lanes), false));
-            lane_pairs.extend(run.iter().map(|p| (m.clone(), *ib, p.0, *ob, p.1)));
-        }
-        if motor.is_empty() {
-            rows.push((mid.clone(), mid.clone(), None, false, false));
-            row_ends.push((*ib, *ob, None, false));
-        }
-        for &(a, b) in &bike {
-            let m = format!("{mid}-b{a}");
-            rows.push((mid.clone(), m.clone(), Some((a, a, b, b)), true, false));
-            row_ends.push((*ib, *ob, Some((a, a, b, b)), true));
-            lane_pairs.push((m, *ib, a, *ob, b));
-        }
-    }
-    apply_rows(c, sch, &rows)?;
-    // every lane of a link with movements has a way out and a way in (driving: the car lanes)
-    let (mut outs, mut ins): (HashMap<i64, HashSet<i64>>, HashMap<i64, HashSet<i64>>) = (HashMap::new(), HashMap::new());
-    for (ib, ob, lanes, _) in &row_ends {
-        if let Some((a0, a1, b0, b1)) = lanes {
-            outs.entry(*ib).or_default().extend(*a0..=*a1);
-            ins.entry(*ob).or_default().extend(*b0..=*b1);
-        }
-    }
-    let has_out: HashSet<i64> = row_ends.iter().map(|r| r.0).collect();
-    let has_in: HashSet<i64> = row_ends.iter().map(|r| r.1).collect();
-    for ((lk, n), u) in &use_of {
-        if mode == "driving" && u == "bike" {
-            continue;
-        }
-        if has_out.contains(lk) && !outs.get(lk).is_some_and(|s| s.contains(n)) {
-            check.push(("no way out".into(), lid_of[&(*lk, *n)].clone(), "no movement leaves this lane".into()));
-        }
-        if has_in.contains(lk) && !ins.get(lk).is_some_and(|s| s.contains(n)) {
-            check.push(("no way in".into(), lid_of[&(*lk, *n)].clone(), "no movement enters this lane".into()));
-        }
-    }
+    let rhd = drive_side == "right";
     let has_geom = c.count(&format!("SELECT count(*) FROM duckdb_columns() WHERE schema_name = '{sch}' AND table_name = 'lane' AND column_name = 'geom'"))? > 0;
-    if geometry && has_geom {
-        // each lane cut at the junction radius of its two ends; the path of each lane pair a Hermite curve between the cuts
-        let radius = junction_radius(c, sch)?;
-        let mut st = c.con.prepare(&format!(
-            "SELECT n.lane_id, l.from_node_id, l.to_node_id, ST_AsText(n.geom) FROM {sch}.lane n JOIN {sch}.link l USING (link_id) WHERE n.geom IS NOT NULL"
-        )).map_err(e)?;
+    let geometry = geometry && has_geom;
+    c.exec(&format!("CREATE OR REPLACE TABLE {sch}.lane_check(kind VARCHAR, id VARCHAR, detail VARCHAR)"))?;
+    crate::gmns_sumo::mv_new_table(c)?;
+    if geometry {
+        junction_radius(c, sch)?;
+        lane_cuts(c, sch)?;
+        c.exec("CREATE OR REPLACE TEMP TABLE _con(connector_id VARCHAR, mvmt_id VARCHAR, from_lane_id VARCHAR, to_lane_id VARCHAR, width DOUBLE, wkt VARCHAR)")?;
+    }
+    // the rows of each chunk together, by one sort: each chunk reads only its own rows (DuckDB skips the other row groups)
+    let cut_sel = if geometry { "c.pts" } else { "NULL::VARCHAR" };
+    let cut_join = if geometry { "LEFT JOIN _cut c USING (lane_id)" } else { "" };
+    c.exec(&format!(
+        "CREATE OR REPLACE TEMP TABLE _jn AS SELECT node_id, (row_number() OVER (ORDER BY node_id) - 1) // {CHUNK_NODES} AS ch
+           FROM (SELECT DISTINCT node_id FROM {sch}.movement);
+         CREATE OR REPLACE TEMP TABLE _jm AS SELECT n.ch, m.rowid AS rid, m.mvmt_id, m.node_id, m.ib_link_id, m.ob_link_id, m.type
+           FROM {sch}.movement m JOIN _jn n USING (node_id) ORDER BY n.ch, rid;
+         CREATE OR REPLACE TEMP TABLE _jk AS SELECT DISTINCT ch, ib_link_id AS link_id FROM _jm UNION SELECT DISTINCT ch, ob_link_id FROM _jm;
+         CREATE OR REPLACE TEMP TABLE _jlink AS SELECT k.ch, l.link_id, l.from_node_id, l.to_node_id, coalesce(l.facility_type, '') AS hw, l.geometry
+           FROM {sch}.link l JOIN _jk k USING (link_id) ORDER BY k.ch;
+         CREATE OR REPLACE TEMP TABLE _jlane AS SELECT k.ch, n.link_id, n.lane_num, coalesce(n.allowed_uses, '') AS uses, n.turn, n.lane_id,
+             coalesce(n.width, 3.25)::DOUBLE AS width, {cut_sel} AS cut
+           FROM {sch}.lane n JOIN _jk k USING (link_id) {cut_join} ORDER BY k.ch, n.link_id, n.lane_num;
+         DROP TABLE _jk"
+    ))?;
+    let chunks = c.count("SELECT coalesce(max(ch) + 1, 0) FROM _jn")?;
+    let (mut n_mv, mut n_rows, mut n_pairs, mut n_check) = (0usize, 0usize, 0usize, 0usize);
+    for ch in 0..chunks {
+        let mut links: HashMap<i64, Link> = HashMap::new();
+        for (id, f, t, hw, w) in rows(
+            c,
+            &format!("SELECT link_id, from_node_id, to_node_id, hw, geometry FROM _jlink WHERE ch = {ch}"),
+            |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?, r.get::<_, String>(3)?, r.get::<_, Option<String>>(4)?)),
+        )? {
+            let pts = w.map(|w| shp::wkt_points(&w)).unwrap_or_default();
+            let l = if pts.is_empty() { vec![] } else { local(&pts, pts[0]) };
+            links.insert(id, (f, t, hw, l));
+        }
+        // the lanes of the chunk's links, left to right (lane_num: a bike lane on the left is -1)
+        let mut net = Net { lanes: Vec::new(), of: HashMap::new() };
+        let mut use_of: BTreeMap<(i64, i64), String> = BTreeMap::new();
+        let mut lid_of: HashMap<(i64, i64), String> = HashMap::new();
+        let mut width_of: HashMap<String, f64> = HashMap::new();
         let mut cut: HashMap<String, Vec<P>> = HashMap::new();
-        for r in st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?, r.get::<_, String>(3)?))).map_err(e)? {
-            let (lid, a, b, w) = r.map_err(e)?;
-            let pts = shp::wkt_points(&w);
-            if pts.len() < 2 {
+        for (link, num, uses, turn, lid, w, x) in rows(
+            c,
+            &format!("SELECT link_id, lane_num, uses, turn, lane_id, width, cut FROM _jlane WHERE ch = {ch} ORDER BY link_id, lane_num"),
+            |r| {
+                Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, String>(2)?, r.get::<_, Option<String>>(3)?, r.get::<_, String>(4)?, r.get::<_, f64>(5)?, r.get::<_, Option<String>>(6)?))
+            },
+        )? {
+            if let Some(x) = x {
+                cut.insert(lid.clone(), from_exact(&x));
+            }
+            let has = |u: &str| uses.split(',').any(|x| x.trim() == u);
+            // a bike lane is its own lane only in the driving network; in the cycling network each lane is a bike lane
+            let bike = mode == "driving" && has("bike") && !has("auto") && !has("bus");
+            let bus = has("bus") && !has("auto");
+            net.of.entry(link).or_default().push(net.lanes.len());
+            net.lanes.push(Lane { num, bus, bike, turn: turn.filter(|t| !t.is_empty()) });
+            use_of.insert((link, num), uses);
+            lid_of.insert((link, num), lid.clone());
+            width_of.insert(lid, w);
+        }
+        let mv: Vec<(i64, String, i64, i64, i64, Option<String>)> = rows(
+            c,
+            &format!("SELECT rid, mvmt_id, node_id, ib_link_id, ob_link_id, type FROM _jm WHERE ch = {ch} ORDER BY rid"),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
+        )?;
+        // the turns of each junction, in the order of the movements
+        let mut at: BTreeMap<i64, Vec<Turn>> = BTreeMap::new();
+        for (_, mid, node, ib, ob, typ) in &mv {
+            if let (Some(a), Some(b)) = (links.get(ib), links.get(ob)) {
+                at.entry(*node).or_default().push(turn_of(mid.clone(), *ib, *ob, typ.as_deref(), a, b));
+            }
+        }
+        let got: HashMap<String, Vec<(i64, i64)>> =
+            at.into_par_iter().map(|(_, mut ts)| node_pairs(&net, &links, &mut ts, ring, rhd)).flatten().collect();
+        // the movement rows, as lanes_from_sumo makes them: (old id, new id, lanes, bike row, kept as it was), and their order
+        let mut rows_k: Vec<(i64, crate::gmns_sumo::MvRow)> = Vec::new();
+        let mut row_ends: Vec<(i64, i64, Option<(i64, i64, i64, i64)>, bool)> = Vec::new();
+        let mut lane_pairs: Vec<(String, i64, i64, i64, i64)> = Vec::new(); // (row id, ib, lane in, ob, lane out)
+        let mut check: Vec<Check> = Vec::new();
+        for (rid, mid, _, ib, ob, typ) in &mv {
+            // the order of the rows: the movement's row, then its rows in the order made
+            let mut k = rid << 16;
+            let mut push = |r: crate::gmns_sumo::MvRow, rows_k: &mut Vec<(i64, crate::gmns_sumo::MvRow)>| {
+                rows_k.push((k, r));
+                k += 1;
+            };
+            let typ = typ.clone().unwrap_or_default();
+            let ps = got.get(mid).cloned().unwrap_or_default();
+            if ps.is_empty() {
+                push((mid.clone(), mid.clone(), None, false, true), &mut rows_k);
+                row_ends.push((*ib, *ob, None, false));
+                check.push(("no lane connection".into(), mid.clone(), format!("{typ} {ib} -> {ob}: the lane rules give no lane pair")));
                 continue;
             }
-            let o = pts[0];
-            let (kx, ky) = (o.1.to_radians().cos() * 111_320.0, 111_320.0);
-            let loc: Vec<P> = pts.iter().map(|p| ((p.0 - o.0) * kx, (p.1 - o.1) * ky)).collect();
-            let n = shp::length(&loc);
-            let (ra, rb) = (radius.get(&a).copied().unwrap_or(0.0), radius.get(&b).copied().unwrap_or(0.0));
-            // a lane shorter than its two cuts keeps its middle 10 %
-            let (s0, s1) = if ra + rb < 0.9 * n { (ra, n - rb) } else { (0.45 * n, 0.55 * n) };
-            let piece = shp::substring(&loc, s0, s1);
-            cut.insert(lid, piece.iter().map(|p| (o.0 + p.0 / kx, o.1 + p.1 / ky)).collect());
-        }
-        let mut cons: Vec<(String, String, String, String, f64, String)> = Vec::new();
-        for (m, ib, a, ob, b) in &lane_pairs {
-            let (Some(la), Some(lb)) = (lid_of.get(&(*ib, *a)), lid_of.get(&(*ob, *b))) else { continue };
-            let (Some(ca), Some(cb)) = (cut.get(la), cut.get(lb)) else { continue };
-            let o = ca[ca.len() - 1];
-            let (kx, ky) = (o.1.to_radians().cos() * 111_320.0, 111_320.0);
-            let to_l = |p: &P| ((p.0 - o.0) * kx, (p.1 - o.1) * ky);
-            let (pa, pb): (Vec<P>, Vec<P>) = (ca.iter().map(to_l).collect(), cb.iter().map(to_l).collect());
-            let path = hermite(pa[pa.len() - 1], tangent(&pa, true), pb[0], tangent(&pb, false));
-            let ll: Vec<P> = path.iter().map(|p| (o.0 + p.0 / kx, o.1 + p.1 / ky)).collect();
-            let w = width_of.get(la).copied().unwrap_or(3.25).min(width_of.get(lb).copied().unwrap_or(3.25));
-            cons.push((format!("{la}>{lb}"), m.clone(), la.clone(), lb.clone(), w, wkt(&ll)));
-        }
-        c.exec(&format!(
-            "ALTER TABLE {sch}.lane ADD COLUMN IF NOT EXISTS geom_cut GEOMETRY;
-             CREATE OR REPLACE TABLE {sch}.lane_connector(connector_id VARCHAR, mvmt_id VARCHAR, from_lane_id VARCHAR, to_lane_id VARCHAR, width DOUBLE, geom GEOMETRY);
-             CREATE OR REPLACE TEMP TABLE _cut(lane_id VARCHAR, wkt VARCHAR);
-             CREATE OR REPLACE TEMP TABLE _con(connector_id VARCHAR, mvmt_id VARCHAR, from_lane_id VARCHAR, to_lane_id VARCHAR, width DOUBLE, wkt VARCHAR)"
-        ))?;
-        {
-            let mut app = c.con.appender("_cut").map_err(e)?;
-            for (lid, pts) in &cut {
-                if pts.len() >= 2 {
-                    app.append_row(duckdb::params![lid, wkt(pts)]).map_err(e)?;
-                }
+            let is_bike = |a: i64, b: i64| mode == "driving" && (use_of.get(&(*ib, a)).is_some_and(|u| u == "bike") || use_of.get(&(*ob, b)).is_some_and(|u| u == "bike"));
+            let bike: Vec<(i64, i64)> = ps.iter().copied().filter(|p| is_bike(p.0, p.1)).collect();
+            let motor: Vec<(i64, i64)> = ps.iter().copied().filter(|p| !bike.contains(p)).collect();
+            for (j, run) in runs(&motor).iter().enumerate() {
+                let m = if j == 0 { mid.clone() } else { format!("{mid}-{}", j + 1) };
+                let lanes = (run[0].0, run[run.len() - 1].0, run[0].1, run[run.len() - 1].1);
+                push((mid.clone(), m.clone(), Some(lanes), false, false), &mut rows_k);
+                row_ends.push((*ib, *ob, Some(lanes), false));
+                lane_pairs.extend(run.iter().map(|p| (m.clone(), *ib, p.0, *ob, p.1)));
             }
-            app.flush().map_err(e)?;
+            if motor.is_empty() {
+                push((mid.clone(), mid.clone(), None, false, false), &mut rows_k);
+                row_ends.push((*ib, *ob, None, false));
+            }
+            for &(a, b) in &bike {
+                let m = format!("{mid}-b{a}");
+                push((mid.clone(), m.clone(), Some((a, a, b, b)), true, false), &mut rows_k);
+                row_ends.push((*ib, *ob, Some((a, a, b, b)), true));
+                lane_pairs.push((m, *ib, a, *ob, b));
+            }
+        }
+        crate::gmns_sumo::mv_new_append(c, &rows_k)?;
+        // every lane of a link with movements has a way out and a way in (driving: the car lanes). All movements out of a link
+        // are at its to node, all movements into it at its from node: both in this chunk
+        let (mut outs, mut ins): (HashMap<i64, HashSet<i64>>, HashMap<i64, HashSet<i64>>) = (HashMap::new(), HashMap::new());
+        for (ib, ob, lanes, _) in &row_ends {
+            if let Some((a0, a1, b0, b1)) = lanes {
+                outs.entry(*ib).or_default().extend(*a0..=*a1);
+                ins.entry(*ob).or_default().extend(*b0..=*b1);
+            }
+        }
+        let has_out: HashSet<i64> = row_ends.iter().map(|r| r.0).collect();
+        let has_in: HashSet<i64> = row_ends.iter().map(|r| r.1).collect();
+        for ((lk, n), u) in &use_of {
+            if mode == "driving" && u == "bike" {
+                continue;
+            }
+            if has_out.contains(lk) && !outs.get(lk).is_some_and(|s| s.contains(n)) {
+                check.push(("no way out".into(), lid_of[&(*lk, *n)].clone(), "no movement leaves this lane".into()));
+            }
+            if has_in.contains(lk) && !ins.get(lk).is_some_and(|s| s.contains(n)) {
+                check.push(("no way in".into(), lid_of[&(*lk, *n)].clone(), "no movement enters this lane".into()));
+            }
+        }
+        if geometry {
+            // the path of each lane pair: a Hermite curve between the cuts of the two lanes
+            let cons: Vec<(String, String, String, String, f64, String)> = lane_pairs
+                .par_iter()
+                .filter_map(|(m, ib, a, ob, b)| {
+                    let (la, lb) = (lid_of.get(&(*ib, *a))?, lid_of.get(&(*ob, *b))?);
+                    let (ca, cb) = (cut.get(la)?, cut.get(lb)?);
+                    let o = ca[ca.len() - 1];
+                    let (kx, ky) = (o.1.to_radians().cos() * 111_320.0, 111_320.0);
+                    let to_l = |p: &P| ((p.0 - o.0) * kx, (p.1 - o.1) * ky);
+                    let (pa, pb): (Vec<P>, Vec<P>) = (ca.iter().map(to_l).collect(), cb.iter().map(to_l).collect());
+                    let path = hermite(pa[pa.len() - 1], tangent(&pa, true), pb[0], tangent(&pb, false));
+                    let ll: Vec<P> = path.iter().map(|p| (o.0 + p.0 / kx, o.1 + p.1 / ky)).collect();
+                    let w = width_of.get(la).copied().unwrap_or(3.25).min(width_of.get(lb).copied().unwrap_or(3.25));
+                    Some((format!("{la}>{lb}"), m.clone(), la.clone(), lb.clone(), w, wkt(&ll)))
+                })
+                .collect();
             let mut app = c.con.appender("_con").map_err(e)?;
             for (id, m, a, b, w, g) in &cons {
                 app.append_row(duckdb::params![id, m, a, b, w, g]).map_err(e)?;
             }
             app.flush().map_err(e)?;
         }
+        if !check.is_empty() {
+            let mut app = c.con.appender_to_db("lane_check", sch).map_err(e)?;
+            for (k, i, d) in &check {
+                app.append_row(duckdb::params![k, i, d]).map_err(e)?;
+            }
+            app.flush().map_err(e)?;
+        }
+        (n_mv, n_rows, n_pairs, n_check) = (n_mv + mv.len(), n_rows + rows_k.len(), n_pairs + lane_pairs.len(), n_check + check.len());
+    }
+    c.exec("DROP TABLE _jn; DROP TABLE _jm; DROP TABLE _jlink; DROP TABLE _jlane")?;
+    crate::gmns_sumo::mv_new_apply(c, sch)?;
+    if geometry {
         c.exec(&format!(
-            "UPDATE {sch}.lane l SET geom_cut = ST_GeomFromText(c.wkt) FROM _cut c WHERE c.lane_id = l.lane_id;
+            "ALTER TABLE {sch}.lane ADD COLUMN IF NOT EXISTS geom_cut GEOMETRY;
+             CREATE OR REPLACE TABLE {sch}.lane_connector(connector_id VARCHAR, mvmt_id VARCHAR, from_lane_id VARCHAR, to_lane_id VARCHAR, width DOUBLE, geom GEOMETRY);
+             UPDATE {sch}.lane l SET geom_cut = ST_GeomFromText(c.wkt) FROM _cut c WHERE c.lane_id = l.lane_id;
              INSERT INTO {sch}.lane_connector SELECT connector_id, mvmt_id, from_lane_id, to_lane_id, width, ST_GeomFromText(wkt) FROM _con ORDER BY connector_id;
-             DROP TABLE _cut; DROP TABLE _con"
+             DROP TABLE _cut; DROP TABLE _con; DROP TABLE _rad"
         ))?;
     }
-    if !check.is_empty() {
-        let mut app = c.con.appender_to_db("lane_check", sch).map_err(e)?;
-        for (k, i, d) in &check {
-            app.append_row(duckdb::params![k, i, d]).map_err(e)?;
-        }
-        app.flush().map_err(e)?;
-    }
-    eprintln!("GMNS[{mode}] lanes from the lane rules: {} movements -> {} rows, {} lane pairs, {} checks", mv.len(), rows.len(), lane_pairs.len(), check.len());
+    eprintln!("GMNS[{mode}] lanes from the lane rules: {n_mv} movements -> {n_rows} rows, {n_pairs} lane pairs, {n_check} checks");
     Ok(())
 }
 
@@ -663,6 +747,12 @@ mod tests {
         let left: Vec<i64> = plain_pairs(&n, "left", &e, &n.end_lanes(2, false), true).iter().map(|p| n.lanes[p.0].num).collect();
         let ahead: Vec<i64> = plain_pairs(&n, "straight", &e, &n.end_lanes(3, false), true).iter().map(|p| n.lanes[p.0].num).collect();
         assert_eq!((left, ahead), (vec![1], vec![2]));
+    }
+
+    #[test]
+    fn exact_reads_back() {
+        let p = vec![(7.415907823456789, 43.73685647123), (-0.1 + 0.2, 1e-9)];
+        assert_eq!(from_exact(&exact(&p)), p);
     }
 
     #[test]

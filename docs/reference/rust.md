@@ -25,12 +25,12 @@ duckOSM Studio does this in its `crates/duckosm-wasm/Cargo.toml`.
 | `duckosm-parquet` | Write the tables as GeoParquet files | no |
 | `duckosm-duckdb` | Write the GeoParquet files into a `.duckdb` file, and make the base-map layers | yes |
 | `duckosm-build` | The whole build: `build`, `run`, the config file, `quack`, the levels | with the feature `duckdb` (on by default) |
-| `duckosm-route` | Routing on a built database: `route`, `route_points`, `directions`, and the graphs (`graphs`) | yes |
+| `duckosm-route` | Routing on a built database: `route`, `route_points`, `route_multimodal`, `directions`, the lane graph, and the graphs (`graphs`, `export-graph`) | yes |
 | `duckosm-router` | The routing algorithms on plain data (no DuckDB), for the program, Python and the browser | no |
 | `duckosm-planner` | The route planner of `duckosm route-map`, also as WebAssembly | no |
-| `duckosm-export` | The exports: SUMO, MATSim, GMNS, GIS, OpenDRIVE, Lanelet2, railML | yes |
-| `duckosm-tools` | The database tools: `info`, `way`, `boundary`, `extract`, `admin`, `elevation`, `init-config` | yes |
-| `duckosm-edit` | The local pages `duckosm edit`, `duckosm ask` and `duckosm studio` | yes |
+| `duckosm-export` | The exports: SUMO, MATSim (also with lanes), GMNS, GIS, OpenDRIVE, Lanelet2, railML, and the check maps `gmns-viz` and `gis-debug` | yes |
+| `duckosm-tools` | The database tools: `info`, `way`, `boundary`, `extract`, `admin`, `elevation`, `bus`, `multimodal`, `init-config`, `get` | yes |
+| `duckosm-edit` | The local pages `duckosm edit`, `duckosm ask` and `duckosm studio`, and the map pages `viz`, `route-map`, `gmns-map`, `sumo-map` | yes |
 | `duckosm-editor` | The files of the OSM fixes editor, for a host page | no |
 | `duckosm-cli` | The program `duckosm` | yes |
 | `duckosm-py` | The Python module `duckosm._rust` | yes |
@@ -46,6 +46,8 @@ The crates with "no" also compile to WebAssembly.
 | `snap` | Snappy compression, in pure Rust (for WebAssembly) in place of `zstd` | off |
 | `tzf` | The time zone of an area from the world map of `tzf-rs` | on |
 | `gpkg` | The GeoPackage output of `quack --gdal` | on |
+| `postgis` | The PostGIS output of `quack --osm2pgsql` | on |
+| `get` | The download of `duckosm get` | off |
 
 For WebAssembly, use `default-features = false, features = ["snap"]`.
 
@@ -62,8 +64,8 @@ For WebAssembly, use `default-features = false, features = ["snap"]`.
 | `duckosm_build::build(pbf, out, &Params) -> Result<Summary, String>` | Builds the networks of an area. Writes GeoParquet files and `<out>/<name>.duckdb`. | `duckosm FILE` |
 | `duckosm_build::config::read(path, pbf_is_cut, strict) -> Result<FromConfig, String>` | Reads a [config file](../guides/build.md#the-config-file) into a PBF path, an output folder and `Params` | `duckosm --config` |
 | `duckosm_build::run(input, &fixes, boundary, &Params, &mut log, file)` | The whole build without a file system: each output file goes to a writer that you give. The browser build uses it. | |
-| `duckosm_build::quack(pbf, parquet, duckdb, threads, sort, tiles)` | The features table of QuackOSM | `duckosm quack` |
-| `duckosm_build::quack_gdal::quack_gdal(pbf, gpkg, geoparquet, tiles)` | The five layers of GDAL's OSM driver | `duckosm quack --gdal` |
+| `duckosm_build::quack(pbf, parquet, duckdb, threads, sort, tiles, fixes)` | The features table of QuackOSM | `duckosm quack` |
+| `duckosm_build::quack_gdal::quack_gdal(pbf, gpkg, parquet, tiles, fixes)` | The five layers of GDAL's OSM driver | `duckosm quack --gdal` |
 | `duckosm_build::config::read_osm_fixes(path) -> Result<OsmFixes, String>` | Reads an [OSM fixes file](../guides/edit-osm-data.md#the-fixes-file) | |
 | `duckosm_core::hash::edge_id(osm_id, source, target) -> i64` | The [stable edge id](../concepts/edge-ids.md) | |
 | `duckosm_route::route::routing_graph(&con, mode, weight, &uses)` | The routing graph of one mode | |
@@ -72,8 +74,8 @@ For WebAssembly, use `default-features = false, features = ["snap"]`.
 | `duckosm_route::directions::directions(&con, &route, mode)` | The turn-by-turn steps of a route | `duckosm directions` |
 | `duckosm_route::graphs::to_petgraph(db, mode, weight) -> Result<PetGraphs, String>` | The junction graph (`junctions`: a node is a junction with `x` and `y`, an edge a road with `edge_id` and its columns) and the turn graph (`turns`: a node is an `edge_id`, an arc a legal turn with its weight), as petgraph `DiGraph`s. The same graphs as Python's `to_networkx_nodes` and `to_networkx`. Needs the feature `petgraph`. | `duckosm export-graph` |
 | `duckosm_route::graphs::junction_rows`, `turn_rows` | The same graphs as rows, for another graph library | |
-| `duckosm_export::sumo::to_sumo(db, out_dir, mode, net_name, connections, config, netconvert)` | SUMO files | `duckosm sumo` |
-| `duckosm_export::matsim::to_matsim(db, out, mode, crs, gz)` | A MATSim network | `duckosm matsim` |
+| `duckosm_export::sumo::to_sumo(db, out_dir, mode, net_name, connections, config, netconvert)` | SUMO files. `to_sumo_with(..., &SumoOptions)` also takes the options `merge` and `join_junctions` | `duckosm sumo` |
+| `duckosm_export::matsim::to_matsim(db, out, mode, crs, gz, merge)` | A MATSim network | `duckosm matsim` |
 | `duckosm_export::gmns::to_gmns(source, out, &modes)` | A GMNS database | `duckosm gmns` |
 | `duckosm_export::gis::to_gis(db, out, &modes, fmt, boundary, name, srs)` | A GeoPackage, GeoParquet or shapefile | `duckosm export-gis` |
 | `duckosm_tools::extract::extract(source, db, area)` | Cuts an area out of a built database. `area` is `Area::Name`, `Area::OsmId` or `Area::Boundary`. | `duckosm extract` |

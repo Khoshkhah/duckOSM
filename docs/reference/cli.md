@@ -137,7 +137,6 @@ duckosm build [OPTIONS]
 | `--graph` / `--no-graph` | build `edge_graph`, the graph of legal turns | on |
 | `--h3-index` / `--no-h3-index` | add H3 cell ids to nodes and edges | on |
 | `--h3-resolution INTEGER` | H3 resolution, 0–15 | `8` |
-| `--tile-index` / `--no-tile-index` | add the zoom-28 [tile keys](database.md#tile-keys) to nodes and edges. Only the Rust build (`duckosm --config`, `duckosm <PBF>`) has this option | on |
 | `-m`, `--modes TEXT` | `driving`, `walking` or `cycling`; repeat for several | `driving` |
 | `--features` / `--no-features` | build the [base-map layers](features.md), `features.*` | on |
 | `--levels` / `--no-levels` | the last step: the [drawing order](../guides/drawing-order.md) of the roads (`visualization.edge_levels`), with your edits kept | on |
@@ -527,15 +526,14 @@ duckosm gmns [OPTIONS] DB
 | `--micro-mode TEXT` | modes for `--micro`; repeat for several | `driving` |
 | `--combined` | also write `gmns_all`, one network for all modes | |
 | `--drive-side` | `right` or `left`: the side two-way lanes are drawn on | `right` |
-| `--pair-carriageways` / `--no-pair-carriageways` | place a one-way road mapped next to its opposite direction as one two-way road | on |
-| `--walk-frame` / `--no-walk-frame` | move a mapped sidewalk off the carriageway, to the kerb | off |
+| `--no-pair-carriageways` | do not place a one-way road mapped next to its opposite direction as one two-way road. Without this option, they are placed as one road | |
+| `--walk-frame` | move a mapped sidewalk off the carriageway, to the kerb | off |
 | `--walk-clearance METRES` | the gap between the kerb and a footpath placed by `--walk-frame` | `0.0` |
 | `--gtfs PATH` | a GTFS feed (`.zip` or folder; repeat for several): its stops become `location` rows on the nearest link of each mode | |
 | `--gtfs-max-m METRES` | how far from a link a GTFS stop can be and still go on it | `30.0` |
 | `--csv-extensions` | keep duckOSM's extra columns in the CSV files, as user-defined fields with a `u_` prefix | |
 | `--check` | check the values of the result; exit code 1 if a check fails | |
-| `--lane-source [auto\|rules\|netconvert]` | which lane goes to which at each junction: SUMO's netconvert, or the lane rules (ported from SimReady, no SUMO needed); `auto`: netconvert when it is installed, else the rules. [Design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/gmns_lane_rules.md) | `auto` |
-| `--tile-zoom Z` | make an area with nodes in two or more map tiles of zoom `Z` one tile at a time, so the memory follows a tile, not the area. `0`: the whole area at once | `9` |
+| `--lane-source [rules\|netconvert\|auto]` | which lane goes to which at each junction: the lane rules (ported from SimReady, no SUMO needed), or SUMO's netconvert; `auto`: netconvert when it is installed, else the rules. netconvert reads the whole area at once and needs much memory on a large area (Kentucky: about 26 GB). [Design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/gmns_lane_rules.md) | `rules` |
 
 ### `gmns-map`
 
@@ -746,7 +744,7 @@ duckosm admin --pbf PBF --db DB [--gpkg GPKG]
 |---|---|---|
 | `--pbf PBF` | the OSM PBF | required |
 | `--db DB` | the database to add the table to | required |
-| `--gpkg GPKG` | GeoPackage of the boundaries: reused if it exists, else written here (the next run does not read the PBF again) | a temporary file |
+| `--gpkg GPKG` | GeoPackage of the boundaries: reused if it exists, else written here (the next run does not read the PBF again) | none: the boundaries are read from the PBF, and no file is written |
 
 ### `multimodal`
 

@@ -49,10 +49,9 @@ Level 4 replaces it with the real junction shape.
 
 `duckosm gmns --lane-source auto|rules|netconvert` (`GmnsOptions::lane_source`):
 
-- `netconvert`: as today.
-- `rules`: SimReady's rules, no SUMO needed.
-- `auto` (the default): netconvert when it is installed, else the rules. Today a GMNS build without netconvert has no lanes
-  for its movements; with `auto` it has the rules' lanes.
+- `rules` (the default since 2026-11-24): SimReady's rules, no SUMO needed.
+- `netconvert`: SUMO's netconvert. It reads the whole area at once.
+- `auto`: netconvert when it is installed, else the rules.
 
 The default stays netconvert until the comparison below shows that the rules are as good. Then `auto` becomes `rules`, and
 netconvert stays as a check (`lane_check` lists the turns where the two disagree).

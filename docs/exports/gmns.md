@@ -16,7 +16,7 @@ give 18 links and 4 nodes more than `driving.edges` and `driving.nodes`.
 | Check | the CSV files pass the schemas of the specification, and Path4GMNS loads them and finds a route. `--check` checks the values: link ends, lengths, lane numbers, movements. [How each output is checked](../concepts/checks.md) |
 
 ```bash
-pip install "duckosm[sumo]"                      # optional: without netconvert, the lane rules give the lanes (--lane-source)
+pip install "duckosm[sumo]"                      # optional: only for --lane-source netconvert
 
 # Input: Level 2 routable database (monaco.duckdb)
 # Output: Level 3 GMNS database (monaco_gmns.duckdb by default, or with -o)
@@ -47,7 +47,7 @@ In `<area>_gmns.duckdb`, **every table belongs to a network schema** (the defaul
 
 ### One link for each edge
 
-duckOSM cuts roads where a footpath or a cycleway crosses them. Thus the walking, cycling and driving networks meet at the same `node_id`.
+duckOSM cuts roads where a footpath or a cycleway crosses them. Thus the walking, cycling and driving networks meet at the same `node_id`. Why GMNS keeps the edges, and where each level uses chains: [Edges and chains](../concepts/edges-and-chains.md).
 
 Each `gmns_<mode>.link` is one Level 2 edge: `link_id` = `edge_id`. GMNS does not merge links. Thus each crossing node stays in each mode, and `gmns_all` can join the modes on `link_id`.
 
@@ -55,9 +55,9 @@ To get one road section between two junctions, use Level 2 [`driving.chains`](..
 
 ### Macro schemas (`duckosm gmns`)
 
-* **`gmns_driving` (18 tables, with netconvert):** The vehicular road network for cars, trucks, and buses. Models lanes (`lane`), lane-level turns with restrictions (`movement`), signals (`signal_controller`), on-street parking (`curb_seg`), crosswalks spanning road lanes (`crossing`, `lane_crossing`), smooth intersection curves (`lane_connector`), and the road chains for `--merge` (`chains`).
+* **`gmns_driving` (18 tables):** The vehicular road network for cars, trucks, and buses. Models lanes (`lane`), lane-level turns with restrictions (`movement`), signals (`signal_controller`), on-street parking (`curb_seg`), crosswalks spanning road lanes (`crossing`, `lane_crossing`), smooth intersection curves (`lane_connector`), and the road chains for `--merge` (`chains`).
 * **`gmns_walking` (15 tables):** Sidewalks, footpaths, stairs, plazas, and crosswalks. Tracks parallel roadways via `link_along`, connects footways to road crossings via `lane_connector`, and lists unpaired lanes in `lane_check`.
-* **`gmns_cycling` (13 tables):** Cycleways, protected bike paths, shared lanes, and bikeable roads. Tracks parallel roadways via `link_along`.
+* **`gmns_cycling` (14 tables):** Cycleways, protected bike paths, shared lanes, and bikeable roads. Tracks parallel roadways via `link_along`.
 * **`gmns_all` (5 tables, via `--combined`):** Merges shared physical streets across driving, walking, and cycling into a single link with unioned `allowed_uses = 'auto,bike,walk'` (`link_id` = `edge_id`). Lanes and turns stay in the mode schemas.
 
 ### Meso and micro schemas (`--meso`, `--micro`)
@@ -105,7 +105,7 @@ Most ways have none of these tags, so most lanes are general lanes with a defaul
 
 ## See it
 
-`duckosm gmns-map monaco_gmns.duckdb --source-db monaco.duckdb` draws each lane at its width on a base map. Click a lane:
+`duckosm levels monaco.duckdb`, then `duckosm gmns-map monaco_gmns.duckdb --source-db monaco.duckdb`, draws each lane at its width on a base map. Click a lane:
 it turns red, and the lanes that its turns lead into turn green.
 
 <iframe src="../../maps/monaco_gmns_lanes.html" title="Monaco's lanes, drawn by duckosm gmns-map"
@@ -118,10 +118,11 @@ Driving network, with netconvert. Input is the Level 2 routable database (`<area
 | Area (input DuckDB) | Machine | Time | Memory | Output GMNS DuckDB |
 |---|---|---|---|---|
 | Monaco (38 MB `.duckdb`) | Mac mini (M6, 16 GB) | 0.8 s | 145 MB | 8.4 MB |
-| Kentucky (~1.2 GB `.duckdb`), 49 tiles | WSL (20 cores, 23 GB) | 23 min | 5.0 GB | 5.9 GB |
-| Île-de-France (2.2 GB `.duckdb`), 15 tiles | WSL (20 cores, 23 GB) | 23 min | 8.5 GB | 2.6 GB |
+| Kentucky (~1.2 GB `.duckdb`), driving | Mac mini (M6, 16 GB) | 2.5 min | 2.2 GB (Rust) + 2 GB (DuckDB) | 6.7 GB |
 | France (~35 GB `.duckdb`) | | not run | (estimated ~150 GB) | |
 
-Large areas run tile-by-tile (`--tile-zoom 9`), keeping peak memory bounded by the tile rather than the whole region.
+Each step works in chunks (a chunk of junctions, of road runs or of lanes), so the memory stays about the same on a large
+area. DuckDB has a limit of 2 GB and spills to disk above it. With `--lane-source netconvert`, netconvert reads the whole
+area at once and needs much more memory.
 
 All options: [Command line](../reference/cli.md#gmns).

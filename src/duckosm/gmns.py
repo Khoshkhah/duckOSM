@@ -10,7 +10,7 @@ from duckosm import _api
 
 def to_gmns(source_db, out_path, modes=None, to_csv=None, lane_geometry=True, combined=False, drive_side="right",
             pair_carriageways=True, csv_extensions=False, gtfs=None, gtfs_max_m=30.0, walk_frame=False, walk_clearance_m=0.0,
-            tile_zoom=9, lane_source="auto"):
+            lane_source="rules"):
     """The GMNS db ``out_path`` from the duckOSM db ``source_db`` (overwritten if it exists), as ``duckosm gmns``.
 
     ``modes``: the mode schemas (default: every mode present). ``to_csv``: also the spec CSVs into this folder.
@@ -18,14 +18,15 @@ def to_gmns(source_db, out_path, modes=None, to_csv=None, lane_geometry=True, co
     ``right`` or ``left``. ``pair_carriageways``: a one-way road next to its opposite direction is one side of a two-way
     road. ``csv_extensions``: keep duckOSM's extra columns in the CSVs (``u_`` prefix). ``gtfs``: GTFS feeds whose stops
     become ``location`` rows, within ``gtfs_max_m`` metres of a link. ``walk_frame``, ``walk_clearance_m``: a mapped
-    sidewalk is placed at its road's kerb. ``tile_zoom``: build by map tiles of this zoom (None: the whole area at once).
-    ``lane_source``: which lane goes to which at a junction: ``netconvert``, ``rules`` (no SUMO needed) or ``auto``
-    (netconvert when it is installed, else the rules); docs/concepts/lane-rules.md.
+    sidewalk is placed at its road's kerb.
+    ``lane_source``: which lane goes to which at a junction: ``rules`` (the default; no SUMO needed), ``netconvert`` or
+    ``auto`` (netconvert when it is installed, else the rules); docs/concepts/lane-rules.md.
 
-    Returns ``{"path", "csv", "combined", "modes": {mode: {counts per table}}}``. Every ``link_id`` == ``edge_id``."""
+    Returns ``{"path", "csv", "combined", "modes": {mode: {counts per table}}}``, and ``"sumo"`` (the report of the lanes
+    from netconvert of each mode) when netconvert made the lanes. Every ``link_id`` == ``edge_id``."""
     return _api.to_gmns(source_db, out_path, modes=modes, to_csv=to_csv, lane_geometry=lane_geometry, combined=combined,
                         drive_side=drive_side, pair_carriageways=pair_carriageways, csv_extensions=csv_extensions, gtfs=gtfs,
-                        gtfs_max_m=gtfs_max_m, walk_frame=walk_frame, walk_clearance_m=walk_clearance_m, tile_zoom=tile_zoom,
+                        gtfs_max_m=gtfs_max_m, walk_frame=walk_frame, walk_clearance_m=walk_clearance_m,
                         lane_source=lane_source)
 
 

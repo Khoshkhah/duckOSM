@@ -122,13 +122,13 @@ def to_gis(con, out, modes=None, fmt: str = "gpkg", boundary: bool = True, name:
 
 def to_gmns(source_db, out_path, modes=None, to_csv=None, lane_geometry=True, combined=False, drive_side="right",
             pair_carriageways=True, csv_extensions=False, gtfs=None, gtfs_max_m=30.0, walk_frame=False, walk_clearance_m=0.0,
-            tile_zoom=9, lane_source="auto"):
+            lane_source="rules"):
     """See :func:`duckosm.gmns.to_gmns` (the Rust build of ``duckosm gmns``)."""
     modes = [modes] if isinstance(modes, str) else list(modes or [])
     gtfs = [gtfs] if isinstance(gtfs, (str, os.PathLike)) else list(gtfs or [])
     r = json.loads(_rust().to_gmns(_db(source_db), str(out_path), modes, None if to_csv is None else str(to_csv), lane_geometry,
                                    combined, drive_side, pair_carriageways, csv_extensions, [str(g) for g in gtfs], float(gtfs_max_m),
-                                   walk_frame, float(walk_clearance_m), tile_zoom if tile_zoom else None, lane_source))
+                                   walk_frame, float(walk_clearance_m), lane_source))
     return _paths(r, ("path", "csv"))
 
 

@@ -49,6 +49,10 @@ pub fn chain_id(ids: &[i64]) -> i64 {
 /// - neither edge is in `keep_edges` (an edge of a via-way rule).
 ///
 /// A closed ring of joins is cut before its smallest `edge_id`. A chain that ends at its own start is cut in two.
+///
+/// The two directions of a two-way road end at the same nodes: a chain is cut at each node inside it where another chain
+/// ends. A node inside a chain has only the edges of that road, so the other chain is the road's other direction (where
+/// that direction did not join, for example at a lane change or a turn rule on one side only).
 pub fn chains(
     edges: &[ChainEdge],
     turns: &HashSet<(i64, i64)>,
@@ -154,7 +158,28 @@ pub fn chains(
             split.push(c);
         }
     }
-    split
+    cut_at_ends(split, &ends)
+}
+
+/// Each chain of `chains` cut at each node inside it where a chain starts or ends (`ends`: edge id -> (source, target)).
+/// The nodes where the chains end do not change, so one pass is enough.
+pub fn cut_at_ends(chains: Vec<Vec<i64>>, ends: &HashMap<i64, (i64, i64)>) -> Vec<Vec<i64>> {
+    let stops: HashSet<i64> = chains
+        .iter()
+        .flat_map(|c| [ends[&c[0]].0, ends[&c[c.len() - 1]].1])
+        .collect();
+    let mut out = Vec::with_capacity(chains.len());
+    for c in chains {
+        let mut part = Vec::new();
+        for e in c {
+            if !part.is_empty() && stops.contains(&ends[&e].0) {
+                out.push(std::mem::take(&mut part));
+            }
+            part.push(e);
+        }
+        out.push(part);
+    }
+    out
 }
 
 #[cfg(test)]
@@ -178,6 +203,17 @@ mod tests {
                     .map(move |b| (a.id, b.id))
             })
             .collect()
+    }
+
+    #[test]
+    fn two_way_road_ends_at_the_same_nodes() {
+        // A=1 -> x=2 -> B=3, both ways. At x the turn 21 -> 20 has a rule (one direction only): 21 and 20 do not join, so
+        // 10 and 11 must not join either. Each direction then has the same two chains.
+        let es = vec![e(10, 1, 2, "k"), e(11, 2, 3, "k"), e(21, 3, 2, "k"), e(20, 2, 1, "k")];
+        let keep: HashSet<(i64, i64)> = [(21, 20)].into_iter().collect();
+        let mut c = chains(&es, &all_turns(&es), &HashSet::new(), &keep, &HashSet::new());
+        c.sort();
+        assert_eq!(c, vec![vec![10], vec![11], vec![20], vec![21]]);
     }
 
     #[test]
