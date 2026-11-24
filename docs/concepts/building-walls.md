@@ -30,7 +30,7 @@ The walls need an OSM file and a boundary.
 ## What the build uses
 
 - The buildings: ways and multipolygon relations with a `building` tag.
-- The streets: driving and walking edges, but not footways, paths, steps, cycleways and tracks.
+- The streets: driving and walking edges, but not footways, paths, steps, corridors, bridleways, cycleways and tracks.
 - The entrances: nodes with an `entrance` tag (not `no`, `service`, `emergency` or `exit`).
 - The `addr:street` tag of the building.
 

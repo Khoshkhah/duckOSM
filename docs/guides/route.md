@@ -14,8 +14,8 @@ The easiest way to try it is the route planner below. Drag **A** and **B**, and 
 | Way | For | Example |
 |---|---|---|
 | **A map page** | look and try | `duckosm route-map monaco.duckdb`: one HTML page, as above |
-| **Python** | your own program | `route_points(con, (7.4155, 43.7285), (7.4400, 43.7480))` |
-| **The command line** | scripts, many routes at once | `duckosm route-points monaco.duckdb 7.4155 43.7285 7.4400 43.7480` |
+| **Python** | your own program | `route_points(con, (7.4155, 43.7285), (7.4335, 43.7468))` |
+| **The command line** | scripts, many routes at once | `duckosm route-points monaco.duckdb 7.4155 43.7285 7.4335 43.7468` |
 
 ## In Python
 
@@ -26,7 +26,7 @@ import duckdb
 from duckosm import route_points, directions
 
 con = duckdb.connect("monaco.duckdb", read_only=True)
-r = route_points(con, (7.4155, 43.7285), (7.4400, 43.7480))  # by car, fastest
+r = route_points(con, (7.4155, 43.7285), (7.4335, 43.7468))  # by car, fastest
 r["time_s"], r["length_m"]  # seconds, meters
 for step in directions(con, r):
     print(step["text"])  # "At the roundabout, take the 1st exit onto ..."
@@ -46,7 +46,8 @@ To route on foot, give `mode="walking"`. For the shortest route, give `weight="l
 | `directions(con, route)` | a result of one of the functions above | `mode="driving"` |
 
 A route gives `edges` (the `edge_id` values in order), `time_s`, `length_m` and `path` (for each edge: `name`, `highway`,
-`length_m`, `cost_s`, `geometry`). It gives `None` when no route connects the two ends.
+`length_m`, `cost_s`, and with `route()` also `geometry`). A route between points also gives `start` and `end`, and each
+edge of its `path` has `edge_id`, `from_fraction` and `to_fraction`. It gives `None` when no route connects the two ends.
 
 | Command | Does | Many queries |
 |---|---|---|
@@ -63,7 +64,7 @@ Each mode has its own edges. For `mode="walking"`, use the ids of `walking.edges
 
 A point joins the road of the mode nearest to it within `radius_m`. The walk to that road costs walking time (`access_kmh`),
 also by car. The first and the last edge count only the part that the trip uses. A point with no road within the radius
-gives a `ValueError`.
+gives a `RuntimeError`.
 
 To find an `edge_id`, click a road on the route map below, or use SQL ([Query the database](query.md#places)):
 
