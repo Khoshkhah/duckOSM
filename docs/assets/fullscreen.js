@@ -41,10 +41,20 @@ const loadPanZoom = () => panZoomLoaded || (panZoomLoaded = new Promise((ok, fai
 }));
 
 let drawn = 0;
-async function openDiagram(n) {
+// the title of a diagram: the first heading before it on the page
+function titleOf(el) {
+  for (let e = el.previousElementSibling; e; e = e.previousElementSibling) {
+    if (/^H[1-6]$/.test(e.tagName)) return e.textContent.replace("¶", "").trim();
+  }
+  return "";
+}
+
+async function openDiagram(n, title) {
   const pop = document.createElement("div");
   pop.className = "dk-diagram-pop";
-  pop.innerHTML = '<button type="button" class="dk-fullscreen dk-diagram-close">Close (Esc)</button><div class="dk-diagram-svg"></div>';
+  pop.innerHTML = '<div class="dk-diagram-title"></div>' +
+    '<button type="button" class="dk-fullscreen dk-diagram-close">Close (Esc)</button><div class="dk-diagram-svg"></div>';
+  pop.querySelector(".dk-diagram-title").textContent = title;
   document.body.appendChild(pop);
   const close = () => { pop.remove(); document.removeEventListener("keydown", onKey); };
   const onKey = (e) => { if (e.key === "Escape") close(); };
@@ -68,8 +78,8 @@ function addButtons() {
   }
   document.querySelectorAll(".md-content div.mermaid, .md-content pre.mermaid").forEach((d, n) => {
     if (hasBar(d)) return;
-    button(d, () => openDiagram(n));
-    d.addEventListener("dblclick", () => openDiagram(n));
+    button(d, () => openDiagram(n, titleOf(d)));
+    d.addEventListener("dblclick", () => openDiagram(n, titleOf(d)));
   });
 }
 
