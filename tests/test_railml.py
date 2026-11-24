@@ -1,4 +1,4 @@
-"""Tests for duckosm.railml — railML 2.4 rail-infrastructure export from raw OSM.
+"""Tests for duckosm.to_railml — railML 2.4 rail-infrastructure export from raw OSM.
 
 No freely-available railML XSD → structural assertions on a well-formed railML 2.4 file
 (OpenTrack/railVIVID load is the documented manual check)."""
@@ -7,7 +7,7 @@ import xml.etree.ElementTree as ET
 import duckdb
 import pytest
 
-from duckosm.railml import to_railml
+from duckosm import to_railml
 
 NS = {"r": "https://www.railml.org/schemas/2013"}
 
@@ -75,5 +75,5 @@ def test_no_rail_raises_or_empty(tmp_path):
 def test_missing_raw_raises(tmp_path):
     bare = tmp_path / "bare.duckdb"
     duckdb.connect(str(bare)).close()
-    with pytest.raises(ValueError, match="raw.ways"):
+    with pytest.raises(RuntimeError, match="raw.ways"):
         to_railml(str(bare), tmp_path / "r.xml")

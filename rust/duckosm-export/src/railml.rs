@@ -44,11 +44,16 @@ fn ids(s: &str) -> Vec<i64> {
 
 /// Write a railML 2.4 infrastructure file from the `raw` schema of the database `db`, as `to_railml`.
 pub fn to_railml(db: &Path, out: &Path) -> Result<Summary> {
+    to_railml_types(db, out, &RAIL)
+}
+
+/// [`to_railml`] with the `railway=*` values to export (default [`RAIL`]).
+pub fn to_railml_types(db: &Path, out: &Path, rail_types: &[&str]) -> Result<Summary> {
     let con = open(db)?;
     if !has_table(&con, "raw", "ways")? {
         return Err(format!("no 'raw.ways' in {} — need a built duckOSM db (with the raw OSM schema)", db.display()));
     }
-    let types = RAIL.iter().map(|t| format!("'{t}'")).collect::<Vec<_>>().join(",");
+    let types = rail_types.iter().map(|t| format!("'{}'", t.replace('\'', "''"))).collect::<Vec<_>>().join(",");
     let e = |e: duckdb::Error| e.to_string();
     let mut st = con
         .prepare(&format!(

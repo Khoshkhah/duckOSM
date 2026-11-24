@@ -1,21 +1,8 @@
 """The Python API of duckOSM on the Rust code (the module ``duckosm._rust``). docs/design/all_in_rust.md, step 6.
 
-The functions keep the names, the arguments and the results of the Python code. Each one calls Rust, except for the
-cases that the Rust code does not have; these call the Python code (the module named in each function).
-
-TODO (step 6, before the Python engine code goes):
-- The build: ``DuckOSM.run()`` runs the Python steps with the Rust network step, as before. The whole build in Rust
-  (``duckosm --config``) is not yet equal to it: no ``features.ocean`` (``options.sea``), no
-  ``visualization.level_heads`` and the other tables of the level edits, no ``main.building_faces`` in some builds,
-  other tables with a fixes file of the page (tests/test_page_fixes.py), and ``main.visualization_metadata`` gives
-  ``duckosm 0.7.0`` as the version. tests/test_engine_rust.py, test_levels_in_build.py, test_ask_schema.py,
-  test_editor_changes.py and test_page_fixes.py fail with it.
-- ``to_sumo`` with ``bus_edges``, ``edge_attrs`` or ``lanes`` still calls the Python code (tests/test_no_python_engine.py
-  lists every module still to port).
-- The commands with no Rust port yet: ``levels``, ``clip-pbf`` (see ``duckosm/_main.py``).
-- ``to_networkx``, ``to_networkx_nodes`` and ``write_graph`` give networkx graphs: they stay Python.
-- ``to_sumo`` with a ``dict`` config or ``netconvert_bin``, ``to_railml`` with other ``rail_types``,
-  ``route`` with a ``graph`` and ``route_multimodal`` with ``_points``.
+The functions keep the names, the arguments and the results of the old Python code, and each one calls Rust. A
+connection to an in-memory database is copied to a temporary file first (``_file``). The build (``DuckOSM.run()``)
+is the last Python code to port: tests/test_no_python_engine.py lists the modules still to go.
 """
 
 import json
@@ -31,8 +18,8 @@ def _rust():
 
 
 def _db(con):
-    """The file of a database: a path, or a DuckDB connection to a database file. None: an in-memory database (the Rust
-    code cannot read it, so the Python code runs)."""
+    """The file of a database: a path, or a DuckDB connection to a database file. None: an in-memory database (``_file``
+    copies it to a file for the Rust code)."""
     if isinstance(con, (str, os.PathLike)):
         return str(con)
     row = con.execute("SELECT path FROM duckdb_databases() WHERE database_name = current_database()").fetchone()
@@ -124,12 +111,11 @@ def sumo_lane_diff(db, osm_file, work_dir, netconvert_bin=None):
 
 def to_gis(con, out, modes=None, fmt: str = "gpkg", boundary: bool = True, name: str = None,
            srs: str = "EPSG:4326", ogr2ogr_bin: str = None):
-    """See :func:`duckosm._gis_py.to_gis`. ``ogr2ogr_bin`` is not used: Rust writes the GeoPackage through DuckDB."""
-    if _db(con) is None:
-        from duckosm import _gis_py as gis
-        return gis.to_gis(con, out, modes, fmt, boundary, name, srs, ogr2ogr_bin)
+    """The edges, nodes and boundary as a GeoPackage, GeoJSON or shapefiles (``duckosm export-gis``). ``ogr2ogr_bin`` is
+    not used: Rust writes the files through DuckDB."""
     modes = [modes] if isinstance(modes, str) else list(modes or [])
-    r = json.loads(_rust().to_gis(_db(con), str(out), modes, fmt, boundary, name, srs))
+    with _file(con) as db:
+        r = json.loads(_rust().to_gis(db, str(out), modes, fmt, boundary, name, srs))
     r["files"] = [Path(f) for f in r["files"]]
     return _paths(r, ("path", "dir"))
 
@@ -191,11 +177,10 @@ _RAIL = ("rail", "light_rail", "subway", "tram", "narrow_gauge", "funicular")
 
 
 def to_railml(source, out_path, rail_types=_RAIL):
-    """See :func:`duckosm.railml.to_railml`."""
-    if tuple(rail_types) != _RAIL:
-        from duckosm import railml
-        return railml.to_railml(source, out_path, rail_types)
-    return json.loads(_rust().to_railml(_db(source), str(out_path)))
+    """A railML 2.4 infrastructure file from the ``raw`` OSM schema (``duckosm railml``): the ways with a ``railway`` tag in
+    ``rail_types``."""
+    with _file(source) as db:
+        return json.loads(_rust().to_railml(db, str(out_path), list(rail_types)))
 
 
 def to_lanelet2(gmns_db, out_path, mode="driving", snap_m=0.01):
@@ -213,76 +198,69 @@ def to_elevation(db, dem=None, source="auto", modes=None, nodata_fill=0.0, suffi
 
 # ---- routing -----------------------------------------------------------------------------------------------------
 
+_INPUT_ERRORS = ("not in the", "no road within")      # the Rust messages of a bad edge id or point: a ValueError, as before
+
+
+def _json(call, *args):
+    """``json.loads`` of a Rust routing call; a bad edge id or point raises ValueError."""
+    try:
+        return json.loads(call(*args))
+    except RuntimeError as e:
+        if any(m in str(e) for m in _INPUT_ERRORS):
+            raise ValueError(str(e)) from None
+        raise
+
+
 class Router:
-    """Build the routing graph of one mode once, then answer many shortest-route queries. See
-    :class:`duckosm._routing_py.Router`; the graph is in Rust, so there is no ``.graph``."""
+    """Build the routing graph of one mode once, then answer many shortest-route queries (the graph is in Rust)."""
 
     def __init__(self, con, mode: str = "driving", weight: str = "time"):
         self.con, self.mode, self.weight = con, mode, weight
-        db = _db(con)
-        if db is None:
-            from duckosm import _routing_py as routing
-            self._py = routing.Router(con, mode, weight)
-        else:
-            self._py, self._r = None, _rust().Router(db, mode, weight)
+        with _file(con) as db:
+            self._r = _rust().Router(db, mode, weight)
 
     def route(self, from_edge, to_edge):
         """Shortest route between two edge ids: the dict of :func:`route`, or None."""
-        if self._py is not None:
-            return self._py.route(from_edge, to_edge)
-        try:
-            return json.loads(self._r.route(int(from_edge), int(to_edge)))
-        except RuntimeError as e:
-            if "not in the" in str(e):        # as networkx: a ValueError
-                raise ValueError(str(e)) from None
-            raise
+        return _json(self._r.route, int(from_edge), int(to_edge))
 
 
-def route(con, from_edge, to_edge, mode: str = "driving", weight: str = "time", graph=None):
-    """See :func:`duckosm._routing_py.route`. With a networkx ``graph``, the Python code."""
-    if graph is not None or _db(con) is None:
-        from duckosm import _routing_py as routing
-        return routing.route(con, from_edge, to_edge, mode=mode, weight=weight, graph=graph)
+def route(con, from_edge, to_edge, mode: str = "driving", weight: str = "time"):
+    """Shortest route between two edge ids: ``{edges, time_s, length_m, path}``, or None when they are not connected. For
+    many routes on one graph, use :class:`Router`."""
     return Router(con, mode, weight).route(from_edge, to_edge)
 
 
 def route_multimodal(con, src_node, dst_node, schema: str = "mm", start_mode: str = "walking",
-                     end_mode: str = "walking", enforce_sequence: bool = True, allowed_modes=None, _points=None):
-    """See :func:`duckosm._routing_py.route_multimodal`."""
-    if _points is not None or _db(con) is None:
-        from duckosm import _routing_py as routing
-        return routing.route_multimodal(con, src_node, dst_node, schema, start_mode, end_mode, enforce_sequence,
-                                        allowed_modes, _points)
+                     end_mode: str = "walking", enforce_sequence: bool = True, allowed_modes=None):
+    """The fastest trip between two nodes over the multimodal ``mm`` graph (``duckosm route-multimodal``)."""
     modes = None if allowed_modes is None else list(allowed_modes)
-    return json.loads(_rust().route_multimodal(_db(con), int(src_node), int(dst_node), schema, start_mode, end_mode,
-                                               enforce_sequence, modes))
+    with _file(con) as db:
+        r = _json(_rust().route_multimodal, db, int(src_node), int(dst_node), schema, start_mode, end_mode,
+                  enforce_sequence, modes)
+    if r:
+        r["edges"] = [tuple(e) for e in r["edges"]]      # (mode, edge_id), as before
+    return r
 
 
 def route_points(con, a, b, mode="driving", weight="time", radius_m=50.0, access_kmh=4.5):
-    """See :func:`duckosm.point_routing.route_points`."""
-    if _db(con) is None:
-        from duckosm import point_routing
-        return point_routing.route_points(con, a, b, mode, weight, radius_m, access_kmh)
-    return json.loads(_rust().route_points(_db(con), tuple(a), tuple(b), mode, weight, float(radius_m), float(access_kmh)))
+    """The route between two points ``(lng, lat)`` (``duckosm route-points``, docs/design/point_routing.md)."""
+    with _file(con) as db:
+        return _json(_rust().route_points, db, tuple(a), tuple(b), mode, weight, float(radius_m), float(access_kmh))
 
 
 def route_multimodal_points(con, a, b, radius_m=50.0, access_kmh=4.5, schema="mm", allowed_modes=None,
                             enforce_sequence=True):
-    """See :func:`duckosm.point_routing.route_multimodal_points`."""
-    if _db(con) is None:
-        from duckosm import point_routing
-        return point_routing.route_multimodal_points(con, a, b, radius_m, access_kmh, schema, allowed_modes, enforce_sequence)
+    """The multimodal trip between two points ``(lng, lat)`` (``duckosm route-multimodal-points``)."""
     modes = None if allowed_modes is None else list(allowed_modes)
-    return json.loads(_rust().route_multimodal_points(_db(con), tuple(a), tuple(b), float(radius_m), float(access_kmh),
-                                                      schema, modes, enforce_sequence))
+    with _file(con) as db:
+        return _json(_rust().route_multimodal_points, db, tuple(a), tuple(b), float(radius_m), float(access_kmh),
+                     schema, modes, enforce_sequence)
 
 
 def directions(con, route, mode="driving"):
-    """See :func:`duckosm.directions.directions`."""
-    if _db(con) is None:
-        from duckosm import directions as d
-        return d.directions(con, route, mode)
-    return json.loads(_rust().directions(_db(con), json.dumps(route), mode))
+    """The turn-by-turn steps of a route (``duckosm directions``)."""
+    with _file(con) as db:
+        return json.loads(_rust().directions(db, json.dumps(route), mode))
 
 
 def build_lane_graph(gmns_db, mode="driving"):
@@ -297,6 +275,63 @@ def route_lanes(gmns_db, from_lane, to_lane, mode="driving"):
 
 
 # ---- graphs ------------------------------------------------------------------------------------------------------
+
+def _uses(uses):
+    return ",".join(uses) if isinstance(uses, (list, tuple)) else uses
+
+
+def _graph(con, kind, mode, weight="time", geometry="wkt", uses=None, node_attrs=True):
+    """The networkx graph that Rust writes as a pickle (duckosm_route::graphml, the ``gpickle`` of ``export-graph``)."""
+    try:
+        import networkx  # noqa: F401  (the pickle makes networkx classes)
+    except ImportError as e:
+        raise ImportError("this needs networkx: pip install networkx") from e
+    import pickle
+    with _file(con) as db:
+        data, _, _ = _rust().graph_bytes(db, mode, kind, "gpickle", weight, geometry, _uses(uses), node_attrs)
+    return pickle.loads(data)
+
+
+def to_networkx(con, mode: str = "driving", weight: str = "time", node_attrs: bool = True, uses=None):
+    """The turn graph of ``mode`` as a ``networkx.DiGraph``: a node is an ``edge_id`` (with ``name``, ``highway``,
+    ``length_m``, ``maxspeed_kmh``, ``cost_s``, ``geometry`` as WKT when ``node_attrs``), an arc a legal turn with its
+    ``weight`` (``"time"`` in seconds or ``"length"`` in metres). ``uses``: the turns into and out of the restricted edges
+    with these labels too (``bus``, ``private``, ``pedestrian``, ``delivery``)."""
+    if weight not in ("time", "length"):
+        raise ValueError("weight must be 'time' or 'length'")
+    return _graph(con, "edge", mode, weight=weight, uses=uses, node_attrs=node_attrs)
+
+
+def to_networkx_nodes(con, mode: str = "driving", geometry: str = "wkt"):
+    """The junction graph of ``mode`` as a ``networkx.MultiDiGraph`` in the layout of osmnx: a node is a junction (``x``,
+    ``y``), an edge a road keyed by ``edge_id`` with all its columns. ``geometry``: ``"wkt"``, ``"shapely"`` or ``"none"``."""
+    if geometry not in ("wkt", "shapely", "none"):
+        raise ValueError("geometry must be 'wkt', 'shapely' or 'none'")
+    return _graph(con, "node", mode, geometry=geometry)
+
+
+_GRAPH_EXTS = {".graphml": "graphml", ".gpickle": "gpickle", ".pkl": "gpickle", ".pickle": "gpickle"}
+
+
+def write_graph(con, path, mode: str = "driving", graph: str = "node", fmt=None, weight: str = "time",
+                geometry: str = "wkt", uses=None):
+    """Write the junction graph (``graph="node"``) or the turn graph (``"edge"``) of ``mode`` as GraphML or a networkx
+    pickle (``duckosm export-graph``). Gives ``{path, fmt, graph, mode, n_nodes, n_edges}``."""
+    path = Path(path)
+    fmt = fmt or _GRAPH_EXTS.get(path.suffix.lower(), "graphml")
+    if fmt not in ("graphml", "gpickle"):
+        raise ValueError("fmt must be 'graphml' or 'gpickle'")
+    if graph not in ("node", "edge"):
+        raise ValueError("graph must be 'node' or 'edge'")
+    if uses and graph != "edge":
+        raise ValueError("uses is for the edge graph (graph='edge'): its turns carry the labels")
+    geom = "wkt" if (fmt == "graphml" and geometry == "shapely") else geometry
+    with _file(con) as db:
+        data, n, m = _rust().graph_bytes(db, mode, graph, fmt, weight, geom, _uses(uses), True)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+    return {"path": str(path), "fmt": fmt, "graph": graph, "mode": mode, "n_nodes": n, "n_edges": m}
+
 
 def to_rustworkx(con, mode="driving", graph="turns", weight="time"):
     """The graph of ``mode`` as a ``rustworkx.PyDiGraph``, from the rows of the Rust code (no networkx).

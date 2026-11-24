@@ -97,7 +97,7 @@ def test_only_selected_mode_exported(tmp_path):
 
 
 def test_unknown_mode_errors(tmp_path):
-    with pytest.raises(ValueError, match="not found"):
+    with pytest.raises(RuntimeError, match="not found"):
         to_gis(_db(), str(tmp_path), fmt="shp", modes=["flying"])
 
 
@@ -105,7 +105,7 @@ def test_gpkg_is_single_multi_layer_file(tmp_path):
     con = _db()
     out = tmp_path / "net.gpkg"
     res = to_gis(con, str(out), fmt="gpkg")
-    assert res["path"] == str(out) and out.exists()
+    assert res["path"] == out and out.exists()
     assert set(res["layers"]) == {"edges_driving", "nodes_driving", "boundary"}
 
     cols = _cols(con, out, layer="edges_driving")
@@ -123,7 +123,7 @@ def _pq_files(tmp_path):
 def test_geoparquet_without_visualization_table(tmp_path):
     con = _db()
     res = to_gis(con, str(tmp_path), fmt="geoparquet")
-    assert res["fmt"] == "geoparquet" and res["dir"] == str(tmp_path)
+    assert res["fmt"] == "geoparquet" and res["dir"] == tmp_path
     assert _pq_files(tmp_path) == ["boundary.parquet", "edges_driving.parquet", "layers.json", "nodes_driving.parquet"]
     assert res["layers"] == {"edges_driving": 2, "nodes_driving": 3, "boundary": 1}
     for f in tmp_path.glob("*.parquet"):                            # DuckDB writes the GeoParquet 'geo' key
