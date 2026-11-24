@@ -20,3 +20,17 @@ flowchart LR
 | CARLA, esmini, Vissim | [OpenDRIVE](../opendrive.md): `.xodr` | `duckosm opendrive` |
 
 All three are **experimental**. Tests check their structure. They are not loaded in the target tools yet.
+
+## The tables
+
+The HD map has no database of its own in duckOSM yet. Its exports read the lane tables of the GMNS database, and
+`duckosm lane-graph` writes one table into that database.
+
+| Table | Holds | Written by |
+|---|---|---|
+| [`gmns_<mode>.lane`](../gmns_tables.md#lane) | each lane of a link: its number, its width and its line | `duckosm gmns` |
+| [`gmns_<mode>.movement`](../gmns_tables.md#movement) | each turn at a junction, with the lanes that it goes from and to | `duckosm gmns` |
+| [`gmns_<mode>.lane_connector`](../gmns_tables.md#lane_connector) | the path of a lane through a junction | `duckosm gmns` |
+| [`lane_<mode>.lane_edges`](../lane-routing.md#the-lane-graph) | the lane graph: `from_lane` and `to_lane` (VARCHAR lane ids), `kind` (VARCHAR: the type of the turn, or `lane_change`), `cost` (DOUBLE: the length in metres plus the penalty) | `duckosm lane-graph` |
+
+Every table of the GMNS database: [GMNS tables](../gmns_tables.md).
