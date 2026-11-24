@@ -14,6 +14,7 @@ Bike lanes are not counted in ``lanes`` (OSM, and SUMO's OSM import): ``cycleway
 lanes, ``cycleway:left=lane`` on a one-way edge (with the traffic) one left of them.
 """
 import logging
+from collections import defaultdict
 
 from duckosm.processors.base import BaseProcessor
 
@@ -113,7 +114,6 @@ class LaneProfile(BaseProcessor):
         self.overrides = set(overrides)
 
     def run(self) -> int:
-        from duckosm.gmns import _inherit_lanes          # the one inheritance rule (moves here when GMNS reads this table)
 
         cols = {c for (c,) in self.fetchall("SELECT column_name FROM duckdb_columns() WHERE schema_name = 'driving' AND table_name = 'edges'")}
         rev = "e.is_reverse" if "is_reverse" in cols else "false"
@@ -162,3 +162,35 @@ class LaneProfile(BaseProcessor):
         counts = dict(self.fetchall("SELECT source, count(*) FROM driving.lane_profile GROUP BY 1"))
         logger.info(f"lane profile: {len(out):,} lanes; by source: " + ", ".join(f"{k} {v:,}" for k, v in sorted(counts.items(), key=lambda kv: -kv[1])))
         return len(out)
+
+
+def _inherit_lanes(edges, passes=6):
+    """Lane counts for one-way roads OSM gives none for (Kaveh, 2026-10-02: the tunnel ``80378487`` after the 2-lane ``167625718``).
+    ``edges``: dicts ``edge_id``, ``source``, ``target``, ``cls`` (the road class), ``lanes`` (as the edges table has it: tagged, else a
+    default of 1), ``tagged`` (the way has a ``lanes`` / ``turn:lanes`` / ``width:lanes`` tag), ``oneway``. An untagged one-way edge takes the
+    lanes of the road it plainly continues (the node between them joins only the two, both one-way, of one class: a road changes its name
+    at a tunnel) when that has more; else of the one it plainly leads into. Passes repeat, so a way cut into pieces inherits piece by piece.
+    Returns ``{edge_id: lanes}`` for the edges that change."""
+    by = {e["edge_id"]: dict(e) for e in edges}
+    at = defaultdict(set)                                # node -> the edges that touch it
+    for e in by.values():
+        at[e["source"]].add(e["edge_id"])
+        at[e["target"]].add(e["edge_id"])
+    changed = {}
+    for _ in range(passes):
+        step = False
+        for e in by.values():
+            if e["tagged"] or not e["oneway"]:
+                continue
+            for node, end in ((e["source"], "target"), (e["target"], "source")):      # what leads in, else what it leads into
+                others = at[node] - {e["edge_id"]}
+                if len(others) != 1:
+                    continue
+                o = by[next(iter(others))]
+                if o["oneway"] and o["cls"] == e["cls"] and o[end] == node and (o["lanes"] or 1) > (e["lanes"] or 1):
+                    e["lanes"] = changed[e["edge_id"]] = o["lanes"]
+                    step = True
+                    break
+        if not step:
+            break
+    return changed

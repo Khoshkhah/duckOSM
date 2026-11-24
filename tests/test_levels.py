@@ -47,7 +47,7 @@ def test_the_roads_of_all_modes_with_their_bands(monaco):
     con = duckdb.connect(str(monaco), read_only=True)
     assert len(roads) == roads["edge_id"].nunique() == _all_edge_ids(con)             # one row per edge_id, every mode
     assert roads["edge_id"].is_monotonic_increasing
-    from duckosm.crossings import _level
+    from duckosm._levels import _level
     assert (roads["band"].to_numpy() == [_level(ly, br, tn) for ly, br, tn in zip(roads["layer"], roads["bridge"], roads["tunnel"], strict=True)]).all()   # the tags only: a sidewalk or a crossing is on its street's floor
     assert (roads["walk_type"] == "sidewalk").any() and (roads["walk_type"] == "crossing").any()
     assert roads["highway"].notna().all() and (roads["highway"] == "ferry").any()      # a ferry is a road too, with its own class

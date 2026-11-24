@@ -86,6 +86,15 @@ or continuing a matched footpath); `--walk-frame` (moves footpaths to the kerb) 
   when named: config `osm_overrides:` or `build --fixes` (no default since 2026-09-30; Kaveh's local
   area configs name it). Only enable a rule once verified; provenance goes in `known_osm_issues.md`.
 
+## The library is Rust (Kaveh, 2026-11-23)
+
+- **Python is only a thin layer.** Each SDK function calls `duckosm._rust`. The only exception: a function that must return a
+  Python object (a networkx graph). No Python engine code: no build steps, exporters or routers in Python.
+- **Port and delete in the same PR.** When a part moves to Rust, its Python version goes. No fallbacks to Python code.
+- **`tests/test_no_python_engine.py` guards this.** It lists the Python engine modules still left. The list only shrinks: a
+  new Python engine module fails the test, and a module that is gone must leave the list.
+- Do not ask Kaveh about Python leftovers, and do not report them as open questions. Port them.
+
 ## Conventions
 
 - Heavy/optional deps (geopandas, networkx, rasterio, roadstyle, sumolib) are imported lazily

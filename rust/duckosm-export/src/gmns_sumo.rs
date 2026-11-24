@@ -591,3 +591,18 @@ pub(crate) fn lanes_from_sumo(c: &Ctx, source: &Path, sch: &str, mode: &str, geo
     );
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Lane pairs that go on side by side are one movement row; a lane feeding two lanes ahead is two rows (ported from
+    /// tests/test_gmns.py).
+    #[test]
+    fn lane_pairs_become_runs_side_by_side() {
+        assert_eq!(runs(&[(1, 1), (2, 2)]), vec![vec![(1, 1), (2, 2)]]);
+        assert_eq!(runs(&[(2, 1), (2, 2)]), vec![vec![(2, 1)], vec![(2, 2)]]);
+        assert_eq!(runs(&[(1, 1), (1, 2), (2, 3)]), vec![vec![(1, 1)], vec![(1, 2), (2, 3)]]);
+    }
+}
+

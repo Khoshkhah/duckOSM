@@ -8,7 +8,6 @@ import pytest
 
 pytest.importorskip("pandas")
 from duckosm.gmns import to_gmns  # noqa: E402
-from duckosm.gtfs import read_stops  # noqa: E402
 from tests.test_gmns import A, AR, _source  # noqa: E402
 
 
@@ -39,25 +38,6 @@ STOPS = [("S1", "Main Street", 59.32004, 18.065, 0),       # 4.4 m north of road
          ("ST", "The station", 59.32004, 18.0655, 1),       # a station: groups stops, not a place to board
          ("E1", "Station entrance", 59.32004, 18.0656, 2)]  # an entrance
 SERVICE = {"S1": 3, "S2": 2, "S3": 3, "E1": 2}
-
-
-def test_read_stops_tells_buses_from_trains_and_leaves_out_stations(tmp_path):
-    for folder in (False, True):
-        feed = _feed(tmp_path / ("f" if folder else "f.zip"), STOPS, SERVICE, folder)
-        d = read_stops(feed).set_index("stop_id")
-        assert set(d.index) == {"S1", "S2", "S3", "E1"}                      # the station (type 1) is left out
-        assert d.loc["S1", "loc_type"] == "bus_stop" and bool(d.loc["S1", "is_bus"])
-        assert d.loc["S2", "loc_type"] == "train_station" and not d.loc["S2", "is_bus"]
-        assert d.loc["E1", "loc_type"] == "entrance"
-        assert d.loc["S1", "name"] == "Main Street" and d.loc["S1", "lat"] == pytest.approx(59.32004)
-    # without service data every stop is taken for a bus stop; two feeds are one table
-    only = _feed(tmp_path / "only.zip", STOPS[:1])
-    assert read_stops(only).loc_type.tolist() == ["bus_stop"]
-    assert len(read_stops([only, _feed(tmp_path / "two.zip", STOPS[:2])])) == 3
-    with pytest.raises(ValueError, match="no stops.txt"):
-        with zipfile.ZipFile(tmp_path / "bad.zip", "w") as z:
-            z.writestr("agency.txt", "agency_name\nx\n")
-        read_stops(tmp_path / "bad.zip")
 
 
 def _build(tmp_path, feed, **kw):

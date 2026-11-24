@@ -370,7 +370,7 @@ def test_partner_must_be_on_the_inner_side(tmp_path):
 def test_lane_graph_pairs_movement_lanes_in_order(tmp_path):
     """Step 4: lane routing follows the movement's ranges: A's right turn into B: the cars from lane 1 (A's lane 2 is a bike lane,
     bicycle:lanes), the bike lane's own row from lane 2 (lanes from SUMO, 2026-10-10)."""
-    from duckosm.lane_routing import build_lane_graph
+    from duckosm._api import build_lane_graph
     _gmns(tmp_path).close()
     out = tmp_path / "out_gmns.duckdb"
     build_lane_graph(str(out))
@@ -428,14 +428,6 @@ def test_placement_says_where_the_line_lies(tmp_path):
     y = dict(con.execute("SELECT lane_id, round((ST_Y(ST_StartPoint(geom)) - 59.32) * 111320, 2) "
                          "FROM gmns_driving.lane WHERE link_id = 11").fetchall())
     assert y["11_1"] == pytest.approx(4.875, abs=0.05) and y["11_2"] == pytest.approx(1.625, abs=0.05)
-
-
-def test_placement_values():
-    from duckosm.gmns import _placement
-    w = [3.25, 3.25, 3.0]
-    assert _placement("left_of:1", w) == 0 and _placement("middle_of:2", w) == 4.875
-    assert _placement("right_of:3", w) == 9.5
-    assert _placement("transition", w) is None and _placement("left_of:4", w) is None and _placement(None, w) is None
 
 
 def _source_with(path, tags, edges, graph):
@@ -674,26 +666,6 @@ def test_a_roundabout_ring_closes(tmp_path):
         assert gap < 0.05, (a, b, gap)
 
 
-def test_smooth_ring_puts_a_circle_through_a_coarse_roundabout_and_leaves_other_rings_alone():
-    """docs/design/gmns_roundabout_arc.md: the vertices of a ring that lies on a circle are kept and points on the circle are added (3 degrees at most); a square, an oval or an open line is not changed."""
-    import math
-
-    from duckosm.gmns import _smooth_ring
-
-    n, r = 8, 10.0
-    ring = [(r * math.cos(2 * math.pi * k / n), r * math.sin(2 * math.pi * k / n)) for k in range(n)]
-    ring.append(ring[0])
-    out = _smooth_ring(ring)
-    assert set(ring) <= set(out) and len(out) >= 120 and out[0] == out[-1]                   # the original vertices stay, the arcs are dense
-    assert max(abs(math.hypot(x, y) - r) for x, y in out) < 1e-9
-    assert max(math.degrees(abs(math.atan2(b[1], b[0]) - math.atan2(a[1], a[0]) + math.pi) % (2 * math.pi) - math.pi) for a, b in zip(out, out[1:])) < 3.0001
-    square = [(0, 0), (10, 0), (10, 10), (0, 10), (0, 0)]
-    oval = [(15 * math.cos(2 * math.pi * k / 12), 8 * math.sin(2 * math.pi * k / 12)) for k in range(12)]
-    oval.append(oval[0])
-    open_line = [(0, 0), (5, 1), (10, 3), (15, 6), (20, 10)]
-    assert _smooth_ring(square) == square and _smooth_ring(oval) == oval and _smooth_ring(open_line) == open_line
-
-
 def test_a_roundabout_of_a_few_ways_has_round_lanes(tmp_path):
     """The lanes of a roundabout drawn as 8 ways around a 10 m circle are on circles (the radius of a lane varies by less than 5 cm), not on an octagon."""
     import math
@@ -829,7 +801,7 @@ def test_bus_turns_come_from_edge_graph_and_leave_the_cars_alone(tmp_path):
         "SELECT mvmt_id, type, allowed_uses, start_ib_lane, end_ib_lane, start_ob_lane, end_ob_lane FROM n.gmns_driving.movement ORDER BY 1").fetchall()
     assert g.execute(f"SELECT count(*) FROM gmns_driving.lane_connector WHERE mvmt_id = '{Gr}-{S}'").fetchone()[0] == 1
     g.close()
-    from duckosm.lane_routing import build_lane_graph
+    from duckosm._api import build_lane_graph
     build_lane_graph(str(tmp_path / "bus_gmns.duckdb"))         # the cars' lane graph: no bus turns
     g = duckdb.connect(str(tmp_path / "bus_gmns.duckdb"))
     assert not g.execute(f"SELECT * FROM lane_driving.lane_edges WHERE from_lane LIKE '{R}_%' OR to_lane LIKE '{S}_%'").fetchall()
@@ -861,7 +833,6 @@ def test_lanes_from_sumo(tmp_path):
     # middles; the lanes leaving the fork start later, where the junction ends (an incoming lane may end a little past the node)
     assert con.execute("SELECT max(ST_Distance(ST_LineInterpolatePoint(geom_cut, 0.5), geom)) * 111320 FROM gmns_driving.lane").fetchone()[0] < 0.05
     assert con.execute("SELECT bool_and(ST_Length(geom_cut) < ST_Length(geom)) FROM gmns_driving.lane WHERE link_id IN (12, 13)").fetchone()[0]
-
 
 
 def _fork_check(tmp_path, arrows):
@@ -896,14 +867,6 @@ def test_arrows_are_read_by_order_and_applied_by_sumo(tmp_path):
     assert _fork_check(tmp_path, "left|through;right")[1] == [("arrows not matched", "11")]
 
 
-def test_sumo_lane_pairs_become_runs_side_by_side():
-    """gmns_sumo._runs: lane pairs that go on side by side are one movement row; a lane feeding two lanes ahead is two rows."""
-    from duckosm.gmns_sumo import _runs
-    assert _runs([(1, 1), (2, 2)]) == [[(1, 1), (2, 2)]]
-    assert _runs([(2, 1), (2, 2)]) == [[(2, 1)], [(2, 2)]]
-    assert _runs([(1, 1), (1, 2), (2, 3)]) == [[(1, 1)], [(1, 2), (2, 3)]]
-
-
 def test_gmns_lanes_come_from_the_lane_profile(tmp_path):
     """docs/design/gmns_lane_profile.md step 1c: in driving, GMNS takes each edge's lanes from driving.lane_profile (number, use, width,
     turn) and only places them; an edge the profile lacks is an error, not a guess."""
@@ -920,27 +883,7 @@ def test_gmns_lanes_come_from_the_lane_profile(tmp_path):
     con = duckdb.connect(str(src))
     con.execute("DELETE FROM driving.lane_profile WHERE edge_id = 12")
     con.close()
-    with pytest.raises(ValueError, match="lane_profile has no lanes"):
+    with pytest.raises(RuntimeError, match="lane_profile has no lanes"):
         to_gmns(str(src), str(tmp_path / "p2_gmns.duckdb"))
 
 
-def test_a_lane_that_goes_on_straight_meets_the_lane_it_continues():
-    """2026-10-09 (Tunnel Rocher Palais): a two-lane road splits into two one-lane roads that start at the node, its middle; each
-    branch's lane is bent to start at its lane of the wider road (the movements say which), fading back over the taper. A turn is left."""
-    import duckdb
-    from duckosm.gmns import _meet_lanes
-    con = duckdb.connect()
-    con.execute("INSTALL spatial; LOAD spatial; CREATE SCHEMA g")
-    con.execute("CREATE TABLE g.lane(lane_id VARCHAR, link_id BIGINT, lane_num INT, allowed_uses VARCHAR, geom GEOMETRY)")
-    d = 1.6 / 111320                                   # the two lanes 1.6 m either side of the road's line (y = 0)
-    con.execute(f"""INSERT INTO g.lane VALUES
-        ('1_1', 1, 1, 'auto', ST_GeomFromText('LINESTRING(0 {d}, 0.001 {d})')), ('1_2', 1, 2, 'auto', ST_GeomFromText('LINESTRING(0 -{d}, 0.001 -{d})')),
-        ('2_1', 2, 1, 'auto', ST_GeomFromText('LINESTRING(0.001 0, 0.002 0.0003)')), ('3_1', 3, 1, 'auto', ST_GeomFromText('LINESTRING(0.001 0, 0.002 -0.0003)')),
-        ('4_1', 4, 1, 'auto', ST_GeomFromText('LINESTRING(0.001 0, 0.001 0.001)'))""")
-    con.execute("CREATE TABLE g.movement(ib_link_id BIGINT, start_ib_lane INT, end_ib_lane INT, ob_link_id BIGINT, start_ob_lane INT, end_ob_lane INT, type VARCHAR)")
-    con.execute("INSERT INTO g.movement VALUES (1, 1, 1, 2, 1, 1, 'diverge'), (1, 2, 2, 3, 1, 1, 'diverge'), (1, 1, 1, 4, 1, 1, 'left')")
-    assert _meet_lanes(con, "g") == 2
-    start = dict(con.execute("SELECT lane_id, [ST_X(ST_StartPoint(geom)), ST_Y(ST_StartPoint(geom))] FROM g.lane").fetchall())
-    assert start["2_1"] == [0.001, d] and start["3_1"] == [0.001, -d] and start["4_1"] == [0.001, 0.0]   # the turn keeps its start
-    ends = dict(con.execute("SELECT lane_id, [ST_X(ST_EndPoint(geom)), ST_Y(ST_EndPoint(geom))] FROM g.lane").fetchall())
-    assert ends["2_1"] == [0.002, 0.0003] and ends["1_1"] == [0.001, d]                                    # its far end and the wide road stay

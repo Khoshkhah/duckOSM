@@ -68,7 +68,6 @@ def load_roads(db):
     import pandas as pd
     from shapely import wkb
 
-    from duckosm.crossings import _level
 
     def walk(c):        # a cycling edge where bikes are pushed (dismount) is walked: walking, not cycling (2026-10-09)
         return f"CASE WHEN {c} = 'cycling' AND coalesce(dismount, false) THEN 'walking' ELSE {c} END"
@@ -229,3 +228,16 @@ def make_and_solve(db, area=None, inputs=None, keep_unmatched=True):
             con.close()
     return {"area": area, "roads": len(solved), "given_up": len(solved.attrs["levels_given_up"]), "info": solved.attrs["levels_info"],
             "unmatched": 0 if unmatched is None else len(unmatched)}
+
+
+def _level(layer, bridge, tunnel):
+    """The level of a way or link: its OSM ``layer`` if that is a number, else 1 for a bridge, -1 for a tunnel, else 0 (the rule roadstyle
+    and lanestyle use to put a lane in a band). A crossing paints only on the lanes of its own level."""
+    try:
+        ly = int(float(layer))
+    except (TypeError, ValueError):
+        ly = 0
+    if ly:
+        return ly
+    yes = lambda v: v is not None and str(v) not in ("", "no")          # noqa: E731
+    return 1 if yes(bridge) else -1 if yes(tunnel) else 0

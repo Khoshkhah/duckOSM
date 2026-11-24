@@ -1457,6 +1457,20 @@ fn merge_joined<'a>(nodes: &[(i64, f64, f64)], rows: &'a [Edge], cs: &[Conn], st
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
+    /// A lone lane into a wider road feeds all its lanes (ported from tests/test_lane_taper.py). SUMO's indices: 0 is the
+    /// right-most lane.
+    #[test]
+    fn a_lone_lane_into_a_wider_road_feeds_all_its_lanes() {
+        let lane = |n: usize| (0..n).map(|_| ("".to_string(), 3.25, None)).collect::<Vec<_>>();
+        let prof: HashMap<i64, Vec<(String, f64, Option<String>)>> = HashMap::from([(4, lane(2)), (2, lane(2)), (7, lane(1))]);
+        let got = super::split_lone_lanes(vec![(4, vec![(1, 7, 0), (0, 2, 1)])], &prof);
+        let mut out = got.into_iter().find(|x| x.0 == 4).unwrap().1;
+        out.sort();
+        assert_eq!(out, vec![(0, 2, 0), (0, 2, 1), (1, 7, 0)]);
+    }
+
     use super::*;
 
     #[test]

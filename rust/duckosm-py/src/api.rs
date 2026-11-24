@@ -344,8 +344,98 @@ fn graph_rows(py: Python<'_>, db: PathBuf, mode: String, weight: String)
         turns))
 }
 
+/// `to_gmns`: the GMNS db `out` from the duckOSM db `source` (duckosm_export::gmns::to_gmns_with, as `duckosm gmns`).
+#[pyfunction]
+#[pyo3(signature = (source, out, modes, to_csv, lane_geometry, combined, drive_side, pair_carriageways, csv_extensions, gtfs, gtfs_max_m, walk_frame, walk_clearance_m, tile_zoom, lane_source))]
+#[allow(clippy::too_many_arguments)]
+fn to_gmns(
+    py: Python<'_>,
+    source: PathBuf,
+    out: PathBuf,
+    modes: Vec<String>,
+    to_csv: Option<PathBuf>,
+    lane_geometry: bool,
+    combined: bool,
+    drive_side: String,
+    pair_carriageways: bool,
+    csv_extensions: bool,
+    gtfs: Vec<PathBuf>,
+    gtfs_max_m: f64,
+    walk_frame: bool,
+    walk_clearance_m: f64,
+    tile_zoom: Option<u8>,
+    lane_source: String,
+) -> PyResult<String> {
+    let o = duckosm_export::gmns::GmnsOptions {
+        modes,
+        lane_geometry,
+        pair_carriageways,
+        drive_side,
+        combined,
+        to_csv: to_csv.clone(),
+        csv_extensions,
+        gtfs,
+        gtfs_max_m,
+        walk_frame,
+        walk_clearance_m,
+        tile_zoom,
+        lane_source,
+    };
+    let s = py.detach(|| duckosm_export::gmns::to_gmns_with(&source, &out, &o)).map_err(err)?;
+    let modes: serde_json::Map<String, J> = s
+        .modes
+        .iter()
+        .map(|m| (m.mode.clone(), J::Object(m.counts.iter().map(|(t, n)| (t.to_string(), json!(n))).collect())))
+        .collect();
+    Ok(text(&json!({
+        "path": out,
+        "csv": to_csv,
+        "combined": s.combined.map(|(n, l)| json!({"node": n, "link": l})),
+        "modes": modes,
+    })))
+}
+
+/// `to_meso`: the meso network of each mode of a GMNS db; per mode its counts.
+#[pyfunction]
+fn to_meso(py: Python<'_>, gmns_db: PathBuf, modes: Vec<String>, trim_m: f64) -> PyResult<String> {
+    let r = py.detach(|| duckosm_export::gmns_meso::to_meso(&gmns_db, &modes, trim_m)).map_err(err)?;
+    let v: serde_json::Map<String, J> =
+        r.into_iter().map(|(m, n, a, b)| (m, json!({"meso_node": n, "normal": a, "movement": b, "meso_link": a + b}))).collect();
+    Ok(text(&J::Object(v)))
+}
+
+/// `to_micro`: the micro (cell) network of each mode of a GMNS db; per mode its counts.
+#[pyfunction]
+fn to_micro(py: Python<'_>, gmns_db: PathBuf, modes: Vec<String>, cell_length_m: f64) -> PyResult<String> {
+    let r = py.detach(|| duckosm_export::gmns_meso::to_micro(&gmns_db, &modes, cell_length_m)).map_err(err)?;
+    let v: serde_json::Map<String, J> = r
+        .into_iter()
+        .map(|(m, n, c, l, mv)| (m, json!({"micro_node": n, "cell": c, "lane_change": l, "movement": mv, "micro_link": c + l + mv})))
+        .collect();
+    Ok(text(&J::Object(v)))
+}
+
+/// `check_gmns`: the checks of a GMNS db, as [(schema, check, bad, total)].
+#[pyfunction]
+fn check_gmns(py: Python<'_>, path: PathBuf, modes: Vec<String>) -> PyResult<String> {
+    let r = py.detach(|| duckosm_export::gmns_check::check_gmns(&path, &modes)).map_err(err)?;
+    Ok(text(&json!(r.into_iter().map(|(s, c, b, t)| json!([s, c, b, t])).collect::<Vec<_>>())))
+}
+
+/// The GMNS viewer page (`duckosm gmns-viz`) of one mode; gives its path, lanes and connectors.
+#[pyfunction]
+fn gmns_viewer(py: Python<'_>, gmns_db: PathBuf, out: PathBuf, mode: String) -> PyResult<String> {
+    let v = py.detach(|| duckosm_export::gmns_viewer::write_viewer(&gmns_db, &out, &mode)).map_err(err)?;
+    Ok(text(&json!({"path": v.path, "lanes": v.lanes, "conns": v.conns})))
+}
+
 pub fn add(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(cli, m)?)?;
+    m.add_function(wrap_pyfunction!(to_gmns, m)?)?;
+    m.add_function(wrap_pyfunction!(to_meso, m)?)?;
+    m.add_function(wrap_pyfunction!(to_micro, m)?)?;
+    m.add_function(wrap_pyfunction!(check_gmns, m)?)?;
+    m.add_function(wrap_pyfunction!(gmns_viewer, m)?)?;
     m.add_function(wrap_pyfunction!(to_sumo, m)?)?;
     m.add_function(wrap_pyfunction!(chains, m)?)?;
     m.add_function(wrap_pyfunction!(to_gis, m)?)?;
