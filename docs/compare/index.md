@@ -11,15 +11,15 @@ flowchart LR
     PBF -.->|Re-parse 2| L2["<b>Simulation</b><br/>SUMO · MATSim"]
     PBF -.->|Re-parse 3| L3["<b>Planning & HD Maps</b><br/>osm2gmns · JOSM"]
 
-    L1 --> SILO["❌ <b>Isolated Silos</b><br/>Transient IDs · No SQL joins"]
+    L1 --> SILO["❌ <b>Isolated Silos</b><br/>Transient IDs<br/>No SQL joins"]
     L2 --> SILO
     L3 --> SILO
 
     %% duckOSM Unified Pipeline
-    PBF ==>|Single Build| U1[("<b>Level 2: Routable DuckDB</b><br/>Turn bans · 64-bit edge_id")]
+    PBF ==>|Single Build| U1[("<b>Level 2:<br/>Routable DuckDB</b><br/>Turn bans<br/>64-bit edge_id")]
     U1 ==>|GMNS| U2[("<b>Level 3: GMNS DuckDB</b><br/>Macro · Meso · Micro")]
     U1 ==> U3["<b>Simulation & ML</b><br/>SUMO · MATSim · PyG"]
-    U2 ==> U4["<b>Lanes & HD maps</b><br/>MATSim lanes · Lanelet2 · CommonRoad"]
+    U2 ==> U4["<b>Lanes & HD maps</b><br/>MATSim lanes · Lanelet2<br/>CommonRoad"]
     U3 ==> JOIN["✅ <b>Unified via SQL</b><br/>Joined on edge_id"]
     U4 ==> JOIN
 

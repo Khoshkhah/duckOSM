@@ -4,11 +4,11 @@ The multi-resolution network in the GMNS standard, from macro (links) to micro (
 
 ```mermaid
 flowchart LR
-  l2[("<area>.duckdb (Level 2)")] --> gmns[("<area>_gmns.duckdb (GMNS)")]
+  l2[("#lt;area#gt;.duckdb<br/>(Level 2)")] --> gmns[("#lt;area#gt;_gmns.duckdb<br/>(GMNS)")]
   gmns --> sumo["SUMO"]
-  gmns --> matsim["MATSim network, lanes and signals"]
+  gmns --> matsim["MATSim network,<br/>lanes and signals"]
   gmns --> dta["DTALite & Path4GMNS"]
-  gmns --> hd["HD map: Lanelet2, CommonRoad"]
+  gmns --> hd["HD map: Lanelet2,<br/>CommonRoad"]
 ```
 
 | Read by | Export | Reads | Command |
@@ -18,6 +18,8 @@ flowchart LR
 | MATSim, BEAM, eqasim | [MATSim](../matsim.md): `network.xml` | GMNS db (or Level 2 db) | `duckosm matsim` |
 | MATSim | [MATSim](../matsim.md#lanes-and-signals): lanes and signals | GMNS db | `duckosm matsim-lanes` |
 | SUMO | [SUMO](../sumo.md): plain XML and `.netccfg` (netconvert makes the `.net.xml`) | GMNS db (or Level 2 db) | `duckosm sumo` |
+
+Every table and column of the GMNS database: [GMNS network tables](../gmns_tables.md).
 
 ## Multi-resolution model
 
@@ -52,4 +54,4 @@ The GMNS tables have the entities of a heterogeneous graph, and you can read the
 | `movement` | a legal turn, with its lanes in and out | `mvmt_id`, `node_id`, `ib_link_id`, `ob_link_id` |
 | `signal_controller` | a node with traffic lights (OSM has no signal timing) | `controller_id`, `node_id` |
 
-For the full specification, see [GMNS](../gmns.md) and the [GMNS tables reference](../gmns_tables.md).
+For the full specification, see [GMNS](../gmns.md) and the [GMNS network tables](../gmns_tables.md).

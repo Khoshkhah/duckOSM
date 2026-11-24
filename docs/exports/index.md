@@ -17,7 +17,7 @@ The levels go from the raw OSM data to the most detailed network. Each level is 
 <a class="lv" href="#1-osm-data"><span class="n">1</span><b>OSM data</b><span class="db-tag">from .osm.pbf</span><span class="desc">Flat tables of all OSM objects</span><span class="tools">QuackOSM · GDAL · Geofabrik · PMTiles</span></a>
 <a class="lv" href="#2-routable-network"><span class="n">2</span><b>Routable network</b><span class="db-tag db">DuckDB</span><span class="desc">Drive, walk, bike<br>Edges, edge_id, turns</span><span class="tools">GeoPackage · networkx</span></a>
 <a class="lv" href="#3-gmns-network"><span class="n">3</span><b>GMNS network</b><span class="db-tag db">GMNS DuckDB</span><span class="desc">Macro, meso, micro<br>links, lanes, turns</span><span class="tools">GMNS · MATSim · SUMO</span></a>
-<a class="lv" href="#4-hd-map"><span class="n">4</span><b>HD map</b><span class="db-tag db">HD map DuckDB</span><span class="desc">Lane shape in 3D (experimental)</span><span class="tools">Lanelet2 · OpenDRIVE</span></a>
+<a class="lv" href="#4-hd-map"><span class="n">4</span><b>HD map</b><span class="db-tag db">HD map DuckDB</span><span class="desc">Lane shape in 3D (experimental)</span><span class="tools">SimReady · Lanelet2 · OpenDRIVE</span></a>
 </div>
 
 Your OSM fixes go into every level.
@@ -73,6 +73,7 @@ Each lane with its own shape and its connections, for driving simulators and aut
 
 | Read by | Export | Command |
 |---|---|---|
+| Simulators and HD map tools | [the HD map database](hd-map/index.md#the-hd-map-database) of SimReady (`<area>_hdmap.duckdb`), with Lanelet2, OpenDRIVE and other files | `duckosm hdmap` (needs SimReady) |
 | Your own lane router | [a lane graph](lane-routing.md) | `duckosm lane-graph`, `route-lanes` |
 | Autoware, lanelet2 | [Lanelet2](lanelet2.md) `.osm` | `duckosm lanelet2` |
 | CARLA, esmini, Vissim | [OpenDRIVE](opendrive.md) `.xodr` | `duckosm opendrive` |

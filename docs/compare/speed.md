@@ -22,9 +22,11 @@ Mac mini (Apple M6, 12 cores, 16 GB). The browser is headless Chromium.
 | Job | duckOSM | duckOSM in the browser | Other tool | Details |
 |---|---|---|---|---|
 | Road network, 3 modes (`build`) | **0.3 s, 71 MB** | 2.7 s, 65 MB | | [Browser and native builds](../concepts/browser-native.md#speed-and-memory) |
-| GMNS network (`gmns`) | **0.8 s, 145 MB** | | | [GMNS](../exports/gmns.md#speed-and-memory) |
+| GMNS network (`gmns`) | **0.34 s, 0.15 GB** | | | [GMNS](../exports/gmns.md#speed-and-memory) |
 | MATSim (`matsim`) | **0.04 s, 18.6 MB** | | | [MATSim](../exports/matsim.md#speed-and-memory) |
-| OpenDRIVE (`opendrive --junctions`) | **0.06 s, 50.5 MB** | | | [OpenDRIVE](../exports/opendrive.md) |
+| OpenDRIVE (`opendrive --junctions`) | **0.07 s, 0.04 GB** | | | [OpenDRIVE](../exports/opendrive.md) |
+| Lanelet2 (`lanelet2`) | **0.12 s, 0.03 GB** | | | [Lanelet2](../exports/lanelet2.md) |
+| Lane graph (`lane-graph`) | **0.05 s, 0.02 GB** | | | [Lane routing](../exports/lane-routing.md) |
 | OSM features table (`quack`) | **0.05 s, 0.05 GB** | | | [QuackOSM table](../concepts/quackosm.md#speed-and-memory) |
 | GDAL's layers, GeoParquet (`quack --gdal`) | **0.05 s, 0.01 GB** | | | [GDAL's OSM layers](../concepts/gdal.md#speed-and-memory) |
 | osm2pgsql tables into PostGIS | 0.25 s, 52 MB | | osm2pgsql: 0.25 s, 29 MB | [osm2pgsql tables](../exports/osm2pgsql.md) |
@@ -38,11 +40,13 @@ Mac mini (Apple M6, 12 cores, 16 GB), except where the row says WSL (20 cores, 2
 |---|---|---|---|---|
 | Road network, driving, by tiles | **12.3 s, 0.8 GB** | 24.6 s, 1.5 GB | | [Browser and native builds](../concepts/browser-native.md#speed-and-memory) |
 | Road network, 3 modes, by tiles | **32.9 s, 1.4 GB** | 55.8 s, 2.0 GB | | [Browser and native builds](../concepts/browser-native.md#speed-and-memory) |
-| GMNS network (`gmns`), WSL, 49 tiles | 23 min, 5.0 GB | | | [GMNS](../exports/gmns.md#speed-and-memory) |
+| GMNS network (`gmns`) | **71 s, 5.2 GB** | | | [GMNS](../exports/gmns.md#speed-and-memory) |
 | SUMO, plain XML (`sumo --no-netconvert`) | 11 s, 2.6 GB | | | [SUMO](../exports/sumo.md#speed-and-memory) |
 | MATSim (`matsim`) | **3.4 s, 853 MB** | | | [MATSim](../exports/matsim.md#speed-and-memory) |
 | OpenDRIVE, roads only, WSL | 21 s, 0.52 GB | | | [OpenDRIVE](../exports/opendrive.md) |
-| OpenDRIVE (`--junctions`), WSL | 1 min 18 s, 2.1 GB | | | [OpenDRIVE](../exports/opendrive.md) |
+| OpenDRIVE (`--junctions`) | **47 s, 2.0 GB** | | | [OpenDRIVE](../exports/opendrive.md) |
+| Lanelet2 (`lanelet2`) | **84 s, 8.6 GB** | | | [Lanelet2](../exports/lanelet2.md) |
+| Lane graph (`lane-graph`) | **1.8 s, 2.9 GB** | | | [Lane routing](../exports/lane-routing.md) |
 | OSM features table (`quack`) | **4.0 s, 1.2 GB** | 9.6 s, 1.0 GB | QuackOSM: 13.7 s, 5.8 GB | [QuackOSM table](../concepts/quackosm.md#speed-and-memory) |
 | GDAL's layers, GeoParquet (`quack --gdal`) | **3.7 s, 0.29 GB** | 7.8 s, 1.2 GB | `ogr2ogr`: 12.5 s, 0.62 GB | [GDAL's OSM layers](../concepts/gdal.md#speed-and-memory) |
 | osm2pgsql tables into PostGIS | **7.3 s**, 0.86 GB | | osm2pgsql: 12.3 s, **0.64 GB** | [osm2pgsql tables](../exports/osm2pgsql.md) |

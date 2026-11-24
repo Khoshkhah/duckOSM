@@ -1,10 +1,19 @@
-# Database schema
+# Routable network tables
 
-Every table and column a build writes. Types are as DuckDB reports them. Geometries are
-longitude / latitude (EPSG:4326). How to query them: [Query the database](../guides/query.md).
+Each table of the routable network database (`<area>.duckdb`, level 2), and each of its columns. How to query them:
+[Query the database](../guides/query.md).
 
-Each build writes the descriptions of this page into the `.duckdb` file as DuckDB comments. Read them with
-`SELECT schema_name, table_name, column_name, comment FROM duckdb_columns()` (and `duckdb_tables()` for the tables).
+| Rule | |
+|---|---|
+| Schemas | one schema for each mode (`driving`, `walking`, `cycling`), and the schemas of the area in the table below |
+| Ids | `edge_id` is a [stable hash](../concepts/edge-ids.md) of `osm_id`, `source` and `target`. `node_id` is the OSM node id; a virtual node has a negative id |
+| Direction | one edge for each direction of a road: `source` → `target`. A two-way road has two edges |
+| Units | in the column name: `_m` metres, `_s` seconds, `_kmh` km/h. `lanes` is the lanes of the edge's direction |
+| Geometry | longitude and latitude (EPSG:4326) |
+| Types | as DuckDB reports them |
+| Comments | each build writes the descriptions of this page into the file: `SELECT schema_name, table_name, column_name, comment FROM duckdb_columns()` |
+
+## The schemas
 
 | Schema | Holds | Written by |
 |---|---|---|
@@ -15,6 +24,27 @@ Each build writes the descriptions of this page into the `.duckdb` file as DuckD
 | [`features`](#features-schema) | base-map layers | `options.build_features` |
 | [`visualization`](#visualization-schema) | the drawing order of the roads | `levels` |
 | [`bus`](#bus-schema) | the bus routes on the driving edges | `options.bus_routes`, or `bus` |
+
+## The tables of one mode
+
+A box is a table. A line joins two tables, and its label names the columns that join them. The
+fork at the end of a line is the "many" side: one node starts many edges. `chains` and `lane_profile` are in `driving`
+only.
+
+```mermaid
+erDiagram
+    direction LR
+    nodes ||--o{ edges : "source, target"
+    edges ||--o{ edge_graph : "from_edge, to_edge"
+    edges ||--o{ turn_restrictions : "from_edge_id, to_edge_id"
+    edges ||--o{ turn_permission : "from_edge, to_edge"
+    edges ||--o{ lane_profile : "edge_id"
+    chains ||--|{ edges : "edge_ids"
+    ways ||--o{ edges : "osm_id"
+    ways ||--o{ way_nodes : "way_id"
+    ways ||--o{ edge_id_map : "osm_id"
+    nodes ||--o{ private_edges : "source, target"
+```
 
 ## `<mode>` schema {#mode-schema}
 

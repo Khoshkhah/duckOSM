@@ -6,7 +6,7 @@ use clap::{Parser, Subcommand};
 use std::path::{Path, PathBuf};
 
 /// The command names of this crate: `duckosm <name> ...` goes to [`run`].
-pub const COMMANDS: [&str; 10] = ["matsim", "railml", "export-gis", "gis-debug", "opendrive", "matsim-lanes", "sumo", "lanelet2", "gmns", "gmns-viz"];
+pub const COMMANDS: [&str; 11] = ["matsim", "railml", "export-gis", "gis-debug", "opendrive", "matsim-lanes", "sumo", "lanelet2", "gmns", "gmns-viz", "hdmap"];
 
 #[derive(Parser)]
 #[command(name = "duckosm")]
@@ -252,6 +252,33 @@ enum Cmd {
         /// installed, else the rules). docs/design/gmns_lane_rules.md.
         #[arg(long, default_value = "rules", value_parser = ["auto", "rules", "netconvert"])]
         lane_source: String,
+    },
+    /// The HD map of an area, made by SimReady (docs/design/hdmap_simready.md): write SimReady's input folder from the
+    /// routing database and the GMNS database (made with `duckosm gmns --lane-source rules`), then run `duckosm-sim build`.
+    /// SimReady is a separate program: without it the command stops.
+    Hdmap {
+        /// The routing database (Level 2) of the area.
+        db: PathBuf,
+        /// The GMNS database of the same area.
+        gmns_db: PathBuf,
+        /// The HD map database (default: <db name>_hdmap.duckdb next to DB).
+        #[arg(short, long)]
+        out: Option<PathBuf>,
+        /// The format files that SimReady writes too, comma-separated: lanelet2, opendrive, sumo, gmns, matsim, gltf.
+        #[arg(long, value_delimiter = ',')]
+        formats: Vec<String>,
+        /// SimReady's program (default: $DUCKOSM_SIM, else duckosm-sim on the PATH).
+        #[arg(long)]
+        simready: Option<PathBuf>,
+        /// Keep the input folder after the run.
+        #[arg(long)]
+        keep_input: bool,
+        /// The ISO 3166 code of the area, for SimReady's traffic rules (default: none, SimReady's project default).
+        #[arg(long)]
+        jurisdiction: Option<String>,
+        /// The side of the road that traffic drives on: right or left (default: from the jurisdiction).
+        #[arg(long, value_parser = ["right", "left"])]
+        driving_side: Option<String>,
     },
     /// Export a Lanelet2 map (.osm) from a GMNS db: each lane is a lanelet, with left and right boundaries (the centerline
     /// offset by half the lane width) and the tags subtype, one_way and speed_limit. A lane map in the format of Autoware and
@@ -503,6 +530,13 @@ pub fn run(args: &[String]) -> Result<()> {
                     std::process::exit(1);
                 }
             }
+        }
+        Cmd::Hdmap { db, gmns_db, out, formats, simready, keep_input, jurisdiction, driving_side } => {
+            let out = out.unwrap_or_else(|| db.with_file_name(format!("{}_hdmap.duckdb", stem(&db))));
+            let s = crate::hdmap_run::run_hdmap(&db, &gmns_db, &out, &formats, simready.as_deref(), keep_input,
+                &crate::hdmap_run::HdmapArea { jurisdiction, driving_side })?;
+            println!("wrote {} (SimReady, from {} input files{})", s.out.display(), s.files.len(),
+                     if keep_input { format!(", input kept in {}", s.input.display()) } else { String::new() });
         }
         Cmd::Lanelet2 { gmns_db, mode, out } => {
             if !gmns_db.exists() {

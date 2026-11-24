@@ -23,7 +23,7 @@ GROUPS = {
 }
 # one short line for each table (SimReady's model pages give some tables the line of another table)
 ROW = {
-    "carriageway": "one directed roadway from junction to junction: one chain of duckOSM",
+    "carriageway": "one directed roadway from junction to junction: one GMNS chain",
     "attribute": "one value of a carriageway (lanes, speed, width), and how it was found",
     "event": "a station where the cross-section changes",
     "lane_section": "the part of a carriageway between two events",
@@ -106,12 +106,21 @@ diagrams[0] = "\n".join(ln for ln, p in zip(road, is_project) if not p).replace(
 w = [f"""# HD map tables
 
 Each table of the HD map database, and each of its columns. [SimReady](https://github.com/Khoshkhah/simready) builds
-this database from a duckOSM database.
+this database from two duckOSM databases of the same build:
+
+- the GMNS network (`<area>_gmns.duckdb` of [`duckosm gmns`](gmns.md), [GMNS network tables](gmns_tables.md)): the road
+  network. Its chains are the carriageways;
+- the routable network (`<area>.duckdb`, [Routable network tables](../reference/database.md)): only the raw OSM data
+  ([`raw.*`](../reference/database.md#raw-schema), with the fixes) for the kerbs, the building walls and the bridges,
+  and the DEM grid ([`main.elevation_grid`](../reference/database.md#elevation_grid)) for the ground.
+
+SimReady is a separate, optional program that is not public yet. The command [`duckosm hdmap DB GMNS_DB`](../reference/cli.md#hdmap)
+gives the two databases to SimReady and writes `<area>_hdmap.duckdb` ([4. HD map](hd-map/index.md)).
 
 | Rule | |
 |---|---|
 | Schema | all tables are in the schema `sim` |
-| Carriageway | one carriageway for each chain of `driving.chains`, with the same `chain_id` ([Edges and chains](../concepts/edges-and-chains.md)) |
+| Carriageway | one carriageway for each chain of `gmns_driving.chains`, with the same `chain_id` ([GMNS network tables](gmns_tables.md#chains), [Edges and chains](../concepts/edges-and-chains.md)) |
 | Ids | a 64-bit hash of the content keys, with the hash of duckOSM's [`edge_id`](../concepts/edge-ids.md). `node_id` is the OSM node id |
 | Units | in the column name: `_m` metres, `_s` seconds, `_deg` degrees, `_kmh` km/h |
 | Geometry | DuckDB `GEOMETRY` in the CRS of `project.crs`: metres, in the UTM zone of the area |

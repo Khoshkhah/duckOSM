@@ -4,7 +4,7 @@ The routable network of each mode: the edges with their `edge_id`, the nodes and
 
 ```mermaid
 flowchart LR
-  db[("<area>.duckdb (DuckDB)")] --> gis["GIS (GeoPackage, shp)"]
+  db[("#lt;area#gt;.duckdb<br/>(DuckDB)")] --> gis["GIS (GeoPackage, shp)"]
   db --> nx["networkx / rustworkx"]
   db --> tr["Turn graph router"]
   db --> rail["railML"]
@@ -18,4 +18,4 @@ flowchart LR
 | networkx | [networkx](../networkx.md): a networkx graph, GraphML or gpickle | `to_networkx()`, `duckosm export-graph` |
 | Rail planning: OpenTrack, RailSys | [railML 2.4](../railml.md) (experimental): the rail tracks, switches and stations, from `raw.*` | `duckosm railml` |
 
-Every table and column of the database: [Database schema](../../reference/database.md).
+Every table and column of the database: [Routable network tables](../../reference/database.md).

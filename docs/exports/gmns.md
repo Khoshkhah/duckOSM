@@ -43,7 +43,7 @@ duckosm gmns-viz monaco_gmns.duckdb                        # draws the meso and 
 
 ## Network schemas
 
-In `<area>_gmns.duckdb`, **every table belongs to a network schema** (the default `main` schema is empty). GMNS is dedicated purely to transport networks, unlike Level 2 (`<area>.duckdb`) which also stores GIS layers (`features`) and raw OSM tags (`raw`).
+In `<area>_gmns.duckdb`, **every network table belongs to a network schema**. The default `main` schema has only [`elevation_metadata`](gmns_tables.md#elevation_metadata), when the source db has heights. GMNS is dedicated purely to transport networks, unlike Level 2 (`<area>.duckdb`) which also stores GIS layers (`features`) and raw OSM tags (`raw`).
 
 ### One link for each edge
 
@@ -51,7 +51,7 @@ duckOSM cuts roads where a footpath or a cycleway crosses them. Thus the walking
 
 Each `gmns_<mode>.link` is one Level 2 edge: `link_id` = `edge_id`. GMNS does not merge links. Thus each crossing node stays in each mode, and `gmns_all` can join the modes on `link_id`.
 
-To get one road section between two junctions, use Level 2 [`driving.chains`](../reference/database.md#chains). SUMO `--merge` reads that table.
+One road section between two junctions is one row of [`gmns_driving.chains`](gmns_tables.md#chains) (Level 2: [`driving.chains`](../reference/database.md#chains)). SUMO and MATSim `--merge` read it.
 
 ### Macro schemas (`duckosm gmns`)
 
@@ -68,7 +68,7 @@ To get one road section between two junctions, use Level 2 [`driving.chains`](..
 * **In DuckDB (`.duckdb`):** Stores all tables with native DuckDB spatial geometries (`geom`) for fast spatial SQL queries and map rendering.
 * **In CSV (`--to-csv`):** Exports the standard specification tables with WKT text geometries (`geometry`), ready for DTALite and Path4GMNS.
 
-See the complete table matrix and column definitions in **[GMNS tables](gmns_tables.md)**.
+See the complete table matrix and column definitions in **[GMNS network tables](gmns_tables.md)**.
 
 ![One junction in GMNS: a node, a link with two lanes, and the movements each lane can take](../images/gmns_junction.svg)
 
@@ -113,12 +113,14 @@ it turns red, and the lanes that its turns lead into turn green.
 
 ## Speed and memory
 
-Driving network, with netconvert. Input is the Level 2 routable database (`<area>.duckdb`):
+Driving network, with the lane rules (the default). Input is the Level 2 routable database (`<area>.duckdb`). Memory is the
+peak of the whole process, Rust and DuckDB (DuckDB has a limit of 2 GB):
 
 | Area (input DuckDB) | Machine | Time | Memory | Output GMNS DuckDB |
 |---|---|---|---|---|
-| Monaco (38 MB `.duckdb`) | Mac mini (M6, 16 GB) | 0.8 s | 145 MB | 8.4 MB |
-| Kentucky (~1.2 GB `.duckdb`), driving | Mac mini (M6, 16 GB) | 2.5 min | 2.2 GB (Rust) + 2 GB (DuckDB) | 6.7 GB |
+| Monaco (38 MB `.duckdb`) | Mac mini (M6, 16 GB) | 0.34 s | 0.15 GB | 9.5 MB |
+| Kentucky (2.2 GB `.duckdb`) | Mac mini (M6, 16 GB) | 71 s | 5.2 GB | 7.5 GB |
+| Île-de-France (2.0 GB `.duckdb`) | Mac mini (M6, 16 GB) | 61 s | 5.0 GB | 3.0 GB |
 | France (~35 GB `.duckdb`) | | not run | (estimated ~150 GB) | |
 
 Each step works in chunks (a chunk of junctions, of road runs or of lanes), so the memory stays about the same on a large
