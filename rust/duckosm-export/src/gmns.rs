@@ -2017,7 +2017,7 @@ impl LaneGeo {
     }
 
     /// The geometry of lane `i` of the edge `r`, as WKT.
-    fn lane(&self, ch: &LaneChunk, r: &LaneRow, i: usize) -> Result<Option<String>> {
+    fn lane(&self, ch: &LaneChunk, r: &LaneRow, i: usize) -> Result<Option<Vec<P>>> {
         if !self.lane_geometry {
             return Ok(None);
         }
@@ -2030,12 +2030,12 @@ impl LaneGeo {
         };
         Ok(Some(match self.finish(ch, r, i, geom.clone())? {
             Some(g) => g,
-            None => lanes::wkt(&geom),
+            None => geom,
         }))
     }
 
     /// The moves after the offset: along a varying gap, over a taper, and straight on through OSM's V. None: no move.
-    fn finish(&self, ch: &LaneChunk, r: &LaneRow, i: usize, mut geom: Vec<P>) -> Result<Option<String>> {
+    fn finish(&self, ch: &LaneChunk, r: &LaneRow, i: usize, mut geom: Vec<P>) -> Result<Option<Vec<P>>> {
         let e = r.edge_id;
         let ri = self.wh[&e].0;
         let mut moved = false;
@@ -2071,7 +2071,7 @@ impl LaneGeo {
                 moved = true;
             }
         }
-        Ok(moved.then(|| lanes::wkt(&geom)))
+        Ok(moved.then_some(geom))
     }
 }
 
@@ -2114,7 +2114,7 @@ fn build_lane_curb(c: &Ctx, sch: &str, mode: &str, uses: &str, has_raw: bool, dr
     // the rows of the car edges, then of the bus edges, each in the order of its query
     for (part, src) in ["_edges_car", "_edges_bus"].iter().enumerate() {
         let sel = format!(
-            "SELECT {part} AS part, row_number() OVER () AS k, e.edge_id, e.is_reverse::BOOLEAN AS is_rev, COALESCE(li.lanes, e.lanes)::BIGINT AS lanes,
+            "SELECT {part} AS part, e.edge_id, e.is_reverse::BOOLEAN AS is_rev, COALESCE(li.lanes, e.lanes)::BIGINT AS lanes,
              e.length_m::DOUBLE AS length_m, e.source, ({oneway_sel})::BOOLEAN AS oneway, {tagcol} AS tags, e.osm_id, e._bus AS bus, e._bike AS bike,
              ({endcol})::BOOLEAN AS way_end, ST_AsText(e.geometry) AS wkt, e.target, e.name
              FROM {src} e {raw_join} LEFT JOIN _lanes_inf li ON li.edge_id = e.edge_id"
@@ -2126,7 +2126,7 @@ fn build_lane_curb(c: &Ctx, sch: &str, mode: &str, uses: &str, has_raw: bool, dr
     let mut w_prof: HashMap<i64, Vec<f64>> = HashMap::new();
     if has_prof {
         let missing: Vec<i64> = {
-            let sql = "SELECT edge_id FROM _lc ANTI JOIN s.driving.lane_profile p USING (edge_id) ORDER BY part, k";
+            let sql = "SELECT edge_id FROM _lc ANTI JOIN s.driving.lane_profile p USING (edge_id) ORDER BY _lc.rowid";
             let mut st = c.con.prepare(sql).map_err(|e| format!("{e}\n{sql}"))?;
             let v = st.query_map([], |r| r.get(0)).map_err(|e| e.to_string())?.collect::<std::result::Result<Vec<i64>, _>>().map_err(|e| e.to_string())?;
             v
@@ -2166,7 +2166,7 @@ fn build_lane_curb(c: &Ctx, sch: &str, mode: &str, uses: &str, has_raw: bool, dr
     let mut w_of: HashMap<i64, Vec<f64>> = HashMap::new();
     let mut facts: HashMap<i64, EdgeFacts> = HashMap::new();
     {
-        let sql = format!("SELECT {LANE_COLS} FROM _lc ORDER BY part, k");
+        let sql = format!("SELECT {LANE_COLS} FROM _lc ORDER BY rowid");
         let mut st = c.con.prepare(&sql).map_err(|e| format!("{e}\n{sql}"))?;
         for r in st.query_map([], lane_row).map_err(|e| e.to_string())? {
             let r = r.map_err(|e| e.to_string())?;
@@ -2224,18 +2224,24 @@ fn build_lane_curb(c: &Ctx, sch: &str, mode: &str, uses: &str, has_raw: bool, dr
         ""
     };
     c.exec(&format!(
-        "CREATE OR REPLACE TEMP TABLE _lcc AS SELECT le.ch, x.* FROM _lc x JOIN _lane_edge le USING (edge_id) ORDER BY le.ch, x.part, x.k;
+        "CREATE OR REPLACE TEMP TABLE _lcc AS SELECT le.ch, x.rowid AS k, x.* FROM _lc x JOIN _lane_edge le USING (edge_id) ORDER BY le.ch, k;
          CREATE OR REPLACE TEMP TABLE _lcx AS SELECT DISTINCT p.ch, x.edge_id, x.wkt FROM _lc x JOIN _lane_extra p USING (edge_id) ORDER BY p.ch;
          {prof_sql}
          DROP TABLE _lc; DROP TABLE _lane_edge; DROP TABLE _lane_extra"
     ))?;
-    c.exec("CREATE OR REPLACE TEMP TABLE _lane_rows(lane_id VARCHAR, link_id BIGINT, lane_num BIGINT, allowed_uses VARCHAR, width DOUBLE, turn VARCHAR, geom_wkt VARCHAR)")?;
+    c.exec("CREATE OR REPLACE TEMP TABLE _lane_rows(lane_id VARCHAR, link_id BIGINT, lane_num BIGINT, allowed_uses VARCHAR, width DOUBLE, turn VARCHAR, geom_wkb BLOB)")?;
     c.exec("CREATE OR REPLACE TEMP TABLE _curb_rows(curb_seg_id VARCHAR, link_id BIGINT, ref_node_id BIGINT, start_lr DOUBLE, end_lr DOUBLE, regulation VARCHAR)")?;
     type Lane = (i64, String, Option<f64>, Option<String>);
     let n_chunks = geo.runs.len().div_ceil(CHUNK_RUNS);
     for ch in 0..n_chunks {
         let rows: Vec<LaneRow> = {
-            let sql = format!("SELECT {LANE_COLS} FROM _lcc WHERE ch = {ch} ORDER BY part, k");
+            // with the lane profile, the chunk needs only the parking tags (the curbs): a full tag map for each row was slow
+            let cols = if has_prof {
+                LANE_COLS.replace("tags,", "map_from_entries(list_filter(map_entries(tags), x -> starts_with(x.key, 'parking:'))) AS tags,")
+            } else {
+                LANE_COLS.to_string()
+            };
+            let sql = format!("SELECT {cols} FROM _lcc WHERE ch = {ch} ORDER BY k");
             let mut st = c.con.prepare(&sql).map_err(|e| format!("{e}\n{sql}"))?;
             let v = st.query_map([], lane_row).map_err(|e| e.to_string())?.collect::<std::result::Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
             v
@@ -2260,7 +2266,7 @@ fn build_lane_curb(c: &Ctx, sch: &str, mode: &str, uses: &str, has_raw: bool, dr
         }
         let chunk = geo.chunk(ch, wkt_of)?;
         // the lanes and the curbs of each row, on all cores, written in the order of the rows
-        type Out = (Vec<(String, i64, i64, String, Option<f64>, Option<String>, Option<String>)>, Vec<(String, i64, i64, Option<f64>, String)>);
+        type Out = (Vec<(String, i64, i64, String, Option<f64>, Option<String>, Option<Vec<u8>>)>, Vec<(String, i64, i64, Option<f64>, String)>);
         let outs: Vec<Out> = rows
             .par_iter()
             .map(|r| -> Result<Out> {
@@ -2268,7 +2274,7 @@ fn build_lane_curb(c: &Ctx, sch: &str, mode: &str, uses: &str, has_raw: bool, dr
                 let these: Vec<Lane> = if has_prof { prof.get(&r.edge_id).cloned().unwrap_or_default() } else { rules.rule_lanes(r, one, &bus_of, uses) };
                 let mut ls = Vec::with_capacity(these.len());
                 for (i, (n, u, w, t)) in these.into_iter().enumerate() {
-                    ls.push((format!("{}_{n}", r.edge_id), r.edge_id, n, u, w, t, geo.lane(&chunk, r, i)?));
+                    ls.push((format!("{}_{n}", r.edge_id), r.edge_id, n, u, w, t, geo.lane(&chunk, r, i)?.map(|g| crate::gmns_lane_rules::wkb(&g, false))));
                 }
                 let mut cs = Vec::new();
                 for side in ["left", "right", "both"] {
@@ -2296,11 +2302,12 @@ fn build_lane_curb(c: &Ctx, sch: &str, mode: &str, uses: &str, has_raw: bool, dr
     let drop_prof = if has_prof { "DROP TABLE _lpc;" } else { "" };
     c.exec(&format!(
         "CREATE TABLE {sch}.lane AS SELECT lane_id, link_id, lane_num, allowed_uses, NULL::VARCHAR AS r_barrier,
-           NULL::VARCHAR AS l_barrier, width, turn, ST_GeomFromText(geom_wkt) AS geom FROM _lane_rows;
+           NULL::VARCHAR AS l_barrier, width, turn, ST_GeomFromWKB(geom_wkb) AS geom FROM _lane_rows;
          CREATE TABLE {sch}.curb_seg AS SELECT curb_seg_id, link_id, ref_node_id, start_lr, end_lr, regulation, NULL::INTEGER AS width
            FROM _curb_rows;
          DROP TABLE _lane_rows; DROP TABLE _curb_rows; DROP TABLE _lcc; DROP TABLE _lcx; {drop_prof}"
-    ))
+    ))?;
+    Ok(())
 }
 
 #[cfg(test)]
