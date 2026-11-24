@@ -262,12 +262,12 @@ pub(crate) fn build_crossings(c: &Ctx, sch: &str, has_raw: bool) -> Result<()> {
     if !has_raw {
         return Ok(());
     }
-    type LaneRow = (String, i64, f64, String, i64, Option<String>, Option<String>, Option<String>, bool);
+    type LaneRow = (String, i64, f64, Vec<u8>, i64, Option<String>, Option<String>, Option<String>, bool);
     // the lanes and the lane connectors stay in DuckDB (`_xl`; `k` is its rowid, the order of the query): only their envelopes and
     // the lanes near a crossing come into memory (docs/design/gmns_streaming.md, step 3)
     c.exec(&format!(
         "CREATE OR REPLACE TEMP TABLE _xl AS SELECT * FROM (
-           SELECT l.lane_id, l.link_id, COALESCE(l.width, {DEFAULT_LANE_W})::DOUBLE AS width, ST_AsText(l.geom) AS wkt, k.osm_id,
+           SELECT l.lane_id, l.link_id, COALESCE(l.width, {DEFAULT_LANE_W})::DOUBLE AS width, ST_AsWKB(l.geom)::BLOB AS wkt, k.osm_id,
                   k.layer::VARCHAR AS layer, k.bridge::VARCHAR AS bridge, k.tunnel::VARCHAR AS tunnel, false AS conn
            FROM {sch}.lane l JOIN {sch}.link k ON k.link_id = l.link_id
            WHERE l.geom IS NOT NULL AND l.allowed_uses IN {ROAD_USES})"
@@ -275,7 +275,7 @@ pub(crate) fn build_crossings(c: &Ctx, sch: &str, has_raw: bool) -> Result<()> {
     if c.count(&format!("SELECT count(*) FROM duckdb_tables() WHERE schema_name = '{sch}' AND table_name = 'lane_connector'"))? > 0 {
         c.exec(&format!(
             "INSERT INTO _xl SELECT * FROM (
-               SELECT c.connector_id, l.link_id, COALESCE(c.width, {DEFAULT_LANE_W})::DOUBLE, ST_AsText(c.geom), k.osm_id,
+               SELECT c.connector_id, l.link_id, COALESCE(c.width, {DEFAULT_LANE_W})::DOUBLE, ST_AsWKB(c.geom)::BLOB, k.osm_id,
                       k.layer::VARCHAR, k.bridge::VARCHAR, k.tunnel::VARCHAR, true
                FROM {sch}.lane_connector c JOIN {sch}.lane l ON l.lane_id = c.from_lane_id
                JOIN {sch}.link k ON k.link_id = l.link_id
@@ -335,7 +335,7 @@ pub(crate) fn build_crossings(c: &Ctx, sch: &str, has_raw: bool) -> Result<()> {
         c.exec("DROP TABLE _xl")?;
         return Ok(());
     }
-    let (x0, y0) = shp::wkt_points(&c.strings("SELECT wkt FROM _xl WHERE rowid = 0")?[0])[0];
+    let (x0, y0) = crate::gmns_lane_rules::from_wkb(&c.con.query_row("SELECT wkt FROM _xl WHERE rowid = 0", [], |r| r.get::<_, Vec<u8>>(0)).map_err(|e| e.to_string())?)[0];
     let kx = crate::gmns_lanes::kx_of(y0);
     const M: f64 = 111320.0;
     let to_m = |lon: f64, lat: f64| ((lon - x0) * kx * M, (lat - y0) * M);
@@ -388,7 +388,7 @@ pub(crate) fn build_crossings(c: &Ctx, sch: &str, has_raw: bool) -> Result<()> {
         let made: Vec<Option<Option<((f64, f64, f64, f64), bool)>>> = rows
             .par_iter()
             .map(|(_, (_, _, w, wkt, ..))| {
-                let g: Vec<P> = shp::wkt_points(wkt).into_iter().map(|(x, y)| to_m(x, y)).collect();
+                let g: Vec<P> = crate::gmns_lane_rules::from_wkb(wkt).into_iter().map(|(x, y)| to_m(x, y)).collect();
                 if shp::length(&g) < 0.5 {
                     return None;
                 }
@@ -441,7 +441,7 @@ pub(crate) fn build_crossings(c: &Ctx, sch: &str, has_raw: bool) -> Result<()> {
     let made: Vec<(Vec<P>, (f64, f64, f64, f64), MultiPolygon<f64>, Vec<crate::geos::Polygon>)> = rows
         .par_iter()
         .map(|(_, (_, _, w, wkt, ..))| {
-            let g: Vec<P> = shp::wkt_points(wkt).into_iter().map(|(x, y)| to_m(x, y)).collect();
+            let g: Vec<P> = crate::gmns_lane_rules::from_wkb(wkt).into_iter().map(|(x, y)| to_m(x, y)).collect();
             let gp = surface(&g, w / 2.0, &mut 0).unwrap_or_default();
             let poly = mp(&gp);
             (g, env_of(&poly), poly, gp)
@@ -514,24 +514,26 @@ pub(crate) fn build_crossings(c: &Ctx, sch: &str, has_raw: bool) -> Result<()> {
         cands.push(Cand { src: "n", osm: *osm, ct: ct.clone(), mk: mk.clone(), width: None, line, only: Some(only), level: None });
     }
     // (length, candidate, parts, near)
-    let mut found: Vec<(f64, usize, Vec<Vec<P>>, Vec<usize>)> = Vec::new();
-    for (ci, cd) in cands.iter().enumerate() {
-        let (mut parts, near) = pieces(&l, &cd.line, None, cd.level);
-        if cd.src == "n" && !parts.is_empty() {
-            // the part through the node itself
-            let m = shp::interpolate(&cd.line, 0.5 * shp::length(&cd.line));
-            let mut best = 0;
-            for k in 1..parts.len() {
-                if shp::point_line_distance(m, &parts[k]) < shp::point_line_distance(m, &parts[best]) {
-                    best = k;
+    // each candidate on its own, on all cores, in the order of the candidates
+    let mut found: Vec<(f64, usize, Vec<Vec<P>>, Vec<usize>)> = cands
+        .par_iter()
+        .enumerate()
+        .filter_map(|(ci, cd)| {
+            let (mut parts, near) = pieces(&l, &cd.line, None, cd.level);
+            if cd.src == "n" && !parts.is_empty() {
+                // the part through the node itself
+                let m = shp::interpolate(&cd.line, 0.5 * shp::length(&cd.line));
+                let mut best = 0;
+                for k in 1..parts.len() {
+                    if shp::point_line_distance(m, &parts[k]) < shp::point_line_distance(m, &parts[best]) {
+                        best = k;
+                    }
                 }
+                parts = vec![parts.swap_remove(best)];
             }
-            parts = vec![parts.swap_remove(best)];
-        }
-        if !parts.is_empty() {
-            found.push((parts.iter().map(|q| shp::length(q)).sum(), ci, parts, near));
-        }
-    }
+            (!parts.is_empty()).then(|| (parts.iter().map(|q| shp::length(q)).sum(), ci, parts, near))
+        })
+        .collect();
     found.sort_by(|a, b| b.0.total_cmp(&a.0)); // the long crossings first (a stable sort, as Python's)
     let mut crossing_rows: Vec<(String, &str, Option<String>, Option<String>, bool, f64, f64, i64, String)> = Vec::new();
     let mut lane_rows: Vec<(String, String, i64, f64, f64, f64, f64, bool)> = Vec::new();

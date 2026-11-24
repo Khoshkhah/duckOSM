@@ -463,7 +463,7 @@ pub(crate) fn wkb(pts: &[P], round: bool) -> Vec<u8> {
     b
 }
 
-fn from_wkb(b: &[u8]) -> Vec<P> {
+pub(crate) fn from_wkb(b: &[u8]) -> Vec<P> {
     let n = u32::from_le_bytes(b[5..9].try_into().unwrap()) as usize;
     let d = |i: usize| f64::from_le_bytes(b[i..i + 8].try_into().unwrap());
     (0..n).map(|k| (d(9 + 16 * k), d(17 + 16 * k))).collect()
