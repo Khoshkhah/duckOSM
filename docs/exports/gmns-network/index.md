@@ -19,6 +19,8 @@ flowchart LR
 | MATSim | [MATSim](../matsim.md#lanes-and-signals): lanes and signals | GMNS db | `duckosm matsim-lanes` |
 | SUMO | [SUMO](../sumo.md): plain XML and `.netccfg` (netconvert makes the `.net.xml`) | GMNS db (or Level 2 db) | `duckosm sumo` |
 
+Every table and column of the GMNS database: [GMNS network tables](../gmns_tables.md).
+
 ## Multi-resolution model
 
 Level 3 takes the routable network from Level 2 and builds a [GMNS (General Modeling Network Specification)](https://zephyr-data-specs.github.io/GMNS/) model in DuckDB.
