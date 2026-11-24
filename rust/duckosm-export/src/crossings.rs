@@ -263,30 +263,35 @@ pub(crate) fn build_crossings(c: &Ctx, sch: &str, has_raw: bool) -> Result<()> {
         return Ok(());
     }
     type LaneRow = (String, i64, f64, String, i64, Option<String>, Option<String>, Option<String>, bool);
-    let lane_sql = |sql: &str| -> Result<Vec<LaneRow>> {
+    // the lanes and the lane connectors stay in DuckDB (`_xl`, numbered `k` in the order of the query): only their envelopes and
+    // the lanes near a crossing come into memory (docs/design/gmns_streaming.md, step 3)
+    c.exec(&format!(
+        "CREATE OR REPLACE TEMP TABLE _xl AS SELECT row_number() OVER () - 1 AS k, * FROM (
+           SELECT l.lane_id, l.link_id, COALESCE(l.width, {DEFAULT_LANE_W})::DOUBLE AS width, ST_AsText(l.geom) AS wkt, k.osm_id,
+                  k.layer::VARCHAR AS layer, k.bridge::VARCHAR AS bridge, k.tunnel::VARCHAR AS tunnel, false AS conn
+           FROM {sch}.lane l JOIN {sch}.link k ON k.link_id = l.link_id
+           WHERE l.geom IS NOT NULL AND l.allowed_uses IN {ROAD_USES})"
+    ))?;
+    if c.count(&format!("SELECT count(*) FROM duckdb_tables() WHERE schema_name = '{sch}' AND table_name = 'lane_connector'"))? > 0 {
+        c.exec(&format!(
+            "INSERT INTO _xl SELECT (SELECT count(*) FROM _xl) + row_number() OVER () - 1, * FROM (
+               SELECT c.connector_id, l.link_id, COALESCE(c.width, {DEFAULT_LANE_W})::DOUBLE, ST_AsText(c.geom), k.osm_id,
+                      k.layer::VARCHAR, k.bridge::VARCHAR, k.tunnel::VARCHAR, true
+               FROM {sch}.lane_connector c JOIN {sch}.lane l ON l.lane_id = c.from_lane_id
+               JOIN {sch}.link k ON k.link_id = l.link_id
+               WHERE c.geom IS NOT NULL AND l.allowed_uses IN {ROAD_USES})"
+        ))?;
+    }
+    let n_lanes = c.count("SELECT count(*) FROM _xl")?;
+    let lane_rows = |sql: &str| -> Result<Vec<(i64, LaneRow)>> {
         let mut st = c.con.prepare(sql).map_err(|e| format!("{e}\n{sql}"))?;
         let v = st
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?)))
+            .query_map([], |r| Ok((r.get(0)?, (r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?))))
             .map_err(|e| e.to_string())?
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(|e| e.to_string());
         v
     };
-    let mut lanes = lane_sql(&format!(
-        "SELECT l.lane_id, l.link_id, COALESCE(l.width, {DEFAULT_LANE_W})::DOUBLE, ST_AsText(l.geom), k.osm_id,
-                k.layer::VARCHAR, k.bridge::VARCHAR, k.tunnel::VARCHAR, false
-         FROM {sch}.lane l JOIN {sch}.link k ON k.link_id = l.link_id
-         WHERE l.geom IS NOT NULL AND l.allowed_uses IN {ROAD_USES}"
-    ))?;
-    if c.count(&format!("SELECT count(*) FROM duckdb_tables() WHERE schema_name = '{sch}' AND table_name = 'lane_connector'"))? > 0 {
-        lanes.extend(lane_sql(&format!(
-            "SELECT c.connector_id, l.link_id, COALESCE(c.width, {DEFAULT_LANE_W})::DOUBLE, ST_AsText(c.geom), k.osm_id,
-                    k.layer::VARCHAR, k.bridge::VARCHAR, k.tunnel::VARCHAR, true
-             FROM {sch}.lane_connector c JOIN {sch}.lane l ON l.lane_id = c.from_lane_id
-             JOIN {sch}.link k ON k.link_id = l.link_id
-             WHERE c.geom IS NOT NULL AND l.allowed_uses IN {ROAD_USES}"
-        ))?);
-    }
     type WayRow = (i64, Option<String>, Option<String>, Option<String>, Vec<i64>, Option<String>, Option<String>, Option<String>);
     let sql = "SELECT osm_id, tags['crossing'], tags['crossing:markings'], tags['width'], refs, tags['layer'], tags['bridge'], tags['tunnel']
                FROM s.raw.ways WHERE tags['footway'] = 'crossing'";
@@ -326,10 +331,11 @@ pub(crate) fn build_crossings(c: &Ctx, sch: &str, has_raw: bool) -> Result<()> {
     // a crossing way with several zebra nodes on roads is a loop round a junction: no crossing line
     let zebra_nodes: HashSet<i64> = nodes.iter().map(|n| n.0).collect();
     let ways: Vec<WayRow> = ways.into_iter().filter(|w| w.4.iter().filter(|r| zebra_nodes.contains(r) && road_ways.contains_key(r)).count() < LOOP_NODES).collect();
-    if lanes.is_empty() || (ways.is_empty() && nodes.is_empty()) {
+    if n_lanes == 0 || (ways.is_empty() && nodes.is_empty()) {
+        c.exec("DROP TABLE _xl")?;
         return Ok(());
     }
-    let (x0, y0) = shp::wkt_points(&lanes[0].3)[0];
+    let (x0, y0) = shp::wkt_points(&c.strings("SELECT wkt FROM _xl WHERE k = 0")?[0])[0];
     let kx = crate::gmns_lanes::kx_of(y0);
     const M: f64 = 111320.0;
     let to_m = |lon: f64, lat: f64| ((lon - x0) * kx * M, (lat - y0) * M);
@@ -370,49 +376,90 @@ pub(crate) fn build_crossings(c: &Ctx, sch: &str, has_raw: bool) -> Result<()> {
         heat((p.0, p.1, p.0, p.1));
     }
     use rayon::prelude::*;
-    // each lane: None (too short), Some(None) (the buffer failed), or its line, envelope and (near a crossing) surface
-    type Made = Option<Option<(Vec<P>, (f64, f64, f64, f64), Option<(MultiPolygon<f64>, Vec<crate::geos::Polygon>)>)>>;
-    let made: Vec<Made> = lanes
-        .par_iter()
-        .map(|(_, _, w, wkt, ..)| {
-            let g: Vec<P> = shp::wkt_points(wkt).into_iter().map(|(x, y)| to_m(x, y)).collect();
-            if shp::length(&g) < 0.5 {
-                return None;
+    // 1. the envelope of every lane's surface, in chunks of lanes on all cores: the order of the lane tree (as shapely's
+    // STRtree) depends on all of them. A lane is kept when its surface is near a crossing.
+    const CHUNK: i64 = 500_000;
+    let mut unbuffered = 0;
+    let (mut env_all, mut near_k): (Vec<(f64, f64, f64, f64)>, Vec<(usize, i64)>) = (Vec::new(), Vec::new());
+    let mut lo = 0;
+    while lo < n_lanes {
+        let rows = lane_rows(&format!("SELECT k, lane_id, link_id, width, wkt, osm_id, layer, bridge, tunnel, conn FROM _xl WHERE k >= {lo} AND k < {} ORDER BY k", lo + CHUNK))?;
+        // each lane: None (too short), Some(None) (the buffer failed), or its envelope and whether it is near a crossing
+        let made: Vec<Option<Option<((f64, f64, f64, f64), bool)>>> = rows
+            .par_iter()
+            .map(|(_, (_, _, w, wkt, ..))| {
+                let g: Vec<P> = shp::wkt_points(wkt).into_iter().map(|(x, y)| to_m(x, y)).collect();
+                if shp::length(&g) < 0.5 {
+                    return None;
+                }
+                let Some(gp) = surface(&g, w / 2.0, &mut 0) else { return Some(None) };
+                let (e, h) = (shp_env(&g), w / 2.0);
+                Some(Some((env_of(&mp(&gp)), cells((e.0 - h, e.1 - h, e.2 + h, e.3 + h)).any(|q| hot.contains(&q)))))
+            })
+            .collect();
+        for ((k, _), m) in rows.iter().zip(made) {
+            match m {
+                Some(Some((env, near))) => {
+                    if near {
+                        near_k.push((env_all.len(), *k));
+                    }
+                    env_all.push(env);
+                }
+                Some(None) => unbuffered += 1,
+                None => {}
             }
-            let mut failed = 0;
-            let Some(gp) = surface(&g, w / 2.0, &mut failed) else { return Some(None) };
+        }
+        lo += CHUNK;
+    }
+    // 2. the tree order of all lanes; the lanes near a crossing keep it among themselves
+    let rank_all: Vec<usize> = {
+        let mut r = vec![0; env_all.len()];
+        for (q, &j) in shp::strtree_order(&env_all).iter().enumerate() {
+            r[j] = q;
+        }
+        r
+    };
+    drop(env_all);
+    // 3. the lanes near a crossing, in the order of `k`
+    c.exec("CREATE OR REPLACE TEMP TABLE _xh(k BIGINT)")?;
+    {
+        let mut app = c.con.appender("_xh").map_err(|e| e.to_string())?;
+        for (_, k) in &near_k {
+            app.append_row([k]).map_err(|e| e.to_string())?;
+        }
+        app.flush().map_err(|e| e.to_string())?;
+    }
+    let rows = lane_rows("SELECT k, lane_id, link_id, width, wkt, osm_id, layer, bridge, tunnel, conn FROM _xl SEMI JOIN _xh USING (k) ORDER BY k")?;
+    c.exec("DROP TABLE _xh; DROP TABLE _xl")?;
+    let made: Vec<(Vec<P>, (f64, f64, f64, f64), MultiPolygon<f64>, Vec<crate::geos::Polygon>)> = rows
+        .par_iter()
+        .map(|(_, (_, _, w, wkt, ..))| {
+            let g: Vec<P> = shp::wkt_points(wkt).into_iter().map(|(x, y)| to_m(x, y)).collect();
+            let gp = surface(&g, w / 2.0, &mut 0).unwrap_or_default();
             let poly = mp(&gp);
-            let env = env_of(&poly);
-            let (e, h) = (shp_env(&g), w / 2.0);
-            let near = cells((e.0 - h, e.1 - h, e.2 + h, e.3 + h)).any(|k| hot.contains(&k));
-            Some(Some((g, env, near.then_some((poly, gp)))))
+            (g, env_of(&poly), poly, gp)
         })
         .collect();
-    let mut unbuffered = 0;
     let mut l = Lanes { id: vec![], link: vec![], way: vec![], width: vec![], level: vec![], conn: vec![], geom: vec![], poly: vec![], gpoly: vec![], env: vec![], tree: vec![], rank: vec![], grid: HashMap::new() };
-    for ((lid, lk, w, _, osm, ly, br, tu, is_conn), m) in lanes.iter().zip(made) {
-        let Some(m) = m else { continue };
-        let Some((g, env, surf)) = m else {
-            unbuffered += 1;
-            continue;
-        };
-        // a lane far from every crossing: no query reaches it, it keeps only its envelope (for the order of the tree)
-        let (poly, gp) = surf.unwrap_or_else(|| (MultiPolygon::new(vec![]), vec![]));
+    for ((_, (lid, lk, w, _, osm, ly, br, tu, is_conn)), (g, env, poly, gp)) in rows.into_iter().zip(made) {
         l.gpoly.push(gp);
         l.env.push(env);
-        l.id.push(lid.clone());
-        l.link.push(*lk);
-        l.way.push(*osm);
-        l.level.push(level(ly, br, tu));
-        l.conn.push(*is_conn);
-        l.width.push(*w);
+        l.id.push(lid);
+        l.link.push(lk);
+        l.way.push(osm);
+        l.level.push(level(&ly, &br, &tu));
+        l.conn.push(is_conn);
+        l.width.push(w);
         l.geom.push(g);
         l.poly.push(poly);
     }
     if unbuffered > 0 {
         eprintln!("GMNS[crossings]: {unbuffered} lane(s) without a surface (the buffer failed also with less precision): no crossing on them");
     }
-    l.tree = shp::strtree_order(&l.env);
+    // the lanes near a crossing in the order of the tree of all lanes
+    let mut tree: Vec<usize> = (0..near_k.len()).collect();
+    tree.sort_unstable_by_key(|&j| rank_all[near_k[j].0]);
+    l.tree = tree;
     l.index();
     // the lanes of each link: a scan of all lanes for each crossing took hours on a large tile (Paris)
     let mut lanes_of_link: HashMap<i64, Vec<usize>> = HashMap::new();

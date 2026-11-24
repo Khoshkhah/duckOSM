@@ -226,10 +226,6 @@ enum Cmd {
         /// Move a mapped sidewalk off the carriageway: it takes its place from its road's lanes.
         #[arg(long)]
         walk_frame: bool,
-        /// The zoom of the map tiles: an area with nodes in two or more tiles is made one tile at a time, so the memory
-        /// does not grow with the area. 0: the whole area at once.
-        #[arg(long, default_value_t = crate::gmns::TILE_ZOOM)]
-        tile_zoom: u8,
         /// Gap in metres between the kerb and a footpath placed by --walk-frame.
         #[arg(long, default_value_t = 0.0)]
         walk_clearance: f64,
@@ -251,9 +247,10 @@ enum Cmd {
         /// Check the values of the result (ends on nodes, lengths, lane numbers, movements); exit 1 if a check fails.
         #[arg(long)]
         check: bool,
-        /// Which lane goes to which at each junction: netconvert (SUMO), rules (SimReady's lane rules, no SUMO needed), or auto
-        /// (netconvert when it is installed, else the rules). docs/design/gmns_lane_rules.md.
-        #[arg(long, default_value = "auto", value_parser = ["auto", "rules", "netconvert"])]
+        /// Which lane goes to which at each junction: rules (SimReady's lane rules, no SUMO needed; the default), netconvert
+        /// (SUMO; it reads the whole area at once and needs much memory on a large area), or auto (netconvert when it is
+        /// installed, else the rules). docs/design/gmns_lane_rules.md.
+        #[arg(long, default_value = "rules", value_parser = ["auto", "rules", "netconvert"])]
         lane_source: String,
     },
     /// Export a Lanelet2 map (.osm) from a GMNS db: each lane is a lanelet, with left and right boundaries (the centerline
@@ -431,7 +428,6 @@ pub fn run(args: &[String]) -> Result<()> {
             gtfs_max_m,
             csv_extensions,
             check,
-            tile_zoom,
             lane_source,
             ..
         } => {
@@ -452,7 +448,6 @@ pub fn run(args: &[String]) -> Result<()> {
                 gtfs_max_m,
                 walk_frame,
                 walk_clearance_m: walk_clearance,
-                tile_zoom: (tile_zoom > 0).then_some(tile_zoom),
                 lane_source,
             };
             let res = crate::gmns::to_gmns_with(&db, &out, &o)?;

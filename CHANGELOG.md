@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **`duckosm gmns`: the lane rules by default, the whole area at once, no tiles.** Each GMNS step works in chunks (junctions,
+  road runs, lanes), so the memory stays about the same on a large area (docs/design/gmns_streaming.md). Kentucky (driving,
+  Mac mini): 2.5 min and at most 2.2 GB of Rust memory in a step, with DuckDB at 2 GB. `--lane-source rules` is the default;
+  `--lane-source netconvert` stays, and needs much memory on a large area. `--tile-zoom` and GMNS by tiles are removed.
+
 - **`duckosm.hdmap.surfaces(gmns_db)`: the road surfaces as polygons.** It gives two GeoDataFrames: one polygon for each
   lane (its line to the edge of the junction, with the lane width) and one for each junction (the union of its lane
   connectors). DuckDB makes the polygons in the UTM zone of the area. Monaco: 3,318 lanes and 1,727 junctions.
