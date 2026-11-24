@@ -353,8 +353,9 @@ pub(crate) fn build_crossings(c: &Ctx, sch: &str, has_raw: bool) -> Result<()> {
         drop(st);
         c.exec("DROP TABLE _refs")?;
     }
-    // only the lanes near a crossing need a surface: a surface for each lane of the area took most of the time and the
-    // memory of this step (Kentucky: 124 s)
+    // every lane needs the envelope of its surface, because the order of the lane tree (as shapely's STRtree) depends on all
+    // envelopes. Only the lanes near a crossing keep their surface: the surfaces of all lanes of the area took most of the
+    // memory of this step. The surfaces are made on all cores (one core: Kentucky 105 s).
     const HOT_M: f64 = 50.0;
     let mut hot: HashSet<(i64, i64)> = HashSet::new();
     let mut heat = |e: (f64, f64, f64, f64)| hot.extend(cells((e.0 - HOT_M, e.1 - HOT_M, e.2 + HOT_M, e.3 + HOT_M)));
@@ -368,21 +369,37 @@ pub(crate) fn build_crossings(c: &Ctx, sch: &str, has_raw: bool) -> Result<()> {
         let p = to_m(n.1, n.2);
         heat((p.0, p.1, p.0, p.1));
     }
+    use rayon::prelude::*;
+    // each lane: None (too short), Some(None) (the buffer failed), or its line, envelope and (near a crossing) surface
+    type Made = Option<Option<(Vec<P>, (f64, f64, f64, f64), Option<(MultiPolygon<f64>, Vec<crate::geos::Polygon>)>)>>;
+    let made: Vec<Made> = lanes
+        .par_iter()
+        .map(|(_, _, w, wkt, ..)| {
+            let g: Vec<P> = shp::wkt_points(wkt).into_iter().map(|(x, y)| to_m(x, y)).collect();
+            if shp::length(&g) < 0.5 {
+                return None;
+            }
+            let mut failed = 0;
+            let Some(gp) = surface(&g, w / 2.0, &mut failed) else { return Some(None) };
+            let poly = mp(&gp);
+            let env = env_of(&poly);
+            let (e, h) = (shp_env(&g), w / 2.0);
+            let near = cells((e.0 - h, e.1 - h, e.2 + h, e.3 + h)).any(|k| hot.contains(&k));
+            Some(Some((g, env, near.then_some((poly, gp)))))
+        })
+        .collect();
     let mut unbuffered = 0;
     let mut l = Lanes { id: vec![], link: vec![], way: vec![], width: vec![], level: vec![], conn: vec![], geom: vec![], poly: vec![], gpoly: vec![], env: vec![], tree: vec![], rank: vec![], grid: HashMap::new() };
-    for (lid, lk, w, wkt, osm, ly, br, tu, is_conn) in &lanes {
-        let g: Vec<P> = shp::wkt_points(wkt).into_iter().map(|(x, y)| to_m(x, y)).collect();
-        if shp::length(&g) < 0.5 {
+    for ((lid, lk, w, _, osm, ly, br, tu, is_conn), m) in lanes.iter().zip(made) {
+        let Some(m) = m else { continue };
+        let Some((g, env, surf)) = m else {
+            unbuffered += 1;
             continue;
-        }
-        let (e, h) = (shp_env(&g), w / 2.0);
-        if !cells((e.0 - h, e.1 - h, e.2 + h, e.3 + h)).any(|k| hot.contains(&k)) {
-            continue;
-        }
-        let Some(gp) = surface(&g, w / 2.0, &mut unbuffered) else { continue };
-        let poly = mp(&gp);
+        };
+        // a lane far from every crossing: no query reaches it, it keeps only its envelope (for the order of the tree)
+        let (poly, gp) = surf.unwrap_or_else(|| (MultiPolygon::new(vec![]), vec![]));
         l.gpoly.push(gp);
-        l.env.push(env_of(&poly));
+        l.env.push(env);
         l.id.push(lid.clone());
         l.link.push(*lk);
         l.way.push(*osm);
