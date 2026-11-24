@@ -7,6 +7,7 @@ Status: design, waits for sign-off. No code yet.
 | 2026-11-24 | SimReady is duckOSM's Level 4 (the HD map). One SimReady carriageway is one row of `gmns_driving.chains`, with its `chain_id` |
 | 2026-11-24 | SimReady reads duckOSM's GMNS database for the network, and the raw OSM tables and the DEM grid of the same build for the street space. Kerbs, walls and bridge outlines do not go into GMNS |
 | 2026-11-24 | duckOSM runs SimReady to make the HD map database |
+| 2026-11-24 | the command takes both databases as required inputs: the routing database and the GMNS database. It does not make the GMNS database |
 
 The duckOSM HD map database of draft PR 443 (`hdmap_duckdb.md`) is not built. This design replaces it.
 
@@ -25,12 +26,12 @@ SimReady's program, and gives the user the HD map database and the format files.
 
 ## The command
 
-`duckosm hdmap DB [OPTIONS]`
+`duckosm hdmap DB GMNS_DB [OPTIONS]`
 
 | Option | Default | Effect |
 |---|---|---|
 | `DB` | required | the routing database (Level 2) of the area |
-| `--gmns PATH` | `<area>_gmns.duckdb` next to `DB` | the GMNS database. When it is not there, the command makes it first (`duckosm gmns`, driving, lanes from the lane rules) |
+| `GMNS_DB` | required | the GMNS database of the same area, made by `duckosm gmns` with the lane rules (`--lane-source rules`) |
 | `--out PATH` | `<area>_hdmap.duckdb` next to `DB` | the HD map database |
 | `--formats LIST` | none | the format files that SimReady writes too: `lanelet2`, `opendrive`, `sumo`, `gmns`, `matsim`, `gltf` |
 | `--simready PATH` | `$DUCKOSM_SIM`, else `duckosm-sim` on the `PATH` | SimReady's program |
@@ -104,7 +105,7 @@ SimReady must add this `build` command (its own work, in its repository):
 | no SimReady code in duckOSM | SimReady rule D35. duckOSM only writes files and runs a program |
 | SimReady is optional | duckOSM installs and works without it. The tests of `duckosm hdmap` skip when `duckosm-sim` is not found |
 | one contract number | a change of the input folder raises `contract`, so an old SimReady stops with a clear message |
-| the GMNS lanes from the lane rules | SimReady never reads netconvert's lanes (D34). The command makes the GMNS database with the lane rules when it makes one |
+| the GMNS lanes from the lane rules | SimReady never reads netconvert's lanes (D34). The user makes the GMNS database with `--lane-source rules`; the command reads `config` to check it when GMNS records the lane source |
 
 ## Rejected alternatives
 
@@ -126,6 +127,4 @@ SimReady must add this `build` command (its own work, in its repository):
 
 ## Questions for Kaveh
 
-1. Name `duckosm hdmap` and `duckosm-sim build`: OK?
-2. Should `duckosm hdmap` make the GMNS database itself when it is missing, or stop and ask the user to run
-   `duckosm gmns`?
+1. Name of SimReady's new command: `duckosm-sim build` (`duckosm-sim` is SimReady's program today), or another name?
