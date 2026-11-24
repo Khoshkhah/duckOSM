@@ -31,7 +31,7 @@ In the GMNS database (`<area>_gmns.duckdb`), **every table belongs to a schema**
 #### Macro schemas (`duckosm gmns`)
 * **`gmns_driving` (18 tables, with netconvert):** Driving network for cars, buses, and trucks. Includes lanes, turns, signals, curb parking, crosswalks, intersection turn curves, and the road chains (`chains`).
 * **`gmns_walking` (15 tables):** Pedestrian network for sidewalks, paths, and crosswalks. Tracks parallel roads via `link_along`, connects footways to road crossings, and lists unpaired lanes in `lane_check`.
-* **`gmns_cycling` (13 tables):** Bicycle network for cycleways and bikeable roads. Tracks parallel roads via `link_along`.
+* **`gmns_cycling` (14 tables):** Bicycle network for cycleways and bikeable roads. Tracks parallel roads via `link_along`.
 * **`gmns_all` (5 tables):** Created with `--combined`. Merges shared streets across modes into one link with `allowed_uses = 'auto,bike,walk'`. Lanes and turns stay in the mode schemas.
 
 #### Meso and micro schemas (`--meso`, `--micro`)
@@ -186,7 +186,7 @@ the other direction of the road.
 | `geometry` | VARCHAR | ✅ | a short curve through the junction, WKT |
 | `name`, `penalty`, `capacity` | | ∅ | empty |
 
-The lanes of a turn come from SUMO's netconvert, for driving and cycling. A turn that gets no lanes is in
+The lanes of a turn come from SUMO's netconvert, or from the [lane rules](../concepts/lane-rules.md) when netconvert is not there (`--lane-source`), for driving and cycling. A turn that gets no lanes is in
 [`lane_check`](#lane_check).
 
 ## location
@@ -257,7 +257,7 @@ In `gmns_driving`: one row for each lane pair of a movement. A turn from lanes 1
 | `mvmt_id` | VARCHAR | the [movement](#movement) |
 | `from_lane_id`, `to_lane_id` | VARCHAR | the two [lanes](#lane) |
 | `width` | DOUBLE | metres |
-| `geom` | GEOMETRY | the path through the junction, from SUMO's netconvert |
+| `geom` | GEOMETRY | the path through the junction, from SUMO's netconvert or the lane rules |
 
 ### Footway joins
 
@@ -282,7 +282,7 @@ link) is a chain of one link. Each driving link is in one chain. A source db wit
 
 ## lane_check
 
-What the lanes cannot get, in place of a guess. In `gmns_driving` and `gmns_cycling`, the table exists only when netconvert ran. `gmns_walking` always has it. Most rows are OSM data to check, in
+What the lanes cannot get, in place of a guess. In `gmns_driving` and `gmns_cycling`, the table exists when netconvert or the lane rules (`--lane-source`) made the lanes. `gmns_walking` always has it. Most rows are OSM data to check, in
 [Fix the OSM data](../guides/edit-osm-data.md).
 
 | Column | Type | Holds |
