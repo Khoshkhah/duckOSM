@@ -10,7 +10,7 @@ Every `duckosm` command and its options. `duckosm <command> --help` prints the s
 | [Query and inspect](#query-and-inspect) | `info`, `way` |
 | [Maps, pages and routing](#maps-and-routing) | `viz`, `levels`, `levels-edit`, `edit`, `studio`, `ask`, `bus`, `route-map`, `route`, `route-points`, `directions`, `route-multimodal`, `route-multimodal-points`, `features-check` |
 | [Exports](#exports) | `sumo`, `sumo-map`, `matsim`, `matsim-lanes`, `gmns`, `gmns-map`, `gmns-viz`, `export-gis`, `gis-debug`, `export-graph` |
-| [Experimental and lane-level](#experimental-and-lane-level) | `opendrive`, `lanelet2`, `railml`, `lane-graph`, `route-lanes` |
+| [Experimental and lane-level](#experimental-and-lane-level) | `opendrive`, `lanelet2`, `hdmap`, `railml`, `lane-graph`, `route-lanes` |
 | [Enrich a built database](#enrich-a-built-database) | `elevation`, `admin`, `multimodal` |
 
 `DB` is a built duckOSM database; `GMNS_DB` is a database written by [`gmns`](#gmns). Commands that
@@ -658,6 +658,35 @@ duckosm lanelet2 [OPTIONS] GMNS_DB
 |---|---|---|
 | `-m`, `--mode TEXT` | the GMNS mode | `driving` |
 | `-o`, `--out TEXT` | output file | `<name>.lanelet2.osm` |
+
+### `hdmap`
+
+Makes the HD map of an area with SimReady, a separate program that is not public yet. The command writes SimReady's input
+folder from the routing database and the GMNS database, then runs `duckosm-sim build`. Without SimReady it stops with
+"SimReady is not installed".
+
+```text
+duckosm hdmap [OPTIONS] DB GMNS_DB
+```
+
+`DB` is the routing database. `GMNS_DB` is its GMNS database, made with `duckosm gmns --lane-source rules`. Both are
+required. `DB` must have the raw OSM tables (a build from a PBF) and heights (run [`elevation`](#elevation) before
+`duckosm gmns`): SimReady needs both.
+
+| Option | Does | Default |
+|---|---|---|
+| `-o`, `--out PATH` | the HD map database | `<name>_hdmap.duckdb` next to `DB` |
+| `--formats LIST` | the format files that SimReady writes too, comma-separated: `lanelet2`, `opendrive`, `sumo`, `gmns`, `matsim`, `gltf` | none |
+| `--simready PATH` | SimReady's program | `$DUCKOSM_SIM`, else `duckosm-sim` on the `PATH` |
+| `--keep-input` | keep the input folder `<out name>_input/` after the run | |
+| `--jurisdiction CODE` | the ISO 3166 code of the area, for SimReady's traffic rules | none: SimReady's default |
+| `--driving-side [right\|left]` | the side of the road that traffic drives on | from the jurisdiction |
+
+The input folder: `gmns.duckdb`, `raw_nodes.parquet`, `raw_ways.parquet`, `raw_relations.parquet`,
+`elevation_grid.parquet` (when the build has a DEM grid), `fixes.yaml` (when the build had a fixes file), and
+`input.json` (contract 1, the area, the duckOSM version, the ground id, the time of the OSM data, the jurisdiction, the
+driving side and the SHA-256 of each file). SimReady also writes
+`<name>_hdmap_fixes.yaml`: the OSM fixes that it suggests, for you to review.
 
 ### `railml`
 
