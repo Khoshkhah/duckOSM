@@ -30,7 +30,8 @@
 <circle cx="476" cy="38" r="16" fill="#f0d35b"/><text x="476" y="44" font-size="16" font-weight="700" text-anchor="middle" fill="#17191f">2</text>
 <text x="462" y="80" font-size="15.5" font-weight="700" fill="#17191f">Routable network</text>
 <rect x="462" y="96" width="156" height="26" rx="5" fill="#ffd43b30" stroke="#f0d35b" stroke-width="1.5"/>
-<text x="540" y="113" font-size="13" font-weight="700" font-family="SFMono-Regular, Menlo, Consolas, monospace" text-anchor="middle" fill="#17191f">DuckDB</text>
+<g transform="translate(507.6,102)" fill="none" stroke="#17191f" stroke-width="1.4"><ellipse cx="5.5" cy="2" rx="5.5" ry="2"/><path d="M0 2v10c0 1.1 2.5 2 5.5 2s5.5-.9 5.5-2V2M0 7c0 1.1 2.5 2 5.5 2s5.5-.9 5.5-2"/></g>
+<text x="548" y="113" font-size="13" font-weight="700" font-family="SFMono-Regular, Menlo, Consolas, monospace" text-anchor="middle" fill="#17191f">DuckDB</text>
 <text x="462" y="146" font-size="12.5" fill="#5f6670">Drive, walk, bike</text>
 <text x="462" y="163" font-size="12.5" fill="#5f6670">Edges, edge_id, turns</text>
 <line x1="462" y1="184" x2="618" y2="184" stroke="#e5e7eb" stroke-dasharray="3,3"/>
@@ -43,7 +44,8 @@
 <circle cx="695" cy="38" r="16" fill="#f0d35b"/><text x="695" y="44" font-size="16" font-weight="700" text-anchor="middle" fill="#17191f">3</text>
 <text x="681" y="80" font-size="16" font-weight="700" fill="#17191f">GMNS network</text>
 <rect x="681" y="96" width="156" height="26" rx="5" fill="#ffd43b30" stroke="#f0d35b" stroke-width="1.5"/>
-<text x="759" y="113" font-size="12" font-weight="700" font-family="SFMono-Regular, Menlo, Consolas, monospace" text-anchor="middle" fill="#17191f">GMNS DuckDB</text>
+<g transform="translate(710.4,102)" fill="none" stroke="#17191f" stroke-width="1.4"><ellipse cx="5.5" cy="2" rx="5.5" ry="2"/><path d="M0 2v10c0 1.1 2.5 2 5.5 2s5.5-.9 5.5-2V2M0 7c0 1.1 2.5 2 5.5 2s5.5-.9 5.5-2"/></g>
+<text x="767" y="113" font-size="12" font-weight="700" font-family="SFMono-Regular, Menlo, Consolas, monospace" text-anchor="middle" fill="#17191f">GMNS DuckDB</text>
 <text x="681" y="146" font-size="12.5" fill="#5f6670">Macro, meso, micro</text>
 <text x="681" y="163" font-size="12.5" fill="#5f6670">links, lanes, turns</text>
 <line x1="681" y1="184" x2="837" y2="184" stroke="#e5e7eb" stroke-dasharray="3,3"/>
@@ -56,7 +58,8 @@
 <circle cx="914" cy="38" r="16" fill="#f0d35b"/><text x="914" y="44" font-size="16" font-weight="700" text-anchor="middle" fill="#17191f">4</text>
 <text x="900" y="80" font-size="17" font-weight="700" fill="#17191f">HD map</text>
 <rect x="900" y="96" width="156" height="26" rx="5" fill="#ffd43b30" stroke="#f0d35b" stroke-width="1.5"/>
-<text x="978" y="113" font-size="12" font-weight="700" font-family="SFMono-Regular, Menlo, Consolas, monospace" text-anchor="middle" fill="#17191f">3D geometry</text>
+<g transform="translate(922.2,102)" fill="none" stroke="#17191f" stroke-width="1.4"><ellipse cx="5.5" cy="2" rx="5.5" ry="2"/><path d="M0 2v10c0 1.1 2.5 2 5.5 2s5.5-.9 5.5-2V2M0 7c0 1.1 2.5 2 5.5 2s5.5-.9 5.5-2"/></g>
+<text x="986" y="113" font-size="12" font-weight="700" font-family="SFMono-Regular, Menlo, Consolas, monospace" text-anchor="middle" fill="#17191f">HD map DuckDB</text>
 <text x="900" y="146" font-size="12.5" fill="#5f6670">Lane shape in 3D</text>
 <text x="900" y="163" font-size="12.5" fill="#5f6670">(experimental)</text>
 <line x1="900" y1="184" x2="1056" y2="184" stroke="#e5e7eb" stroke-dasharray="3,3"/>
