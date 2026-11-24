@@ -1945,14 +1945,22 @@ impl LaneGeo {
         if !lane_geometry {
             return Ok(g);
         }
-        // the lanes of each run of two or more pieces, from the run's one offset curve
-        for (i, run) in g.runs.clone().iter().enumerate() {
-            if run.len() > 1 && g.merged.contains_key(&i) {
-                let pieces: Vec<Vec<P>> = run.iter().map(|e| pts_of(g.wkt_of[e].as_deref().unwrap_or(""))).collect();
-                if let Some(per_piece) = lanes::run_lane_wkts(&pieces, &g.offsets(run[0]), closed.contains(&i))? {
-                    for (e, l) in run.iter().zip(per_piece) {
-                        g.run_geoms.insert(*e, l);
-                    }
+        // the lanes of each run of two or more pieces, from the run's one offset curve. The runs are independent: on all
+        // cores (one core took most of this step: Kentucky 59 s)
+        use rayon::prelude::*;
+        let work: Vec<(usize, Vec<Vec<P>>, Vec<f64>, bool)> = g
+            .runs
+            .iter()
+            .enumerate()
+            .filter(|(i, run)| run.len() > 1 && g.merged.contains_key(i))
+            .map(|(i, run)| (i, run.iter().map(|e| pts_of(g.wkt_of[e].as_deref().unwrap_or(""))).collect(), g.offsets(run[0]), closed.contains(&i)))
+            .collect();
+        let done: Vec<(usize, Option<Vec<Vec<Vec<P>>>>)> =
+            work.into_par_iter().map(|(i, pieces, offs, cl)| lanes::run_lane_wkts(&pieces, &offs, cl).map(|r| (i, r))).collect::<Result<_>>()?;
+        for (i, per_piece) in done {
+            if let Some(per_piece) = per_piece {
+                for (e, l) in g.runs[i].iter().zip(per_piece) {
+                    g.run_geoms.insert(*e, l);
                 }
             }
         }
