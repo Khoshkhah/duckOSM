@@ -72,7 +72,7 @@ def studio(tmp_path_factory, mirror):
     port = _free_port()
     log = out.parent / "studio.log"
     with open(log, "w") as f:
-        proc = subprocess.Popen([sys.executable, "-c", "from duckosm.cli import main; main()", "studio", str(out), "--port", str(port), "--no-open",
+        proc = subprocess.Popen([sys.executable, "-m", "duckosm", "studio", str(out), "--port", str(port), "--no-open",
                                  "--geofabrik-index", f"{mirror}/index-v1.json"], stdout=f, stderr=subprocess.STDOUT, text=True)
         url = None
         for _ in range(300):

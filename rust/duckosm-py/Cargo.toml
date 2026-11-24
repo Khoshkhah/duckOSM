@@ -19,7 +19,7 @@ heap-probe = []
 [dependencies]
 duckosm-build = { path = "../duckosm-build", default-features = false, features = ["zstd", "tzf"] }
 duckosm-core = { path = "../duckosm-core" }
-duckosm-edit = { path = "../duckosm-edit" }    # duckosm edit: the page and its server; the database is Python's (duckosm/edit.py)
+duckosm-edit = { path = "../duckosm-edit" }    # duckosm edit, ask and studio: the pages, their servers and their database (native.rs)
 # the program duckosm (rust/duckosm-cli/src/main.rs is compiled into the module: `cli`)
 duckosm-export = { path = "../duckosm-export", optional = true }
 duckosm-tools = { path = "../duckosm-tools", optional = true }

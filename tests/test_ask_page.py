@@ -52,7 +52,7 @@ def page_url(monaco):
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
-    proc = subprocess.Popen([sys.executable, "-c", "from duckosm.cli import main; main()", "ask", str(monaco), "--port", str(port)],
+    proc = subprocess.Popen([sys.executable, "-m", "duckosm", "ask", str(monaco), "--port", str(port)],
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     line = ""
     for _ in range(600):

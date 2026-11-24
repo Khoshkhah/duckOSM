@@ -5,6 +5,7 @@ pub mod admin;
 pub mod cli;
 pub mod dem_sources;
 pub mod elevation;
+pub mod diff;
 pub mod extract;
 pub mod get;
 pub mod info;

@@ -425,9 +425,43 @@ pub fn edge_id_map(old: &[Road], new: &[Road], tol_m: f64) -> Vec<(i64, i64, f64
     out
 }
 
+/// `duckosm.mobility.aggregate`: for each key (an edge id) and time bin, the number of rows and the mean of `values` (NaN
+/// values are skipped; NaN when none is left). `times` in nanoseconds; `bin` the length of a bin in nanoseconds, a bin starts at
+/// a multiple of it (pandas `dt.floor`); no `times`: one bin `0`. Sorted by key, then bin.
+pub fn aggregate(keys: &[i64], times: Option<&[i64]>, bin: Option<i64>, values: Option<&[f64]>) -> Result<Vec<(i64, i64, i64, f64)>, String> {
+    if times.is_some_and(|t| t.len() != keys.len()) || values.is_some_and(|v| v.len() != keys.len()) {
+        return Err("the keys, the times and the values must have the same length".into());
+    }
+    if bin.is_some_and(|b| b <= 0) {
+        return Err("the time bin must be more than 0".into());
+    }
+    let mut groups: std::collections::BTreeMap<(i64, i64), (i64, f64, i64)> = Default::default();
+    for (i, &k) in keys.iter().enumerate() {
+        let t = match (times, bin) {
+            (Some(t), Some(b)) => t[i].div_euclid(b) * b,
+            _ => 0,
+        };
+        let g = groups.entry((k, t)).or_insert((0, 0.0, 0));
+        g.0 += 1;
+        if let Some(v) = values.map(|v| v[i]).filter(|v| !v.is_nan()) {
+            g.1 += v;
+            g.2 += 1;
+        }
+    }
+    Ok(groups.into_iter().map(|((k, t), (n, sum, m))| (k, t, n, if m > 0 { sum / m as f64 } else { f64::NAN })).collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn aggregate_counts_and_means_by_key_and_bin() {
+        let h = 3_600_000_000_000i64;
+        let r = aggregate(&[7, 7, 7, 5], Some(&[10, h - 1, h + 5, 0]), Some(h), Some(&[10.0, f64::NAN, 30.0, 2.0])).unwrap();
+        assert_eq!(r, [(5, 0, 1, 2.0), (7, 0, 2, 10.0), (7, h, 1, 30.0)]);
+        assert_eq!(aggregate(&[1, 1], None, None, None).unwrap()[0].2, 2);
+    }
 
     /// A two-way street 0-1-2 along the equator (two rows each), and a side street 1-3 to the north.
     fn roads() -> Vec<Road> {

@@ -1,8 +1,9 @@
-"""Tests for duckosm.query — the cross-mode `way_table` / `way_raw` report."""
+"""Tests for `duckosm way` — the cross-mode edge table and the raw way of one OSM id."""
+from cli_run import invoke
+import json
+
 import duckdb
 import pytest
-
-from duckosm.query import way_raw, way_table, way_table_sql
 
 
 def _db():
@@ -21,44 +22,8 @@ def _db():
     return con
 
 
-def test_way_table_unions_modes_with_null_fill():
-    rows = way_table(_db(), 5).fetchall()
-    assert len(rows) == 4
-    cols = [d[0] for d in way_table(_db(), 5).description]
-    assert cols[0] == "mode"
-    assert "maxspeed_kmh" in cols and "walk_type" in cols   # column union across modes
-    by_mode = {(r[cols.index("mode")], r[cols.index("edge_ref")]): r for r in rows}
-    # walking rows NULL-fill the driving-only column and vice versa
-    assert by_mode[("walking", "5#1f")][cols.index("maxspeed_kmh")] is None
-    assert by_mode[("driving", "5#1f")][cols.index("walk_type")] is None
-    # traversal order: seq 1 (fwd, both modes) before seq 1 reverse, before seq 2
-    order = [(r[cols.index("edge_ref")], r[cols.index("mode")]) for r in rows]
-    assert order == [("5#1f", "driving"), ("5#1f", "walking"), ("5#1r", "driving"),
-                     ("5#2f", "driving")]
-
-
-def test_way_table_mode_filter_and_missing():
-    con = _db()
-    assert len(way_table(con, 5, modes=["walking"]).fetchall()) == 1
-    assert way_table(con, 999).fetchall() == []             # unknown id -> empty, not an error
-    with pytest.raises(ValueError):
-        way_table_sql(con, 5, modes=["cycling"])            # no such schema in this db
-
-
-def test_way_raw():
-    con = _db()
-    raw = way_raw(con, 5)
-    assert raw["refs"] == [1, 2, 3] and raw["tags"]["highway"] == "residential"
-    assert way_raw(con, 999) is None
-    con.execute("DROP TABLE raw.ways")
-    assert way_raw(con, 5) is None                          # clip build: no raw schema
-
-
-def test_cli_way_writes_csv(tmp_path):
-    from click.testing import CliRunner
-
-    from duckosm.cli import main
-
+@pytest.fixture
+def db(tmp_path):
     db = tmp_path / "t.duckdb"
     src, dst = _db(), duckdb.connect(str(db))
     for schema, table in (("driving", "edges"), ("walking", "edges"), ("raw", "ways")):
@@ -71,9 +36,45 @@ def test_cli_way_writes_csv(tmp_path):
             dst.execute(f"INSERT INTO {schema}.{table} VALUES "
                         f"({', '.join('?' for _ in r)})", list(r))
     dst.close()
+    return db
 
+
+def test_way_unions_modes_with_null_fill(db):
+    r = invoke(["way", str(db), "5", "--json"])
+    assert r.exit_code == 0, r.output
+    d = json.loads(r.stdout)
+    rows = d["edges"]
+    assert len(rows) == 4
+    assert d["raw"]["refs"] == [1, 2, 3] and d["raw"]["tags"]["highway"] == "residential"
+    by_mode = {(x["mode"], x["edge_ref"]): x for x in rows}
+    # walking rows NULL-fill the driving-only column and vice versa
+    assert by_mode[("walking", "5#1f")]["maxspeed_kmh"] is None
+    assert by_mode[("driving", "5#1f")]["walk_type"] is None
+    # traversal order: seq 1 (fwd, both modes) before seq 1 reverse, before seq 2
+    assert [(x["edge_ref"], x["mode"]) for x in rows] == [("5#1f", "driving"), ("5#1f", "walking"), ("5#1r", "driving"),
+                                                          ("5#2f", "driving")]
+
+
+def test_way_mode_filter_and_missing(db):
+    d = json.loads(invoke(["way", str(db), "5", "-m", "walking", "--json"]).stdout)
+    assert len(d["edges"]) == 1
+    d = json.loads(invoke(["way", str(db), "999", "--json"]).stdout)
+    assert d["edges"] == []                                  # unknown id -> empty, not an error
+    assert invoke(["way", str(db), "5", "-m", "cycling"]).exit_code != 0   # no such schema in this db
+
+
+def test_way_without_raw_schema(db):
+    con = duckdb.connect(str(db))
+    con.execute("DROP TABLE raw.ways")
+    con.close()
+    r = invoke(["way", str(db), "5", "--json"])
+    assert r.exit_code == 0, r.output
+    assert not json.loads(r.stdout).get("raw")               # clip build: no raw schema
+
+
+def test_cli_way_writes_csv(db, tmp_path):
     out = tmp_path / "way.csv"
-    res = CliRunner().invoke(main, ["way", str(db), "5", "-o", str(out)])
+    res = invoke(["way", str(db), "5", "-o", str(out)])
     assert res.exit_code == 0, res.output
     lines = out.read_text().strip().splitlines()
     assert lines[0].startswith("mode,edge_id,edge_ref")     # header = column union

@@ -13,8 +13,6 @@ from __future__ import annotations
 
 import json
 import math
-import urllib.parse
-import urllib.request
 
 from duckosm._api import route_multimodal  # noqa: F401 -- the names of this module
 # the old names of duckosm.routing: they stay, on the Rust code
@@ -75,7 +73,7 @@ class Route(dict):
     @property
     def cost(self) -> float:
         if "cost" in self:
-            return float(self["cost"])
+            return math.nan if self["cost"] is None else float(self["cost"])
         return self.length_m if self.weight == "length" else self.time_s
 
     @property
@@ -104,8 +102,9 @@ class Route(dict):
 
     @property
     def geometry(self):
-        from shapely.ops import linemerge
-        return linemerge(list(self.edges.geometry))
+        import shapely
+        from duckosm import _api
+        return shapely.from_wkb(bytes(_api._rust().route_line(_file(self._db), self._mode, self.edge_ids)))
 
     def directions(self) -> list[dict]:
         return directions(self._db, self, mode=self._mode)
@@ -139,45 +138,37 @@ def geocode(net, name: str, mode: str | None = None) -> tuple[float, float]:
     OpenStreetMap's Nominatim in the box of the network (this needs the internet).
 
     >>> duckosm.routing.geocode(net.driving, "Boulevard Albert 1er")"""
+    from duckosm import _api
     db, mode = resolve(net, mode)
-    net = db if isinstance(db, Network) else Network(_file(db))
-    row = net.sql(f"SELECT ST_X(c), ST_Y(c) FROM (SELECT ST_LineInterpolatePoint(geometry, 0.5) AS c FROM {mode}.edges "
-                  "WHERE lower(name) = lower($n) ORDER BY length_m DESC, edge_id LIMIT 1)", {"n": name})
-    if len(row):
-        return float(row.iloc[0, 0]), float(row.iloc[0, 1])
-    w, s, e, n = net.sql(f"SELECT min(ST_XMin(geometry)), min(ST_YMin(geometry)), max(ST_XMax(geometry)), "
-                         f"max(ST_YMax(geometry)) FROM {mode}.edges").iloc[0]
-    query = urllib.parse.urlencode({"q": name, "format": "json", "limit": 1, "viewbox": f"{w},{n},{e},{s}", "bounded": 1})
-    req = urllib.request.Request(f"https://nominatim.openstreetmap.org/search?{query}", headers={"User-Agent": "duckosm"})
-    with urllib.request.urlopen(req, timeout=30) as f:
-        hits = json.load(f)
-    if not hits:
-        raise DuckOSMError(f"no place {name!r} in the network or in Nominatim inside the box of the network")
-    return float(hits[0]["lon"]), float(hits[0]["lat"])
+    try:
+        return _api._rust().geocode(_file(db), mode, name)
+    except RuntimeError as e:
+        raise DuckOSMError(str(e)) from None
 
 
 def _file(db):
+    """The database file of ``db``. An in-memory database is copied to a temporary file, which stays until Python exits (the
+    router keeps it open)."""
     from duckosm import _api
     path = _api._db(db)
     if path is None:
-        raise DuckOSMError("this call needs a database file, not an in-memory database")
+        import atexit
+        import shutil
+        f = _api._file(db)
+        path = f.__enter__()
+        atexit.register(shutil.rmtree, f.tmp, True)
     return path
 
 
-def _edge_ids(db, mode, places) -> list[int]:
-    """The edge id of each place: an edge id stays; a point (or a geocoded name) takes its nearest edge."""
+def _edge_ids(db, mode, places, router=None) -> list[int]:
+    """The edge id of each place: an edge id stays; a point (or a geocoded name) takes its nearest edge of the graph."""
     places = list(places)
     out = [None if isinstance(p, str) or _is_point(p) else int(p) for p in places]
     todo = [i for i, e in enumerate(out) if e is None]
     if todo:
-        gpd = require("geopandas", "routing from points")
-        net = db if isinstance(db, Network) else Network(_file(db))
-        pts = [geocode(net, places[i], mode) if isinstance(places[i], str) else places[i] for i in todo]
-        edges = net.edges(mode, where=f"edge_id IN (SELECT from_edge FROM {_routed(net, mode)})")[["edge_id", "geometry"]]
-        crs = edges.estimate_utm_crs()
-        at = gpd.GeoDataFrame({"i": todo}, geometry=gpd.points_from_xy(*zip(*pts)), crs="EPSG:4326").to_crs(crs)
-        hit = gpd.sjoin_nearest(at, edges.to_crs(crs), how="left").drop_duplicates("i")
-        for i, e in zip(hit["i"], hit["edge_id"]):
+        router = router or _router(db, mode, "time")
+        pts = [geocode(db, places[i], mode) if isinstance(places[i], str) else tuple(places[i]) for i in todo]
+        for i, e in zip(todo, router.nearest(pts)):
             out[i] = int(e)
     return out
 
@@ -187,15 +178,9 @@ def routed_graph(net, mode: str | None = None) -> str:
     :func:`route`. ``SELECT from_edge FROM {routed_graph(net.driving)}`` gives the edges that a route can start on.
 
     >>> net.sql(f"SELECT count(*) FROM {duckosm.routing.routed_graph(net.driving)}")"""
+    from duckosm import _api
     db, mode = resolve(net, mode)
-    return _routed(db if isinstance(db, Network) else Network(_file(db)), mode)
-
-
-def _routed(net, mode):
-    use = {"driving": "car", "walking": "walk", "cycling": "bike"}.get(mode)
-    has = len(net.sql("SELECT 1 FROM information_schema.columns WHERE table_schema = $m AND table_name = 'edge_graph' "
-                      "AND column_name = 'uses'", {"m": mode}))
-    return f"(SELECT * FROM {mode}.edge_graph WHERE uses = '{use}')" if has and use else f"{mode}.edge_graph"
+    return _api._rust().routed_relation(_file(db), mode)
 
 
 def _labels(places):
@@ -221,52 +206,9 @@ def _router(db, mode, weight, missing="time"):
     return _api._rust().Router(_file(db), mode, name, costs, missing)
 
 
-def _routes_of(db, mode, paths, weight="time", missing="time") -> list:
-    """The Route of each path (a list of edge ids, or None), with the edge rows of the old ``route``. With your own
-    weight, also ``weight`` and ``cost`` (the sum of your costs of the edges)."""
-    ids = sorted({e for p in paths if p for e in p})
-    rows = {}
-    if ids:
-        net = db if isinstance(db, Network) else Network(_file(db))
-        df = net.sql(f"SELECT edge_id, name, highway, length_m::DOUBLE AS length_m, cost_s::DOUBLE AS cost_s, "
-                     f"ST_AsText(geometry) AS geometry FROM {mode}.edges WHERE list_contains($ids, edge_id)", {"ids": ids})
-        rows = {int(r["edge_id"]): {k: (None if v != v else v) for k, v in r.items()} for r in df.to_dict("records")}
-    own = _own_weight(db, mode, weight, ids, missing) if ids and _is_own(weight) else None
-    out = []
-    for p in paths:
-        if p is None:
-            out.append(None)
-            continue
-        path = [{**rows[e], "edge_id": e} for e in p]
-        data = {"edges": list(p), "time_s": sum(r["cost_s"] or 0 for r in path),
-                "length_m": sum(r["length_m"] or 0 for r in path), "path": path}
-        if own is not None:
-            data.update(weight=_weight(weight, missing)[0], cost=sum(own[e] for e in p))
-        out.append(Route(data, db, mode, weight if isinstance(weight, str) else "own"))
-    return out
-
-
-def _own_weight(db, mode, weight, ids, missing="time") -> dict:
-    """The weight (``cost_s``, ``length_m``, the column or your cost) of each edge: the cost of the last edge of a
-    route, which the graph cost does not hold (an arc of the edge graph costs its from-edge). An edge with no own cost:
-    its ``cost_s``, or NaN with ``missing="skip"``."""
-    net = db if isinstance(db, Network) else Network(_file(db))
-    name, costs = _weight(weight, missing)
-    ids = {"ids": sorted(set(ids))}
-    if costs is None and name in WEIGHTS:
-        df = net.sql(f"SELECT edge_id, coalesce({WEIGHTS[name]}, 0)::DOUBLE AS w FROM {mode}.edges "
-                     "WHERE list_contains($ids, edge_id)", ids)
-        return dict(zip(df["edge_id"].astype(int), df["w"]))
-    col = "NULL" if costs is not None else '"' + name.replace('"', '""') + '"'
-    df = net.sql(f"SELECT edge_id, {col}::DOUBLE AS w, coalesce(cost_s, 0)::DOUBLE AS t FROM {mode}.edges "
-                 "WHERE list_contains($ids, edge_id)", ids)
-    given = dict(costs or [])
-    fill = math.nan if missing == "skip" else None
-    out = {}
-    for e, w, t in zip(df["edge_id"].astype(int), df["w"], df["t"]):
-        w = given.get(e, w)
-        out[e] = w if w is not None and w == w else (t if fill is None else fill)
-    return out
+def _routes(db, mode, data, weight="time") -> list:
+    """The Route of each dict of a JSON list of the Rust router (None: not connected)."""
+    return [_route(d, db, mode, weight) for d in json.loads(data)]
 
 
 # ---- routes ----------------------------------------------------------------------------------------------------------
@@ -285,11 +227,14 @@ def route(net, a, b, mode=None, weight="time", missing="time"):
     a, b = (geocode(db, x, mode) if isinstance(x, str) else x for x in (a, b))
     if _is_point(a) and _is_point(b):
         return route_points(db, a, b, mode=mode, weight=weight, missing=missing)
-    if _is_point(a) or _is_point(b):
-        a, b = _edge_ids(db, mode, [a, b])
-    if _is_own(weight):
-        return _routes_of(db, mode, _router(db, mode, weight, missing).paths([(int(a), int(b))]), weight, missing)[0]
-    return _route(_api.route(db, a, b, mode=mode, weight=weight), db, mode, weight)
+    router = _router(db, mode, weight, missing)
+    a, b = _edge_ids(db, mode, [a, b], router)
+    try:
+        return _routes(db, mode, router.routes([(int(a), int(b))]), weight)[0]
+    except RuntimeError as e:
+        if "not in the" in str(e):
+            raise ValueError(str(e)) from None
+        raise
 
 
 def route_points(net, a, b, mode=None, weight="time", radius_m=50.0, access_kmh=4.5, missing="time"):
@@ -317,9 +262,10 @@ def routes(net, origins, destinations, mode=None, weight="time", missing="time")
     origins, destinations = list(origins), list(destinations)
     if len(origins) != len(destinations):
         raise DuckOSMError(f"{len(origins)} origins and {len(destinations)} destinations: give the same number")
-    ids = _edge_ids(db, mode, origins + destinations)
+    router = _router(db, mode, weight, missing)
+    ids = _edge_ids(db, mode, origins + destinations, router)
     pairs = list(zip(ids[:len(origins)], ids[len(origins):]))
-    return _routes_of(db, mode, _router(db, mode, weight, missing).paths(pairs), weight, missing)
+    return _routes(db, mode, router.routes(pairs), weight)
 
 
 def k_shortest_paths(net, a, b, k=3, mode=None, weight="time", missing="time") -> list:
@@ -329,8 +275,9 @@ def k_shortest_paths(net, a, b, k=3, mode=None, weight="time", missing="time") -
 
     >>> for r in duckosm.routing.k_shortest_paths(net.driving, a, b, k=3): print(r.time_s)"""
     db, mode = resolve(net, mode)
-    a, b = _edge_ids(db, mode, [a, b])
-    return _routes_of(db, mode, _router(db, mode, weight, missing).k_shortest_paths(a, b, int(k)), weight, missing)
+    router = _router(db, mode, weight, missing)
+    a, b = _edge_ids(db, mode, [a, b], router)
+    return _routes(db, mode, router.k_shortest_routes(a, b, int(k)), weight)
 
 
 def matrix(net, origins, destinations=None, mode=None, weight="time", max_cost=None, missing="time"):
@@ -345,20 +292,15 @@ def matrix(net, origins, destinations=None, mode=None, weight="time", max_cost=N
     ``{label: place}``: then the labels name the rows and the columns.
 
     >>> m = duckosm.routing.matrix(net.driving, edge_ids[:100])"""
-    import numpy as np
     import pandas as pd
     db, mode = resolve(net, mode)
     origins, o_labels = _named(origins)
     destinations, d_labels = (origins, o_labels) if destinations is None else _named(destinations)
-    ids = _edge_ids(db, mode, origins + destinations)
-    o, d = ids[:len(origins)], ids[len(origins):]
     router = _router(db, mode, weight, missing)
-    own = _own_weight(db, mode, weight, d, missing)
+    ids = _edge_ids(db, mode, origins + destinations, router)
+    o, d = ids[:len(origins)], ids[len(origins):]
     limit = math.inf if max_cost is None else float(max_cost)
-    cost = np.array(router.costs(o, d, limit), dtype=float).reshape(len(o), len(d))
-    cost = cost + np.array([own.get(e, 0.0) for e in d])
-    cost[cost > limit] = np.nan
-    return pd.DataFrame(cost, index=o_labels, columns=d_labels)
+    return pd.DataFrame(router.matrix(o, d, limit), index=o_labels, columns=d_labels, dtype=float)
 
 
 def isochrones(net, origins, minutes=(5, 10, 15), mode=None, buffer_m=25.0, weight="time", missing="time"):
@@ -369,27 +311,15 @@ def isochrones(net, origins, minutes=(5, 10, 15), mode=None, buffer_m=25.0, weig
 
     >>> iso = duckosm.routing.isochrones(net.walking, [(7.4246, 43.7384)], minutes=[5, 10])"""
     gpd = require("geopandas", "isochrones")
-    import pandas as pd
-    from shapely import Polygon, union_all
+    import shapely
     db, mode = resolve(net, mode)
     (origins, labels), minutes = _named(origins), sorted(float(m) for m in ([minutes] if isinstance(minutes, (int, float)) else minutes))
-    ids = _edge_ids(db, mode, origins)
-    reach = _router(db, mode, weight, missing).reach(ids, max(minutes) * 60)
-    every = sorted({e for hit, _ in reach for e in hit})
-    own = _own_weight(db, mode, weight, every, missing)
-    edges = Network(_file(db)).edges(mode, where=f"edge_id IN ({','.join(map(str, every)) or 'NULL'})", crs="utm")
-    geom = dict(zip(edges["edge_id"].astype(int), edges.buffer(buffer_m, resolution=4)))
-    rows = []
-    for label, (hit, cost) in zip(labels, reach):
-        total = pd.Series(cost, index=hit) + pd.Series([own[e] for e in hit], index=hit)
-        poly, done = None, 0.0
-        for m in minutes:                   # each polygon: the one before, and the edges of the next minutes
-            ring = total.index[(total > done * 60) & (total <= m * 60)]
-            parts = [geom[e] for e in ring] + ([poly] if poly is not None else [])
-            poly, done = union_all(parts) if parts else Polygon(), m
-            rows.append({"origin": label, "minutes": m, "n_edges": int((total <= m * 60).sum()),
-                         "area_km2": round(poly.area / 1e6, 3), "geometry": poly})        # the area in the UTM zone
-    return gpd.GeoDataFrame(rows, geometry="geometry", crs=edges.crs).to_crs("EPSG:4326")
+    router = _router(db, mode, weight, missing)
+    rows = router.isochrones(_edge_ids(db, mode, origins, router), [m * 60 for m in minutes], float(buffer_m))
+    return gpd.GeoDataFrame(
+        [{"origin": labels[i], "minutes": limit / 60, "n_edges": n, "area_km2": area,
+          "geometry": shapely.from_wkb(bytes(wkb)) if wkb is not None else shapely.Polygon()} for i, limit, n, area, wkb in rows],
+        geometry="geometry", crs="EPSG:4326")
 
 
 def accessibility(net, origins, targets, minutes=15, mode=None, weight="time", missing="time"):
@@ -398,17 +328,17 @@ def accessibility(net, origins, targets, minutes=15, mode=None, weight="time", m
     largest time). A DataFrame with a row for each origin.
 
     >>> acc = duckosm.routing.accessibility(net.walking, homes, shops, minutes=[5, 10])"""
-    import numpy as np
     import pandas as pd
+    db, mode = resolve(net, mode)
     minutes = sorted(float(m) for m in ([minutes] if isinstance(minutes, (int, float)) else minutes))
-    m = matrix(net, origins, targets, mode=mode, weight=weight, max_cost=max(minutes) * 60, missing=missing)
-    out = {f"n_{x:g}min": (m <= x * 60).sum(axis=1).astype(int) for x in minutes}
-    best = m.to_numpy()
-    reached = ~np.isnan(best).all(axis=1)
-    pick = np.where(reached, np.nanargmin(np.where(np.isnan(best), np.inf, best), axis=1), 0)
-    out["nearest"] = pd.Series([m.columns[j] if ok else None for j, ok in zip(pick, reached)], index=m.index, dtype=object)
-    out["nearest_s"] = [best[i, j] if ok else np.nan for i, (j, ok) in enumerate(zip(pick, reached))]
-    return pd.DataFrame(out, index=m.index)
+    (origins, o_labels), (targets, t_labels) = _named(origins), _named(targets)
+    router = _router(db, mode, weight, missing)
+    ids = _edge_ids(db, mode, origins + targets, router)
+    counts, nearest, best = router.accessibility(ids[:len(origins)], ids[len(origins):], [m * 60 for m in minutes])
+    out = {f"n_{x:g}min": [c[k] for c in counts] for k, x in enumerate(minutes)}
+    out["nearest"] = pd.Series([None if j is None else t_labels[j] for j in nearest], index=o_labels, dtype=object)
+    out["nearest_s"] = best
+    return pd.DataFrame(out, index=o_labels)
 
 
 # ---- across modes, and the steps -------------------------------------------------------------------------------------

@@ -39,31 +39,10 @@ def test_db_named_like_a_schema_is_refused(tmp_path):
     import sys
 
     import duckdb
-    from duckosm.utils import check_db_name
-    for bad in ("driving.duckdb", "mm.duckdb", "Walking.duckdb"):
-        with pytest.raises(ValueError, match="Rename it"):
-            check_db_name(tmp_path / bad)
-    check_db_name(tmp_path / "monaco.duckdb")
     db = tmp_path / "mm.duckdb"
     duckdb.connect(str(db)).close()
     r = subprocess.run([sys.executable, "-m", "duckosm", "multimodal", str(db)], capture_output=True, text=True)
     assert r.returncode != 0 and "Rename it" in r.stderr
-
-
-def test_pbf_cut_is_keyed_on_boundary_and_pbf(tmp_path):
-    """A changed boundary or a newer PBF must never reuse an old cut (it silently built the
-    old area): the cached file name carries a fingerprint of both."""
-    import os
-    from duckosm.importer import pbf_cut_path
-    pbf, b1, b2 = tmp_path / "x.osm.pbf", tmp_path / "a.geojson", tmp_path / "b.geojson"
-    pbf.write_bytes(b"pbf"); b1.write_text('{"a": 1}'); b2.write_text('{"a": 2}')
-    p1 = pbf_cut_path("pbf", "area", "complete_ways", pbf, b1)
-    assert p1 == pbf_cut_path("pbf", "area", "complete_ways", pbf, b1)          # stable
-    assert p1 != pbf_cut_path("pbf", "area", "complete_ways", pbf, b2)          # new boundary
-    assert p1 != pbf_cut_path("pbf", "area", "smart", pbf, b1)                  # other strategy
-    os.utime(pbf, ns=(1, 1))
-    assert p1 != pbf_cut_path("pbf", "area", "complete_ways", pbf, b1)          # newer PBF
-    assert p1.name.startswith("area.complete_ways.") and p1.name.endswith(".osm.pbf")
 
 
 def test_boundary_from_bbox_h3_or_place(tmp_path, monkeypatch):
@@ -120,29 +99,6 @@ def test_misspelled_section_warns(tmp_path, caplog):
     with caplog.at_level("WARNING", logger="duckosm"):
         Config.from_yaml(str(y))
     assert "clipp" in caplog.text and "pbf_path" not in caplog.text     # the flat shorthand is known
-
-
-def test_typed_build_flags_override_the_config(tmp_path, monkeypatch):
-    """With -c, flags typed on the command line win over the file; untyped defaults don't."""
-    from click.testing import CliRunner
-    from duckosm import cli
-    seen = {}
-
-    class Fake:
-        def __init__(self, cfg):
-            seen["cfg"] = cfg
-
-        def run(self):
-            return "x.duckdb"
-
-    monkeypatch.setattr(cli, "DuckOSM", Fake)
-    y = tmp_path / "c.yaml"
-    y.write_text("name: a\nmodes: [driving]\noptions:\n  build_graph: true\n  h3_resolution: 9\n")
-    r = CliRunner().invoke(cli.main, ["build", "-c", str(y), "-m", "walking", "--no-features", "--no-graph"])
-    assert r.exit_code == 0, r.output
-    c = seen["cfg"]
-    assert c.modes == ["walking"] and c.options.build_features is False and c.options.build_graph is False
-    assert c.options.h3_resolution == 9                       # --h3-resolution not typed: file wins
 
 
 @pytest.mark.parametrize("yaml_text, bad", [

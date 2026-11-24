@@ -6,6 +6,8 @@ pub mod directions;
 pub mod graphml;
 pub mod graphs;
 pub mod lanes;
+pub mod ml;
+pub mod plot;
 pub mod points;
 pub mod route;
 

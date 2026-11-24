@@ -16,7 +16,7 @@ module for each group of users: ``analysis``, ``gis``, ``routing``, ``sim``, ``p
 __version__ = "0.8.0"
 
 _NAMES = {
-    "DuckOSM": "duckosm.importer", "Config": "duckosm.config",
+    "DuckOSM": "duckosm._api", "Config": "duckosm.config",
     "edge_id_hash": "duckosm.edge_id", "edge_id_expr": "duckosm.edge_id", "edge_id_hash_v1": "duckosm.edge_id",
     "edge_id_expr_v1": "duckosm.edge_id", "create_edge_id_macro": "duckosm.edge_id",
     "to_networkx": "duckosm._api", "to_networkx_nodes": "duckosm._api", "write_graph": "duckosm._api",

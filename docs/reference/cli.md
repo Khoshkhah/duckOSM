@@ -87,9 +87,11 @@ duckosm get [OPTIONS] [PLACE]
 
 | Option | Does | Default |
 |---|---|---|
-| `PLACE` | the name of the area, for Nominatim | give one of `PLACE`, `--osm-id`, `--bbox`, `--h3-cell`, `--boundary` |
+| `PLACE` | the name of the area, for Nominatim | give one of `PLACE`, `--osm-id`, `--bbox`, `--point`, `--h3-cell`, `--boundary` |
 | `--osm-id ID` | one OSM boundary relation | |
 | `--bbox W,S,E,N` | a box in degrees | |
+| `--point LON,LAT` | the box `--dist-m` metres from the point in each direction (as osmnx `graph_from_point`) | |
+| `--dist-m M` | the distance of `--point` | 1000 |
 | `--h3-cell CELL` | an H3 cell | |
 | `--boundary FILE` | a GeoJSON [boundary file](boundary.md) | |
 | `-o`, `--out DIR` | the output folder | `.` |
@@ -408,7 +410,7 @@ duckosm route-map [OPTIONS] DB
 | `--google-3d` / `--no-google-3d` | a Google 3D window linked to the map. It needs a Google Maps key in `GOOGLE_MAPS_KEY`, and the page must be served over http | on when `GOOGLE_MAPS_KEY` is set |
 | `-o`, `--out TEXT` | output HTML | `reports/<name>_route_map.html` |
 
-### `route`, `route-points`, `directions` {#route-route-points-directions}
+### `route`, `route-points`, `directions`, `route-multimodal`, `route-multimodal-points` {#route-route-points-directions}
 
 Routing on a built database, from the command line. Each prints JSON. Guide: [Route](../guides/route.md).
 

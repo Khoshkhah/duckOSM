@@ -1,106 +1,87 @@
-"""Cycling dismount edges: footway/pedestrian enter the cycling graph as push-the-bike
-edges — kept by the filter, bidirectional, flagged dismount=TRUE, costed at walking speed,
-classified cycle_type='dismount'. Gated by options.cycling_dismount (default on); flag off
-restores the pre-feature graph. See docs/design/cycling_dismount_edges.md."""
+"""Cycling dismount edges: footway/pedestrian enter the cycling graph as push-the-bike edges. They are kept by the
+filter, bidirectional, flagged dismount=TRUE, costed at walking speed and classified cycle_type='dismount'.
+Gated by options.cycling_dismount (default on); flag off restores the pre-feature graph.
+See docs/design/cycling_dismount_edges.md. Checked on `cycling.ways` and `cycling.edges` of the Rust build."""
 import duckdb
-import pytest
 
-from duckosm.processors.dismount import DismountMarker
-from duckosm.processors.functional_type import FunctionalType
-from duckosm.processors.road_filter import RoadFilter
-from duckosm.processors.speed import SpeedProcessor
+from osm_build import build
 
 
-def _ways_row(mode, tags, cycling_dismount=True):
-    """Run RoadFilter._create_ways_table on a single way; return its (highway, oneway) or None."""
-    con = duckdb.connect()
-    con.execute("CREATE SCHEMA raw")
-    con.execute("CREATE TABLE raw.ways(osm_id BIGINT, tags MAP(VARCHAR, VARCHAR), refs BIGINT[])")
-    kv = ", ".join(f"'{k}': '{v}'" for k, v in tags.items())
-    con.execute(f"INSERT INTO raw.ways VALUES (1, MAP {{{kv}}}, [1, 2])")
-    RoadFilter(con, mode=mode, cycling_dismount=cycling_dismount)._create_ways_table()
-    return con.execute("SELECT highway, oneway FROM ways WHERE osm_id = 1").fetchone()
+def _cycling(tmp_path, tagsets, config=None):
+    """One way per tag set (ids 1, 2, ...; 3 nodes each, so a plain way is one edge each way at most).
+    Returns a connection to the cycling build."""
+    nodes, ways = {}, {}
+    for i, tags in enumerate(tagsets, 1):
+        ids = [i * 10, i * 10 + 1, i * 10 + 2]
+        for k, n in enumerate(ids):
+            nodes[n] = (7.0 + k * 0.0006, 43 + i * 0.01)
+        ways[i] = (ids, tags)
+    args = []
+    if config:
+        cfg = tmp_path / "c.yaml"
+        cfg.write_text("name: t\noptions: " + config + "\n")
+        args = ["-c", str(cfg)]
+    return duckdb.connect(str(build(tmp_path, nodes, ways, modes=("cycling",), args=args)), read_only=True)
+
+
+def _kept(con):
+    return {r[0]: r[1:] for r in con.execute("SELECT osm_id, highway, oneway FROM cycling.ways").fetchall()}
 
 
 # ---- filter: what enters the cycling graph ------------------------------------------
 
-def test_footway_kept_as_dismount_even_bicycle_no():
+def test_footway_kept_as_dismount_even_bicycle_no(tmp_path):
     # bicycle=no forbids RIDING; pushing is walking, so the way still enters the graph.
-    assert _ways_row("cycling", {"highway": "footway", "bicycle": "no"}) is not None
-    assert _ways_row("cycling", {"highway": "pedestrian"}) is not None
+    kept = _kept(_cycling(tmp_path, [{"highway": "footway", "bicycle": "no"}, {"highway": "pedestrian"}]))
+    assert 1 in kept and 2 in kept
 
 
-def test_private_kept_for_the_map_foot_no_excluded():
+def test_private_kept_for_the_map_foot_no_excluded(tmp_path):
     """A dismount way is walked, so walking access decides: foot=no keeps it out; access=private
     keeps it as a private road (moved to private_edges by the build: seen, never routed)."""
-    assert _ways_row("cycling", {"highway": "footway", "access": "private"}) is not None
-    assert _ways_row("cycling", {"highway": "footway", "foot": "no"}) is None
+    kept = _kept(_cycling(tmp_path, [{"highway": "footway", "access": "private"}, {"highway": "footway", "foot": "no"}]))
+    assert 1 in kept and 2 not in kept
 
 
-def test_flag_off_restores_old_filter():
-    assert _ways_row("cycling", {"highway": "footway"}, cycling_dismount=False) is None
-    # rideable footway is kept regardless of the flag (pre-existing bicycle=yes path)
-    assert _ways_row("cycling", {"highway": "footway", "bicycle": "yes"},
-                     cycling_dismount=False) is not None
+def test_flag_off_restores_old_filter(tmp_path):
+    kept = _kept(_cycling(tmp_path, [{"highway": "footway"}, {"highway": "footway", "bicycle": "yes"}],
+                          config="{cycling_dismount: false}"))
+    assert 1 not in kept
+    assert 2 in kept          # a rideable footway is kept regardless of the flag
 
 
-def test_steps_stay_out():
-    assert _ways_row("cycling", {"highway": "steps"}) is None
+def test_steps_stay_out(tmp_path):
+    assert 1 not in _kept(_cycling(tmp_path, [{"highway": "steps"}]))
 
 
 # ---- oneway: dismount ways are always bidirectional ----------------------------------
 
-def test_dismount_way_ignores_oneway():
-    hw, oneway = _ways_row("cycling", {"highway": "footway", "oneway": "yes"})
-    assert not oneway
-    # ...but a RIDEABLE footway keeps the vehicular rules
-    hw, oneway = _ways_row("cycling", {"highway": "footway", "bicycle": "yes", "oneway": "yes"})
-    assert oneway
+def test_dismount_way_ignores_oneway(tmp_path):
+    kept = _kept(_cycling(tmp_path, [{"highway": "footway", "oneway": "yes"},
+                                     {"highway": "footway", "bicycle": "yes", "oneway": "yes"}]))
+    assert not kept[1][1]
+    assert kept[2][1]         # a RIDEABLE footway keeps the vehicular rules
 
 
-# ---- marker + speed + cycle_type on the built edges -----------------------------------
+# ---- flag + speed + cycle_type on the built edges -------------------------------------
 
-def _edges_db():
-    """raw.ways + a minimal built cycling `edges` table (one dismount, one rideable)."""
-    con = duckdb.connect()
-    con.execute("CREATE SCHEMA raw")
-    con.execute("CREATE TABLE raw.ways(osm_id BIGINT, tags MAP(VARCHAR, VARCHAR))")
-    con.execute("INSERT INTO raw.ways VALUES "
-                "(1, MAP {'highway': 'footway'}), "
-                "(2, MAP {'highway': 'footway', 'bicycle': 'yes'}), "
-                "(3, MAP {'highway': 'cycleway'})")
-    con.execute("CREATE TABLE edges(edge_id BIGINT, osm_id BIGINT, highway VARCHAR, "
-                "is_reverse BOOLEAN, maxspeed VARCHAR, length_m DOUBLE, source BIGINT, target BIGINT)")
-    con.execute("INSERT INTO edges VALUES "
-                "(10, 1, 'footway',  false, NULL, 100, 1, 2), "    # dismount
-                "(20, 2, 'footway',  false, NULL, 100, 5, 6), "    # rideable footway
-                "(30, 3, 'cycleway', false, NULL, 100, 7, 8), "
-                "(40, -1, 'footway', false, NULL, 5, 2, 9), "      # connector extending the dismount one
-                "(50, -2, 'footway', false, NULL, 5, 6, 9)")       # connector extending the rideable one
-    return con
+def test_marker_speed_and_cycle_type(tmp_path):
+    con = _cycling(tmp_path, [{"highway": "footway"}, {"highway": "footway", "bicycle": "yes"}, {"highway": "cycleway"}])
+    rows = {r[0]: r[1:] for r in con.execute(
+        "SELECT osm_id, any_value(dismount), any_value(maxspeed_kmh), any_value(cycle_type) FROM cycling.edges GROUP BY osm_id").fetchall()}
+    assert rows[1] == (True, 5.0, "dismount")
+    assert rows[2][:2] == (False, 15.0)
+    assert rows[3] == (False, 15.0, "cycleway")
 
 
-def test_marker_speed_and_cycle_type():
-    con = _edges_db()
-    DismountMarker(con).run()
-    flags = dict(con.execute("SELECT edge_id, dismount FROM edges").fetchall())
-    assert flags == {10: True, 20: False, 30: False, 40: True, 50: False}   # a connector follows its path
-
-    SpeedProcessor(con, mode="cycling").run()
-    speeds = dict(con.execute("SELECT edge_id, maxspeed_kmh FROM edges").fetchall())
-    assert speeds[10] == 5.0 and speeds[20] == 15.0 and speeds[30] == 15.0 and speeds[40] == 5.0
-
-    FunctionalType(con, mode="cycling").run()
-    types = dict(con.execute("SELECT edge_id, cycle_type FROM edges").fetchall())
-    assert types[10] == "dismount" and types[30] == "cycleway"
-    assert types[40] == "dismount" and types[50] == "mixed_traffic"          # connectors (no raw way)
-
-
-def test_speed_without_dismount_column_unchanged():
-    con = _edges_db()          # no DismountMarker run -> no dismount column
-    SpeedProcessor(con, mode="cycling").run()
-    assert {r[0] for r in con.execute("SELECT maxspeed_kmh FROM edges").fetchall()} == {15.0}
-
-
-if __name__ == "__main__":
-    raise SystemExit(pytest.main([__file__, "-q"]))
+def test_connector_follows_its_path(tmp_path):
+    """A connector (negative osm_id) that extends a dismount footway is a dismount edge; one that extends a rideable
+    footway is not."""
+    nodes = {1: (7, 43), 2: (7.0006, 43), 3: (7.0006, 43.00004), 4: (7.0006, 43.0006), 5: (7.0012, 43.00004),
+             11: (7, 43.02), 12: (7.0006, 43.02), 13: (7.0006, 43.02004), 14: (7.0006, 43.0206), 15: (7.0012, 43.02004)}
+    ways = {1: ([1, 2], {"highway": "footway"}), 2: ([3, 4, 5], {"highway": "residential"}),       # a footway ends 4 m from a road
+            3: ([11, 12], {"highway": "footway", "bicycle": "yes"}), 4: ([13, 14, 15], {"highway": "residential"})}
+    con = duckdb.connect(str(build(tmp_path, nodes, ways, modes=("cycling",))), read_only=True)
+    got = {r[0]: r[1:] for r in con.execute(
+        "SELECT osm_id, any_value(dismount), any_value(cycle_type) FROM cycling.edges WHERE osm_id < 0 GROUP BY osm_id").fetchall()}
+    assert got == {-1: (True, "dismount"), -3: (False, "mixed_traffic")}

@@ -45,6 +45,11 @@ pub fn edge_id(osm_id: i64, source: i64, target: i64) -> i64 {
     (hash3(osm_id, source, target) >> 1) as i64
 }
 
+/// The previous edge id (v1): `(hash(osm_id, source, target, is_reverse) >> 1)::BIGINT`. DuckDB hashes a BOOLEAN as the integer 0 or 1.
+pub fn edge_id_v1(osm_id: i64, source: i64, target: i64, is_reverse: bool) -> i64 {
+    (combine(hash3(osm_id, source, target), mix(is_reverse as u64)) >> 1) as i64
+}
+
 /// `hash(a, b, text)` for two BIGINT and a VARCHAR.
 pub fn hash_int_int_str(a: i64, b: i64, s: &str) -> u64 {
     combine(combine(mix(a as u64), mix(b as u64)), hash_str(s))
@@ -88,6 +93,13 @@ pub fn virtual_node_arc(osm_id: i64, source: i64, target: i64, refs: &[i64]) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn edge_id_v1_is_the_duckdb_hash() {
+        // SELECT hash(5::BIGINT, 7::BIGINT, 9::BIGINT, true) >> 1 in DuckDB 1.5, and with false
+        assert_eq!(edge_id_v1(5, 7, 9, true), 4213519630363789557);
+        assert_eq!(edge_id_v1(5, 7, 9, false), 1929148089564166301);
+    }
 
     // Values from DuckDB 1.5.3 (and 1.3.2, 1.4.4):
     //   SELECT hash(1::BIGINT, 2::BIGINT, 3::BIGINT)               -> 12722334483198565868

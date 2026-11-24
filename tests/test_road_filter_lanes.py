@@ -1,60 +1,44 @@
-"""RoadFilter lane-count parsing — in particular `lanes:reversible` (counterflow) handling.
+"""Lane counts per direction in the Rust build (`driving.ways.lanes_fwd` / `lanes_bwd`).
 
-A shared reversible lane (e.g. Lions Gate Bridge / Stanley Park Causeway:
-lanes=3, lanes:forward=1, lanes:backward=1, lanes:reversible=1) is available to each direction
-at its peak, so it must be added to BOTH directions' capacity. Before the fix duckOSM ignored
-`lanes:reversible` entirely and stored lanes=1 per direction.
+A shared reversible lane (Lions Gate Bridge: lanes=3, lanes:forward=1, lanes:backward=1,
+lanes:reversible=1) is open to each direction at its peak, so it counts in BOTH directions.
 """
 import duckdb
-import pytest
 
-from duckosm.processors.road_filter import RoadFilter
-
-
-def _ways(rows):
-    """Fresh connection with a raw.ways table populated from (osm_id, tags-dict) rows."""
-    con = duckdb.connect()
-    con.execute("CREATE SCHEMA raw")
-    con.execute("CREATE TABLE raw.ways(osm_id BIGINT, tags MAP(VARCHAR, VARCHAR), refs BIGINT[])")
-    for osm_id, tags in rows:
-        kv = ", ".join(f"'{k}': '{v}'" for k, v in tags.items())
-        con.execute(f"INSERT INTO raw.ways VALUES ({osm_id}, MAP {{{kv}}}, [1, 2])")
-    RoadFilter(con, mode="driving")._create_ways_table()
-    return con
+from osm_build import build
 
 
-def _lanes(con, osm_id):
-    return con.execute(
-        f"SELECT lanes_fwd, lanes_bwd FROM ways WHERE osm_id = {osm_id}").fetchone()
+def _lanes(tmp_path, tagsets):
+    """One short way per tag set (ids 1, 2, ...): {id: (lanes_fwd, lanes_bwd)} from driving.ways."""
+    nodes, ways = {}, {}
+    for i, tags in enumerate(tagsets, 1):
+        nodes[i * 10], nodes[i * 10 + 1] = (7.0, 43 + i * 0.01), (7.0012, 43 + i * 0.01)
+        ways[i] = ([i * 10, i * 10 + 1], tags)
+    con = duckdb.connect(str(build(tmp_path, nodes, ways)), read_only=True)
+    return {r[0]: r[1:] for r in con.execute("SELECT osm_id, lanes_fwd, lanes_bwd FROM driving.ways").fetchall()}
 
 
-def test_reversible_lane_added_to_both_directions():
-    # Lions Gate Bridge pattern: 1 fixed each way + 1 shared reversible -> 2 lanes each way.
-    con = _ways([(1, {"highway": "trunk", "lanes": "3", "lanes:forward": "1",
-                      "lanes:backward": "1", "lanes:reversible": "1", "oneway": "no"})])
-    assert _lanes(con, 1) == (2, 2)
+def test_reversible_lane_added_to_both_directions(tmp_path):
+    # 1 fixed lane each way + 1 shared reversible lane -> 2 lanes each way.
+    got = _lanes(tmp_path, [{"highway": "trunk", "lanes": "3", "lanes:forward": "1",
+                             "lanes:backward": "1", "lanes:reversible": "1", "oneway": "no"}])
+    assert got[1] == (2, 2)
 
 
-def test_reversible_only_with_total():
-    # reversible present, no explicit forward/backward: split total, then add the shared lane.
-    con = _ways([(1, {"highway": "primary", "lanes": "2", "lanes:reversible": "1", "oneway": "no"})])
-    fwd, bwd = _lanes(con, 1)
-    assert fwd == 2 and bwd == 2          # CEIL/FLOOR(2/2)=1, +1 reversible
+def test_reversible_only_with_total(tmp_path):
+    # reversible present, no forward/backward: split the total, then add the shared lane.
+    got = _lanes(tmp_path, [{"highway": "primary", "lanes": "2", "lanes:reversible": "1", "oneway": "no"}])
+    assert got[1] == (2, 2)
 
 
-def test_no_reversible_is_unchanged():
-    # Regression guard: COALESCE(n_rev,0) is a no-op when there's no reversible tag.
-    con = _ways([
-        (1, {"highway": "trunk", "lanes": "2", "oneway": "no"}),          # two-way split
-        (2, {"highway": "motorway", "lanes": "2", "oneway": "yes"}),      # one-way, all forward
-        (3, {"highway": "residential"}),                                  # untagged -> class default
-        (4, {"highway": "trunk", "lanes:forward": "3", "lanes:backward": "2", "oneway": "no"}),
+def test_no_reversible_is_unchanged(tmp_path):
+    got = _lanes(tmp_path, [
+        {"highway": "trunk", "lanes": "2", "oneway": "no"},        # two-way split
+        {"highway": "motorway", "lanes": "2", "oneway": "yes"},    # one-way, all forward
+        {"highway": "residential"},                                # untagged -> class default
+        {"highway": "trunk", "lanes:forward": "3", "lanes:backward": "2", "oneway": "no"},
     ])
-    assert _lanes(con, 1) == (1, 1)
-    assert _lanes(con, 2)[0] == 2
-    assert _lanes(con, 3) == (1, 1)
-    assert _lanes(con, 4) == (3, 2)
-
-
-if __name__ == "__main__":
-    raise SystemExit(pytest.main([__file__, "-q"]))
+    assert got[1] == (1, 1)
+    assert got[2][0] == 2
+    assert got[3] == (1, 1)
+    assert got[4] == (3, 2)

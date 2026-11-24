@@ -1223,6 +1223,18 @@ pub fn main_with(args: Vec<String>) -> i32 {
     }
     // `duckosm edit ...`: its own options (the build's first argument is a PBF file)
     let r = match args.get(1).map(String::as_str) {
+        // the names of all the commands, one on each line (tests/test_cli_reference.py checks the docs against them)
+        Some("commands") => {
+            let own = ["build", "edit", "ask", "studio", "levels-edit", "levels", "cut", "clip-pbf", "get", "tiles", "quack", "quack-tiles",
+                       "quack-union", "features-check"];
+            #[cfg(feature = "duckdb")]
+            let more = [&duckosm_export::cli::COMMANDS[..], &duckosm_tools::cli::COMMANDS[..], &duckosm_route::cli::COMMANDS[..],
+                        &duckosm_edit::cli::COMMANDS[..]].concat();
+            #[cfg(not(feature = "duckdb"))]
+            let more: Vec<&str> = Vec::new();
+            own.iter().chain(more.iter()).for_each(|c| println!("{c}"));
+            Ok(())
+        }
         Some("edit") => edit(&args[1..]),
         Some("ask") => ask(&args[1..]),
         Some("studio") => studio(&args[1..]),
@@ -1395,7 +1407,12 @@ fn build_cmd(args: &[String]) -> Result<(), String> {
                 }
             }
             match duckosm_edit::levels::levels(&db) {
-                Ok(s) => lines.push(format!("Drawing order: {} roads, {} given up, {} edit row(s) not used (visualization.edge_levels)", s.roads, s.given_up, s.unmatched)),
+                Ok(s) => {
+                    if s.unmatched > 0 {
+                        eprintln!("warning: levels: {} edit row(s) name a road that is not in this file: ignored, kept in visualization.level_unmatched", s.unmatched);
+                    }
+                    lines.push(format!("Drawing order: {} roads, {} given up, {} edit row(s) not used (visualization.edge_levels)", s.roads, s.given_up, s.unmatched))
+                }
                 Err(e) => lines.push(format!("warning: drawing order failed: {e}")),
             }
             if parent {

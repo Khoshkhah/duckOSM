@@ -69,26 +69,6 @@ def _pbf(source) -> Path:
     return pbf
 
 
-def _tag_filter(tags) -> str:
-    """The SQL condition of OSMnx's ``tags``: ``{key: True}`` any value, ``{key: "v"}`` one value, ``{key: [..]}`` one of
-    the values. The keys are joined with OR, as in OSMnx. ``None``: all features."""
-    if not tags:
-        return "true"
-
-    def q(s):
-        return "'" + str(s).replace("'", "''") + "'"
-    parts = []
-    for key, value in tags.items():
-        v = f"tags[{q(key)}]"
-        if value is True:
-            parts.append(f"{v} IS NOT NULL")
-        elif isinstance(value, str):
-            parts.append(f"{v} = {q(value)}")
-        else:
-            parts.append(f"{v} IN ({', '.join(q(x) for x in value)})")
-    return " OR ".join(parts)
-
-
 def features(source, tags=None, *, fixes=None, threads=None):
     """The OSM features of an area as a GeoDataFrame (EPSG:4326), as OSMnx's ``features_from_*`` gives them. ``source``:
     an :class:`duckosm.Area`, an OSM file or a Network (its OSM file beside it). ``tags`` as in OSMnx: ``{"building":
@@ -98,24 +78,19 @@ def features(source, tags=None, *, fixes=None, threads=None):
 
     >>> cafes = duckosm.gis.features(area, tags={"amenity": "cafe"})"""
     require("geopandas", "duckosm.gis.features")
-    import duckdb
     import geopandas as gpd
+    import pandas as pd
+
+    from duckosm import _rust
+    asked = [(str(k), None if v is True else [str(v)] if isinstance(v, str) else [str(x) for x in v]) for k, v in (tags or {}).items()]
     with tempfile.TemporaryDirectory() as tmp:
         files = quack(_pbf(source), out=tmp, name="features", formats=["geoparquet"], fixes=fixes, threads=threads,
                       progress=False)
-        con = duckdb.connect()
-        try:
-            con.load_extension("spatial")
-        except duckdb.Error:
-            con.install_extension("spatial")
-            con.load_extension("spatial")
-        keys = "".join(f", tags['{k.replace(chr(39), chr(39) * 2)}'] AS \"{k.replace(chr(34), chr(34) * 2)}\""
-                       for k in (tags or {}))
-        df = con.execute(f"SELECT feature_id{keys}, map_from_entries(map_entries(tags)) AS tags, "
-                         f"ST_AsWKB(geometry) AS wkb FROM read_parquet('{files[0]}') "
-                         f"WHERE {_tag_filter(tags)} ORDER BY feature_id").df()
-        con.close()
-    geometry = gpd.GeoSeries.from_wkb(df.pop("wkb").map(bytes), crs="EPSG:4326")
+        rows = _rust.gis_features(str(files[0]), asked)
+    df = pd.DataFrame({"feature_id": [r[0] for r in rows],
+                       **{k: [r[1][i] for r in rows] for i, (k, _) in enumerate(asked)},
+                       "tags": [dict(r[2]) for r in rows]})
+    geometry = gpd.GeoSeries.from_wkb([bytes(r[3]) for r in rows], crs="EPSG:4326")
     return gpd.GeoDataFrame(df, geometry=geometry, crs="EPSG:4326")
 
 
@@ -137,68 +112,18 @@ def admin_boundaries(net, pbf=None):
     return gpd.GeoDataFrame(df, geometry=geometry, crs="EPSG:4326")
 
 
-# the tags of to_osm_xml that are columns of the edges with the same name
-_XML_TAGS = ("highway", "name", "junction", "layer", "bridge", "tunnel", "service", "surface", "access")
-
-
 def to_osm_xml(net, path, mode=None):
     """The network of one mode as an OSM XML file (``.osm``), as OSMnx's ``save_graph_xml`` writes it: a ``<node>`` for
     each node of the roads (``source``, the OSM nodes of ``refs``, ``target``), a ``<way>`` for each road, with the id ``edge_id`` of its
     forward edge and the tags ``highway``, ``name``, ``oneway``, ``lanes``, ``maxspeed``, ``layer``, ``bridge``,
-    ``tunnel`` ..., ``duckosm:osm_id`` (the OSM way) and ``duckosm:edge_id``. A two-way road is one way. DuckDB writes the
+    ``tunnel`` ..., ``duckosm:osm_id`` (the OSM way) and ``duckosm:edge_id``. A two-way road is one way. Rust (DuckDB) writes the
     file. Returns ``{path, nodes, ways}``.
 
     >>> duckosm.gis.to_osm_xml(net.driving, "out/monaco.osm")"""
+    from duckosm import _api
     from duckosm.network import resolve
     db, mode = resolve(net, mode)
-    from duckosm.network import Network
-    db = db if isinstance(db, Network) else Network(db)
     path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    e = f'"{mode}".edges'
-
-    def attr(expr):     # an XML attribute value: & < " escaped
-        return f"replace(replace(replace({expr}, '&', '&amp;'), '<', '&lt;'), '\"', '&quot;')"
-
-    def tag(k, expr):
-        return f"""CASE WHEN {expr} IS NOT NULL THEN '  <tag k="{k}" v="' || {attr(f"CAST({expr} AS VARCHAR)")} || '"/>' || chr(10) ELSE '' END"""
-    tags = " || ".join([tag(k, k) for k in _XML_TAGS] + [
-        tag("oneway", "CASE WHEN oneway THEN 'yes' ELSE 'no' END"),
-        tag("lanes", "CASE WHEN oneway THEN lanes ELSE lanes + coalesce(twin_lanes, lanes) END"),
-        tag("lanes:forward", "CASE WHEN NOT oneway THEN lanes END"),
-        tag("lanes:backward", "CASE WHEN NOT oneway THEN coalesce(twin_lanes, lanes) END"),
-        tag("maxspeed", "CAST(round(maxspeed_kmh) AS INTEGER)"),
-        tag("duckosm:osm_id", "osm_id"), tag("duckosm:edge_id", "edge_id")])
-    # the nodes of each road: source, the OSM nodes of refs, target; where refs and the vertices differ (an edge cut at a
-    # virtual node), each inner vertex gets a hashed negative id
-    ids = ("CASE WHEN len(e.refs) = ST_NPoints(e.geometry) THEN [e.source] || e.refs[2:len(e.refs) - 1] || [e.target] "
-           "ELSE [e.source] || list_transform(range(2, ST_NPoints(e.geometry)), i -> -(hash(e.edge_id, i) >> 2)::BIGINT) "
-           "|| [e.target] END")
-    roads = (f"SELECT e.*, {ids} AS ids, t.lanes AS twin_lanes FROM {e} e LEFT JOIN {e} t ON t.osm_id = e.osm_id AND "
-             f"t.source = e.target AND t.target = e.source AND t.is_reverse WHERE NOT e.is_reverse")
-    sql = f"""
-        WITH r AS ({roads}),
-             p AS (SELECT unnest(ids) AS id, unnest(generate_series(1, len(ids))) AS i, geometry FROM r),
-             n AS (SELECT DISTINCT ON (id) id, ST_Y(ST_PointN(geometry, CAST(i AS INTEGER))) AS lat,
-                          ST_X(ST_PointN(geometry, CAST(i AS INTEGER))) AS lon FROM p ORDER BY id),
-             body AS (
-               SELECT 0 AS part, id AS k, '<node id="' || id || '" version="1" lat="' || printf('%.7f', lat) ||
-                      '" lon="' || printf('%.7f', lon) || '"/>' AS line FROM n
-               UNION ALL
-               SELECT 1, edge_id, '<way id="' || edge_id || '" version="1">' || chr(10) ||
-                      list_aggr(list_transform(ids, x -> '  <nd ref="' || x || '"/>' || chr(10)), 'string_agg', '') ||
-                      {tags} || '</way>' FROM r)
-        SELECT line FROM (
-            SELECT -1 AS part, 0 AS k, '<?xml version="1.0" encoding="UTF-8"?>' || chr(10) ||
-                   '<osm version="0.6" generator="duckOSM">' AS line
-            UNION ALL SELECT part, k, line FROM body
-            UNION ALL SELECT 2, 0, '</osm>') ORDER BY part, k"""
-    con = db._connect()
-    try:
-        out = str(path).replace("'", "''")
-        con.execute(f"COPY ({sql}) TO '{out}' (FORMAT csv, HEADER false, QUOTE '', ESCAPE '', DELIMITER '\t')")
-        nodes, ways = con.execute(f"SELECT count(DISTINCT x), count(DISTINCT edge_id) FROM "
-                                  f"(SELECT unnest(ids) x, edge_id FROM ({roads}))").fetchone()
-    finally:
-        con.close()
+    with _api._file(db) as f:
+        nodes, ways = _api._rust().to_osm_xml(f, str(path), mode)
     return {"path": path, "nodes": nodes, "ways": ways}

@@ -17,18 +17,6 @@ def _cli(*args):
     return _rust.cli(["duckosm", *map(str, args)])
 
 
-def admin_match_sql(table, has_en=True, limit=1):
-    """SELECT the best admin boundary in ``table`` for the name ``$q``: case, accents and hyphens
-    ignored ("monte carlo" finds Monte-Carlo), ``name:en`` matched too, an exact name before a
-    partial one, then the largest area. Shared by ``extract --name`` and ``duckosm boundary``."""
-    norm = lambda x: f"replace(strip_accents(lower({x})), '-', ' ')"
-    q, nm = norm("$q"), norm("name")
-    en = norm("coalesce(name_en, '')") if has_en else "''"
-    return (f"SELECT geometry AS geom, osm_id, name, admin_level FROM {table} "
-            f"WHERE {nm} LIKE '%' || {q} || '%' OR {en} LIKE '%' || {q} || '%' "
-            f"ORDER BY ({nm} = {q} OR {en} = {q}) DESC, ST_Area(geometry) DESC LIMIT {int(limit)}")
-
-
 def find_boundary(name=None, pbf=None, osm_id=None, offline=False):
     """Return ``(geometry_geojson, info)`` for the area called ``name`` (or OSM relation ``osm_id``), from the Rust
     ``duckosm boundary``.
@@ -48,23 +36,19 @@ def find_boundary(name=None, pbf=None, osm_id=None, offline=False):
 
 
 def bbox_geojson(bbox):
-    """A ``[west, south, east, north]`` box (degrees) as a GeoJSON Polygon string."""
+    """A ``[west, south, east, north]`` box (degrees) as a GeoJSON Polygon string (Rust)."""
+    from duckosm import _rust
     try:
-        w, s, e, n = (float(v) for v in bbox)
+        values = [float(v) for v in bbox]
     except (TypeError, ValueError):
         raise ValueError(f"boundary.bbox must be [west, south, east, north], got {bbox!r}")
-    if not (-180 <= w < e <= 180 and -90 <= s < n <= 90):
-        raise ValueError(f"boundary.bbox must be [west, south, east, north] in degrees, got {bbox!r}")
-    return json.dumps({"type": "Polygon", "coordinates": [[[w, s], [e, s], [e, n], [w, n], [w, s]]]})
+    return _rust.bbox_geojson(values)
 
 
 def h3_geojson(cell):
-    """The outline of H3 cell ``cell`` (hex string) as a GeoJSON Polygon string."""
-    import h3
-    if not h3.is_valid_cell(str(cell)):
-        raise ValueError(f"not an H3 cell: {cell!r}")
-    ring = [[lng, lat] for lat, lng in h3.cell_to_boundary(str(cell))]
-    return json.dumps({"type": "Polygon", "coordinates": [ring + ring[:1]]})
+    """The outline of H3 cell ``cell`` (hex string) as a GeoJSON Polygon string (Rust)."""
+    from duckosm import _rust
+    return _rust.h3_geojson(str(cell))
 
 
 def write_boundary(geometry_geojson, info, out):

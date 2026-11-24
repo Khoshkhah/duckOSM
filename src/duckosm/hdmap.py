@@ -44,16 +44,6 @@ def _has_table(path, schema, table):
         con.close()
 
 
-def _local(geoms, lon0, lat0):
-    """The lon/lat shapely geometries in metres, east and north of (lon0, lat0) (a local plane; numpy, no loop)."""
-    import math
-
-    import numpy as np
-    import shapely
-    kx, ky = 111_320.0 * math.cos(math.radians(lat0)), 110_574.0
-    return shapely.transform(geoms, lambda c: np.column_stack([(c[:, 0] - lon0) * kx, (c[:, 1] - lat0) * ky]))
-
-
 def surfaces(gmns_db, mode="driving"):
     """The road surfaces of a GMNS database (:func:`duckosm.planning.to_gmns`) as two GeoDataFrames (EPSG:4326):
     ``(lanes, junctions)``. ``lanes``: one polygon for each lane, its center line to the edge of the junction
@@ -63,39 +53,17 @@ def surfaces(gmns_db, mode="driving"):
     computes the polygons in the UTM zone of the area.
 
     >>> lanes, junctions = duckosm.hdmap.surfaces("out/gmns.duckdb")"""
-    import duckdb
     import geopandas as gpd
+    import pandas as pd
 
-    g = f"gmns_{mode}"
-    con = duckdb.connect(str(gmns_db), read_only=True)
-    try:
-        con.load_extension("spatial")
-        lon, lat = con.execute(f"SELECT avg(x_coord), avg(y_coord) FROM {g}.node").fetchone()
-        utm = f"EPSG:{(32600 if lat >= 0 else 32700) + int((lon + 180) // 6) + 1}"
-
-        def surface(line, width):              # the line in metres, with the width, back in degrees
-            return (f"ST_AsWKB(ST_Transform(ST_Buffer(ST_Transform({line}, 'EPSG:4326', '{utm}', always_xy := true), "
-                    f"{width} / 2, 8, 'CAP_FLAT', 'JOIN_ROUND', 5.0), '{utm}', 'EPSG:4326', always_xy := true))")
-        lanes = con.execute(f"""SELECT lane_id, link_id AS edge_id, lane_num, coalesce(width, 3.25) AS width, allowed_uses,
-                                       {surface("geom_cut", "coalesce(width, 3.25)")} AS wkb
-                                FROM {g}.lane WHERE geom_cut IS NOT NULL ORDER BY lane_id""").df()
-        has = {t for (t,) in con.execute(f"SELECT table_name FROM duckdb_tables() WHERE schema_name = '{g}'").fetchall()}
-        if {"lane_connector", "movement"} <= has:
-            junctions = con.execute(f"""WITH c AS (SELECT m.node_id, ST_Transform(ST_Buffer(ST_Transform(c.geom, 'EPSG:4326', '{utm}',
-                                                       always_xy := true), coalesce(c.width, 3.25) / 2, 8, 'CAP_FLAT', 'JOIN_ROUND', 5.0),
-                                                       '{utm}', 'EPSG:4326', always_xy := true) AS g
-                                                FROM {g}.lane_connector c JOIN {g}.movement m USING (mvmt_id) WHERE c.geom IS NOT NULL)
-                                        SELECT node_id, count(*) AS connectors, ST_AsWKB(ST_Union_Agg(g)) AS wkb
-                                        FROM c GROUP BY node_id ORDER BY node_id""").df()
-        else:
-            junctions = lanes.iloc[:0][["lane_id", "wkb"]].rename(columns={"lane_id": "node_id"}).assign(connectors=0)
-    finally:
-        con.close()
+    from duckosm import _rust
+    lanes, junctions = _rust.hdmap_surfaces(str(gmns_db), mode)
+    lanes = pd.DataFrame(lanes, columns=["lane_id", "edge_id", "lane_num", "width", "allowed_uses", "wkb"])
+    junctions = pd.DataFrame(junctions, columns=["node_id", "connectors", "wkb"])
 
     def gdf(df):
         return gpd.GeoDataFrame(df.drop(columns="wkb"), geometry=gpd.GeoSeries.from_wkb(df.wkb.map(bytes)), crs="EPSG:4326")
     return gdf(lanes), gdf(junctions)
-
 
 def to_commonroad(gmns_db, path, mode="driving", country_id="ZAM", map_name=None, author="duckOSM", affiliation=""):
     """A CommonRoad scenario map (``.xml``, commonroad-io) of the lanes of a GMNS database (:func:`duckosm.planning.to_gmns`):
@@ -111,11 +79,10 @@ def to_commonroad(gmns_db, path, mode="driving", country_id="ZAM", map_name=None
     >>> duckosm.hdmap.to_commonroad("out/gmns.duckdb", "out/monaco_commonroad.xml")"""
     from pathlib import Path
 
-    import duckdb
     import numpy as np
     import pandas as pd
-    import shapely
 
+    from duckosm import _rust
     from duckosm.errors import require
     require("commonroad", "duckosm.hdmap.to_commonroad")
     from commonroad.common.file_writer import CommonRoadFileWriter, OverwriteExistingFile
@@ -132,63 +99,17 @@ def to_commonroad(gmns_db, path, mode="driving", country_id="ZAM", map_name=None
         from commonroad.scenario.scenario import Location
         xml = {}
 
-    g = f"gmns_{mode}"
-    con = duckdb.connect(str(gmns_db), read_only=True)
-    try:
-        con.load_extension("spatial")
-        lanes = con.execute(f"""SELECT la.lane_id AS key, la.link_id AS edge_id, la.lane_num, coalesce(la.width, 3.25) AS width,
-                                       la.allowed_uses AS uses, ST_AsWKB(coalesce(la.geom_cut, la.geom)) AS wkb
-                                FROM {g}.lane la WHERE coalesce(la.geom_cut, la.geom) IS NOT NULL ORDER BY la.lane_id""").df()
-        conns = con.execute(f"""SELECT c.connector_id AS key, c.from_lane_id, c.to_lane_id, coalesce(c.width, 3.25) AS width,
-                                       NULL AS uses, ST_AsWKB(c.geom) AS wkb
-                                FROM {g}.lane_connector c WHERE c.geom IS NOT NULL ORDER BY c.connector_id""").df() \
-            if con.execute(f"SELECT count(*) FROM duckdb_tables() WHERE schema_name = '{g}' AND table_name = 'lane_connector'").fetchone()[0] \
-            else pd.DataFrame(columns=["key", "from_lane_id", "to_lane_id", "width", "uses", "wkb"])
-    finally:
-        con.close()
-    rows = pd.concat([lanes, conns], ignore_index=True)
-    rows["lanelet_id"] = np.arange(1, len(rows) + 1)
-    lines = shapely.from_wkb(rows.wkb.map(bytes).to_numpy())
-    lon0, lat0 = shapely.centroid(shapely.union_all(shapely.envelope(lines))).coords[0]
-    lines = _local(lines, lon0, lat0)
-    half = rows.width.to_numpy(float) / 2
-    left, right = shapely.offset_curve(lines, half), shapely.offset_curve(lines, -half)
-
-    lane_id = dict(zip(lanes.key, map(int, rows.lanelet_id[:len(lanes)])))
-    succ, pred, adj = {}, {}, {}
-    for c, i in zip(conns.itertuples(), rows.lanelet_id[len(lanes):]):
-        a, b = lane_id.get(c.from_lane_id), lane_id.get(c.to_lane_id)
-        if a and b:
-            succ.setdefault(a, []).append(int(i)), pred.setdefault(int(i), []).append(a)
-            succ.setdefault(int(i), []).append(b), pred.setdefault(b, []).append(int(i))
-    num = {(int(e), int(n)): int(i) for e, n, i in zip(lanes.edge_id, lanes.lane_num, rows.lanelet_id)}
-    for (e, n), i in num.items():              # lane 1 is the leftmost: lane n + 1 is on its right, same direction
-        j = num.get((e, n + 1))
-        if j:
-            adj.setdefault(i, {})["right"], adj.setdefault(j, {})["left"] = j, i
-
-    def resample(line, n):
-        return np.array([p.coords[0] for p in shapely.line_interpolate_point(line, np.linspace(0, 1, n), normalized=True)])
-
-    kinds = {"bus": (LaneletType.BUS_LANE, RoadUser.BUS), "bike": (LaneletType.BICYCLE_LANE, RoadUser.BICYCLE)}
-    sides = {}                                 # lanelet_id: (left, right) with the same number of points
-    for i, l, rt in zip(rows.lanelet_id, left, right):
-        if l is not None and rt is not None and l.geom_type == rt.geom_type == "LineString" and not (l.is_empty or rt.is_empty):
-            n = max(len(l.coords), len(rt.coords), 2)
-            sides[int(i)] = (resample(l, n), resample(rt, n))
+    # the lanelets, their borders and their links come from Rust; here only the commonroad-io objects are made
+    (lon0, lat0), n_lanes, n_conns, rows = _rust.commonroad_lanelets(str(gmns_db), mode)
+    kinds = {"bus": (LaneletType.BUS_LANE, RoadUser.BUS), "bike": (LaneletType.BICYCLE_LANE, RoadUser.BICYCLE),
+             "urban": (LaneletType.URBAN, RoadUser.VEHICLE)}
     lanelets = []
-    for r in rows.itertuples():
-        i = int(r.lanelet_id)
-        if i not in sides:
-            continue
-        lv, rv = sides[i]
-        kind, user = kinds.get(r.uses.split(",")[0] if isinstance(r.uses, str) else "", (LaneletType.URBAN, RoadUser.VEHICLE))
-        a = {k: v for k, v in adj.get(i, {}).items() if v in sides}
-        lanelets.append(Lanelet(lv, (lv + rv) / 2, rv, i, predecessor=[x for x in pred.get(i, []) if x in sides],
-                                successor=[x for x in succ.get(i, []) if x in sides],
-                                adjacent_left=a.get("left"), adjacent_left_same_direction=True if "left" in a else None,
-                                adjacent_right=a.get("right"), adjacent_right_same_direction=True if "right" in a else None,
-                                lanelet_type={kind}, user_one_way={user}))
+    for i, left, center, right, pred, succ, adj_l, adj_r, kind, _, _ in rows:
+        k, user = kinds[kind]
+        lanelets.append(Lanelet(np.array(left), np.array(center), np.array(right), i, predecessor=pred, successor=succ,
+                                adjacent_left=adj_l, adjacent_left_same_direction=True if adj_l else None,
+                                adjacent_right=adj_r, adjacent_right_same_direction=True if adj_r else None,
+                                lanelet_type={k}, user_one_way={user}))
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     import re
@@ -198,9 +119,6 @@ def to_commonroad(gmns_db, path, mode="driving", country_id="ZAM", map_name=None
     location = Location(gps_latitude=lat0, gps_longitude=lon0)
     CommonRoadFileWriter(scenario, PlanningProblemSet(), author=author, affiliation=affiliation, source="duckOSM",
                          tags={Tag.URBAN}, location=location, **xml).write_to_file(str(path), OverwriteExistingFile.ALWAYS)
-    ids = pd.DataFrame({"lanelet_id": rows.lanelet_id, "gmns_id": rows.key,
-                        "edge_id": pd.concat([lanes.edge_id, conns.from_lane_id.str.split("_").str[0].astype("int64")],
-                                             ignore_index=True)})
-    ids = ids[ids.lanelet_id.isin(sides)].reset_index(drop=True)
-    return {"path": path, "lanelets": len(lanelets), "lanes": len(lanes), "connectors": len(conns),
-            "dropped": len(rows) - len(lanelets), "ids": ids}
+    ids = pd.DataFrame([(r[0], r[9], r[10]) for r in rows], columns=["lanelet_id", "gmns_id", "edge_id"])
+    return {"path": path, "lanelets": len(lanelets), "lanes": n_lanes, "connectors": n_conns,
+            "dropped": n_lanes + n_conns - len(lanelets), "ids": ids}

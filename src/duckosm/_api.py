@@ -190,7 +190,8 @@ def to_lanelet2(gmns_db, out_path, mode="driving", snap_m=0.01):
 
 def to_elevation(db, dem=None, source="auto", modes=None, nodata_fill=0.0, suffix="",
                  vertical_datum=None, license=None, reference=True, product=None):
-    """See :func:`duckosm.elevation.to_elevation`."""
+    """``duckosm elevation``: the heights of the nodes and the edges from a DEM file, or from the DEM source of the area
+    (``source="auto"``). The database is changed in place. Returns the numbers of the command."""
     modes = [modes] if isinstance(modes, str) else list(modes or [])
     return json.loads(_rust().to_elevation(_db(db), None if dem is None else str(dem), source, modes, float(nodata_fill),
                                            suffix, product, vertical_datum, license, reference))
@@ -502,6 +503,31 @@ def build(pbf=None, *, config=None, boundary=None, modes=None, output=None, sour
     return net
 
 
+class DuckOSM:
+    """A build from a :class:`duckosm.Config`: ``DuckOSM(config).run()`` runs ``duckosm build`` (Rust) and returns the path
+    of the ``.duckdb`` file. ``on_step``: a function that gets each progress line."""
+
+    def __init__(self, config):
+        self.config = config
+        self.output_path = config.get_db_path()
+        self.on_step = None
+
+    def run(self) -> Path:
+        import tempfile
+        f = tempfile.NamedTemporaryFile("w", suffix=".json", prefix="duckosm-config-", delete=False, encoding="utf-8")
+        with f:
+            json.dump(self.config.to_dict(), f)
+        try:
+            text = _run("build", "-c", f.name, progress=self.on_step)
+        finally:
+            Path(f.name).unlink(missing_ok=True)
+        import logging
+        for line in text.splitlines():           # the warnings of the Rust build, to the logger "duckosm"
+            if line.startswith("warning:"):
+                logging.getLogger("duckosm").warning(line.removeprefix("warning:").strip())
+        return Path(text.rsplit("Output: ", 1)[1].strip().splitlines()[0])
+
+
 def levels(db):
     """``duckosm levels``: make the drawing order of the roads again (``visualization.edge_levels``), with the edits, heads and caps of
     ``visualization.level_*``. The database is changed in place. Returns its path."""
@@ -667,14 +693,10 @@ def get(place=None, *, osm_id=None, bbox=None, h3_cell=None, boundary=None, poin
 
     >>> area = duckosm.get("Monaco")
     >>> area = duckosm.get(point=(7.4246, 43.7384), dist_m=500)"""
-    import math
     from duckosm._progress import reporter
     if out is None and not dry_run:
-        out = _new_work(name or (_slug(place) if place else f"osm_{osm_id}" if osm_id else None))
-    if point is not None:            # the box around the point (as osmnx graph_from_point)
-        lon, lat = (float(v) for v in point)
-        dy, dx = dist_m / 111_320, dist_m / (111_320 * math.cos(math.radians(lat)))
-        bbox, name = (lon - dx, lat - dy, lon + dx, lat + dy), name or "point"
+        out = _new_work(name or (_slug(place) if place else f"osm_{osm_id}" if osm_id else "point" if point else None))
+    point = None if point is None else ",".join(str(float(v)) for v in point)   # the box around it: duckosm get --point
     if boundary is not None and not isinstance(boundary, (str, os.PathLike)):
         geo = getattr(boundary, "__geo_interface__", boundary)
         if not isinstance(geo, dict):
@@ -687,6 +709,8 @@ def get(place=None, *, osm_id=None, bbox=None, h3_cell=None, boundary=None, poin
     if bbox is not None and not isinstance(bbox, str):
         bbox = ",".join(str(float(v)) for v in bbox)
     args = [place]
+    if point is not None:
+        args += ["--point", point, "--dist-m", float(dist_m)]
     for flag, value in (("--osm-id", osm_id), ("--bbox", bbox), ("--h3-cell", h3_cell), ("--boundary", boundary),
                         ("-o", out), ("--name", name), ("--fixes", fixes), ("--cache", cache)):
         if value is not None:

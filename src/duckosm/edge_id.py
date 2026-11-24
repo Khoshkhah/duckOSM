@@ -80,20 +80,13 @@ def create_edge_id_macro(con) -> None:
 
 
 def edge_id_hash(osm_id: int, source: int, target: int, con=None) -> int:
-    """Compute the current (v2) stable edge_id for one edge (in-memory DuckDB if no connection given).
-
-    For bulk work, embed :func:`edge_id_expr` in your own ``duckdb.sql`` over a table/dataframe
-    instead of calling this per row.
-    """
-    import duckdb
-    c = con or duckdb.connect()
-    return c.execute("SELECT " + edge_id_expr("?", "?", "?"),
-                     [int(osm_id), int(source), int(target)]).fetchone()[0]
+    """The current (v2) stable edge_id of one edge (the Rust hash, equal to DuckDB's). ``con`` is not used. For bulk work,
+    embed :func:`edge_id_expr` in your own ``duckdb.sql`` over a table or a data frame."""
+    from duckosm import _rust
+    return _rust.edge_id_hash(int(osm_id), int(source), int(target))
 
 
 def edge_id_hash_v1(osm_id: int, source: int, target: int, is_reverse: bool, con=None) -> int:
-    """Compute the PREVIOUS (v1) edge_id (with ``is_reverse``). For migration / old→new crosswalks."""
-    import duckdb
-    c = con or duckdb.connect()
-    return c.execute("SELECT " + edge_id_expr_v1("?", "?", "?", "?"),
-                     [int(osm_id), int(source), int(target), bool(is_reverse)]).fetchone()[0]
+    """The PREVIOUS (v1) edge_id (with ``is_reverse``), for migration and old→new crosswalks. ``con`` is not used."""
+    from duckosm import _rust
+    return _rust.edge_id_hash_v1(int(osm_id), int(source), int(target), bool(is_reverse))

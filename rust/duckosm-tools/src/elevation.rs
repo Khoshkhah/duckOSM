@@ -130,14 +130,19 @@ impl Sampler {
 
 /// The tile of Copernicus GLO-30 whose south-west corner is (lat, lon), with the pixels over `bbox` only, and the size of its
 /// file. None when the tile does not exist (sea) or cannot be read; then its points get the fill value, as in duckOSM.
-fn copernicus_tile(con: &Connection, (lat, lon): (i32, i32), bbox: [f64; 4]) -> Option<(Dem, usize)> {
-    let name = format!(
+/// The name of the Copernicus GLO-30 tile whose south-west corner is at (`lat`, `lon`).
+fn copernicus_name(lat: i32, lon: i32) -> String {
+    format!(
         "Copernicus_DSM_COG_10_{}{:02}_00_{}{:03}_00_DEM",
         if lat >= 0 { 'N' } else { 'S' },
         lat.abs(),
         if lon >= 0 { 'E' } else { 'W' },
         lon.abs()
-    );
+    )
+}
+
+fn copernicus_tile(con: &Connection, (lat, lon): (i32, i32), bbox: [f64; 4]) -> Option<(Dem, usize)> {
+    let name = copernicus_name(lat, lon);
     let url = format!("{COP_BASE}/{name}/{name}.tif");
     let tile = download(con, &url).and_then(|b| {
         let n = b.len();
@@ -552,4 +557,30 @@ fn write_metadata(con: &Connection, m: &Meta, fill: f64, n_nodes: usize, n_nodat
     )
     .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_copernicus_tile_names() {
+        assert_eq!(copernicus_name(59, 18), "Copernicus_DSM_COG_10_N59_00_E018_00_DEM");
+        assert_eq!(copernicus_name(-34, -71), "Copernicus_DSM_COG_10_S34_00_W071_00_DEM");
+    }
+
+    #[test]
+    fn the_provider_of_auto_and_of_a_name() {
+        let monaco = [7.40, 43.72, 7.44, 43.75];
+        let vancouver = [-123.2, 49.2, -123.0, 49.3];
+        assert!(resolve_provider("nope", monaco).err().unwrap().contains("unknown --source 'nope'"));
+        assert_eq!(resolve_provider("eudtm", vancouver).unwrap().name, "eudtm"); // a name is taken as it is
+        // auto: eudtm only inside its coverage (Europe) and with an OpenTopography key; else copernicus
+        std::env::remove_var("OPENTOPOGRAPHY_API_KEY");
+        assert_eq!(resolve_provider("auto", monaco).unwrap().name, "copernicus");
+        std::env::set_var("OPENTOPOGRAPHY_API_KEY", "test-key");
+        assert_eq!(resolve_provider("auto", monaco).unwrap().name, "eudtm");
+        assert_eq!(resolve_provider("auto", vancouver).unwrap().name, "copernicus");
+        std::env::remove_var("OPENTOPOGRAPHY_API_KEY");
+    }
 }

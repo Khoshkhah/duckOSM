@@ -444,3 +444,26 @@ pub fn chains(db: &Path, mode: &str) -> Result<usize, String> {
     .map_err(|e| format!("{mode}.chains: {e}"))?;
     Ok(cs.len())
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_layer_with_no_bridge_or_tunnel_is_a_warning() {
+        let dir = std::env::temp_dir().join(format!("duckosm-validate-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("t.duckdb");
+        let con = duckdb::Connection::open(&db).unwrap();
+        con.execute_batch(
+            "CREATE SCHEMA driving; CREATE TABLE driving.edges (edge_id BIGINT, layer VARCHAR, bridge VARCHAR, tunnel VARCHAR);
+             INSERT INTO driving.edges VALUES (1, '1', NULL, NULL), (2, '0', NULL, NULL);",
+        )
+        .unwrap();
+        drop(con);
+        let only = super::Checks { unique_node_id: false, way_length_conserved: false, layer_without_structure: true };
+        let r = super::validate(&db, "driving", only).unwrap();
+        assert_eq!((r[0].0.as_str(), r[0].1), ("layer_without_structure", None)); // WARN, never fatal
+        duckdb::Connection::open(&db).unwrap().execute_batch("UPDATE driving.edges SET bridge = 'yes' WHERE edge_id = 1").unwrap();
+        assert_eq!(super::validate(&db, "driving", only).unwrap()[0].1, Some(true));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}

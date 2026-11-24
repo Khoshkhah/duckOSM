@@ -1,4 +1,5 @@
-"""Tests for duckosm.gmns_map — the lanestyle lane map of a GMNS DuckDB — and the link levels it reads."""
+"""Tests for `duckosm gmns-map` — the lanestyle lane map of a GMNS DuckDB — and the link levels it reads."""
+from cli_run import invoke
 import duckdb
 import pytest
 
@@ -43,12 +44,14 @@ def test_write_map(tmp_path):
     if not hasattr(ls, "lane_page"):
         pytest.skip("lanestyle before 0.3 has no lane_page")
     pytest.importorskip("scipy")
-    from duckosm.gmns_map import write_map
-    from duckosm._levels import make_and_solve
     gmns = _gmns_db(tmp_path)
     src = tmp_path / "src.duckdb"
-    with pytest.raises(FileNotFoundError, match="duckosm levels"):
-        write_map(gmns, tmp_path / "lanes.html", src)
-    make_and_solve(src)
-    html = write_map(gmns, tmp_path / "lanes.html", src).read_text()
+    out = tmp_path / "lanes.html"
+    r = invoke(["gmns-map", str(gmns), "--source-db", str(src), "-o", str(out)])
+    assert r.exit_code != 0 and "duckosm levels" in r.output and not out.exists()
+    r = invoke(["levels", str(src)])
+    assert r.exit_code == 0, r.output
+    r = invoke(["gmns-map", str(gmns), "--source-db", str(src), "-o", str(out)])
+    assert r.exit_code == 0, r.output
+    html = out.read_text()
     assert "maplibre" in html.lower() and "roads-simple" in html

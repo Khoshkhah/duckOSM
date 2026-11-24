@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **The Python package has no engine code: the library is Rust.** `DuckOSM(config).run()` runs the Rust build, and the
+  SDK functions call the Rust module `duckosm._rust`. Removed: the Python build (`duckosm.importer`, `duckosm.processors`,
+  `duckosm.validate`, `duckosm.features`), the old Python CLI (`duckosm.cli`), the Python routers, exporters and pages
+  (`duckosm.point_routing`, `duckosm.directions`, `duckosm.railml`, `duckosm.elevation`, `duckosm.edit`, `duckosm.studio`,
+  `duckosm.viz`, `duckosm.route_map`, `duckosm.query`, `duckosm.gis_debug`), and the dependencies `click`, `rich`, `h3`
+  and `timezonefinder`. Changed: `route()` has no `graph=` and `Router` has no `.graph` (`Router` keeps its graph in
+  Rust); `duckosm.routing.node_branches` and `node_out_degree` are removed; an error of the Rust code is a
+  `RuntimeError`, except a bad edge id or point of a route (`ValueError`). New: `duckosm get --point LON,LAT --dist-m M`,
+  and `duckosm commands`. `docs/design/all_in_rust.md`.
+
 - **`duckosm.hdmap.surfaces(gmns_db)`: the road surfaces as polygons.** It gives two GeoDataFrames: one polygon for each
   lane (its line to the edge of the junction, with the lane width) and one for each junction (the union of its lane
   connectors). DuckDB makes the polygons in the UTM zone of the area. Monaco: 3,318 lanes and 1,727 junctions.

@@ -1,89 +1,81 @@
-"""RoadFilter walking rule: a way is walkable when OSM's access rules let people walk on it
-(docs/guides/walking.md). Main roads are walkable without a sidewalk tag; motorways, motorroads and
-roads whose sidewalk is a separate way are not; an explicit foot permission or sidewalk tag wins."""
+"""Which ways each mode's network keeps, checked on `<mode>.ways` of the Rust build.
+
+Walking rule (docs/guides/walking.md): a way is walkable when OSM's access rules let people walk on it.
+Main roads are walkable without a sidewalk tag; motorways, motorroads and roads whose sidewalk is a
+separate way are not; an explicit foot permission or sidewalk tag wins. A way with no highway tag is no road.
+"""
 import duckdb
-import pytest
 
-from duckosm.processors.road_filter import RoadFilter
-
-
-def _walkable(tags):
-    con = duckdb.connect()
-    con.execute("CREATE SCHEMA raw")
-    con.execute("CREATE TABLE raw.ways(osm_id BIGINT, tags MAP(VARCHAR, VARCHAR), refs BIGINT[])")
-    kv = ", ".join(f"'{k}': '{v}'" for k, v in tags.items())
-    con.execute(f"INSERT INTO raw.ways VALUES (1, MAP {{{kv}}}, [1, 2])")
-    RoadFilter(con, mode="walking")._create_ways_table()
-    return con.execute("SELECT count(*) FROM ways").fetchone()[0] == 1
+from osm_build import build
 
 
-@pytest.mark.parametrize("hw", ["tertiary", "secondary_link", "primary", "trunk", "unclassified",
-                                "track", "bridleway", "road", "residential", "footway"])
-def test_walkable_classes(hw):
-    assert _walkable({"highway": hw})
+def _ways(tmp_path, modes, tagsets):
+    """One short way per tag set (ids 1, 2, ...): {mode: {id: highway}} of the ways each mode keeps."""
+    nodes, ways = {}, {}
+    for i, tags in enumerate(tagsets, 1):
+        nodes[i * 10], nodes[i * 10 + 1] = (7.0, 43 + i * 0.01), (7.0012, 43 + i * 0.01)
+        ways[i] = ([i * 10, i * 10 + 1], tags)
+    con = duckdb.connect(str(build(tmp_path, nodes, ways, modes=modes)), read_only=True)
+    return {m: dict(con.execute(f"SELECT osm_id, highway FROM {m}.ways").fetchall()) for m in modes}
 
 
-@pytest.mark.parametrize("tags", [
-    {"highway": "motorway"},
-    {"highway": "motorway_link"},
-    {"highway": "motorway", "foot": "yes"},                     # a motorway never
-    {"highway": "trunk", "motorroad": "yes"},
-    {"highway": "primary", "foot": "no"},
-    {"highway": "primary", "access": "no"},
-    {"highway": "secondary", "foot": "use_sidepath"},
-    {"highway": "tertiary", "sidewalk": "separate"},
-    {"highway": "residential", "sidewalk:both": "separate"},
-    {"highway": "residential", "sidewalk:left": "separate", "sidewalk:right": "separate"},
-    {"highway": "cycleway"},
-])
-def test_not_walkable(tags):
-    assert not _walkable(tags)
+def _check(tmp_path, mode, tagsets, expected):
+    kept = _ways(tmp_path, (mode,), tagsets)[mode]
+    for i, tags in enumerate(tagsets, 1):
+        assert (i in kept) is expected, f"{mode} {tags}: kept={i in kept}"
 
 
-@pytest.mark.parametrize("tags", [
-    {"highway": "residential", "sidewalk:left": "separate", "sidewalk:right": "no"},
-    {"highway": "primary", "access": "no", "foot": "yes"},
-    {"highway": "service", "sidewalk": "separate", "foot": "yes"},
-    {"highway": "trunk", "motorroad": "yes", "foot": "permissive"},
-    {"highway": "cycleway", "foot": "designated"},
-    {"highway": "cycleway", "sidewalk": "right"},
-    {"route": "ferry", "foot": "yes"},                          # no highway tag
-])
-def test_explicit_permission_wins(tags):
-    assert _walkable(tags)
+def test_walkable_classes(tmp_path):
+    hws = ["tertiary", "secondary_link", "primary", "trunk", "unclassified",
+           "track", "bridleway", "road", "residential", "footway"]
+    _check(tmp_path, "walking", [{"highway": h} for h in hws], True)
 
 
-def _in_network(mode, tags):
-    con = duckdb.connect()
-    con.execute("CREATE SCHEMA raw")
-    con.execute("CREATE TABLE raw.ways(osm_id BIGINT, tags MAP(VARCHAR, VARCHAR), refs BIGINT[])")
-    kv = ", ".join(f"'{k}': '{v}'" for k, v in tags.items())
-    con.execute(f"INSERT INTO raw.ways VALUES (1, MAP {{{kv}}}, [1, 2])")
-    RoadFilter(con, mode=mode)._create_ways_table()
-    return con.execute("SELECT count(*) FROM ways").fetchone()[0] == 1
+def test_not_walkable(tmp_path):
+    _check(tmp_path, "walking", [
+        {"highway": "motorway"},
+        {"highway": "motorway_link"},
+        {"highway": "motorway", "foot": "yes"},                     # a motorway never
+        {"highway": "trunk", "motorroad": "yes"},
+        {"highway": "primary", "foot": "no"},
+        {"highway": "primary", "access": "no"},
+        {"highway": "secondary", "foot": "use_sidepath"},
+        {"highway": "tertiary", "sidewalk": "separate"},
+        {"highway": "residential", "sidewalk:both": "separate"},
+        {"highway": "residential", "sidewalk:left": "separate", "sidewalk:right": "separate"},
+        {"highway": "cycleway"},
+    ], False)
 
 
-@pytest.mark.parametrize("mode", ["driving", "walking", "cycling"])
-@pytest.mark.parametrize("tags", [
-    {"area:highway": "pedestrian", "bicycle": "yes", "bridge": "yes", "layer": "2"},
-    {"area:highway": "pedestrian", "foot": "yes"},
-    {"sidewalk": "both", "bicycle": "designated"},
-])
-def test_no_highway_tag_is_no_road(mode, tags):
-    assert not _in_network(mode, tags)
+def test_explicit_permission_wins(tmp_path):
+    _check(tmp_path, "walking", [
+        {"highway": "residential", "sidewalk:left": "separate", "sidewalk:right": "no"},
+        {"highway": "primary", "access": "no", "foot": "yes"},
+        {"highway": "service", "sidewalk": "separate", "foot": "yes"},
+        {"highway": "trunk", "motorroad": "yes", "foot": "permissive"},
+        {"highway": "cycleway", "foot": "designated"},
+        {"highway": "cycleway", "sidewalk": "right"},
+        {"route": "ferry", "foot": "yes"},                          # no highway tag
+    ], True)
 
 
-@pytest.mark.parametrize("mode", ["driving", "walking", "cycling"])
-def test_residential_in_every_network(mode):
-    assert _in_network(mode, {"highway": "residential"})
+def test_no_highway_tag_is_no_road(tmp_path):
+    tagsets = [
+        {"area:highway": "pedestrian", "bicycle": "yes", "bridge": "yes", "layer": "2"},
+        {"area:highway": "pedestrian", "foot": "yes"},
+        {"sidewalk": "both", "bicycle": "designated"},
+    ]
+    for mode in ("driving", "walking", "cycling"):
+        _check(tmp_path, mode, tagsets, False)
 
 
-@pytest.mark.parametrize("mode", ["walking", "cycling"])
-def test_ferry_line_has_class_ferry(mode):
-    con = duckdb.connect()
-    con.execute("CREATE SCHEMA raw")
-    con.execute("CREATE TABLE raw.ways(osm_id BIGINT, tags MAP(VARCHAR, VARCHAR), refs BIGINT[])")
-    con.execute("INSERT INTO raw.ways VALUES (1, MAP {'route': 'ferry', 'foot': 'yes', 'bicycle': 'yes'}, [1, 2]), "
-                "(2, MAP {'highway': 'footway'}, [2, 3])")
-    RoadFilter(con, mode=mode)._create_ways_table()
-    assert dict(con.execute("SELECT osm_id, highway FROM ways").fetchall()) == {1: "ferry", 2: "footway"}
+def test_residential_in_every_network(tmp_path):
+    got = _ways(tmp_path, ("driving", "walking", "cycling"), [{"highway": "residential"}])
+    assert all(1 in kept for kept in got.values())
+
+
+def test_ferry_line_has_class_ferry(tmp_path):
+    got = _ways(tmp_path, ("walking", "cycling"), [{"route": "ferry", "foot": "yes", "bicycle": "yes"},
+                                                   {"highway": "footway"}])
+    for mode in ("walking", "cycling"):
+        assert got[mode] == {1: "ferry", 2: "footway"}, mode

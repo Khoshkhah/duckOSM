@@ -6,7 +6,6 @@ import sys
 from pathlib import Path
 
 from duckosm import dem_sources
-from duckosm.elevation import EUROPE_BBOX, PROVIDERS
 
 ROOT = Path(__file__).resolve().parent.parent
 MONACO = (7.41, 43.73, 7.44, 43.75)
@@ -72,13 +71,11 @@ def test_the_copernicus_cog_files_have_no_cors():
     assert dem_sources.get("copernicus-glo30")["cors"] is False and dem_sources.get("aws-terrain-tiles")["cors"] is True
 
 
-def test_the_python_providers_agree_with_the_catalog():
-    for source in PROVIDERS.values():
-        e = dem_sources.get({"copernicus": "copernicus-glo30", "eudtm": "eudtm"}[next(k for k, v in PROVIDERS.items() if v is source)])
-        assert (source["product"], source["vertical_datum"], source["license"], source["resolution_m"], source["dem_crs"]) == \
-               (e["product"], e["vertical_datum"], e["license"], e["resolution_m"], e["crs"])
-    assert dem_sources.get("eudtm")["coverage"]["bbox"] == list(EUROPE_BBOX)
-    assert {s["duckosm_source"] for s in dem_sources.load() if s["duckosm_source"]} == set(PROVIDERS)
+def test_the_providers_of_the_program_are_in_the_catalog():
+    """`--source` takes `copernicus` and `eudtm` (rust/duckosm-tools/src/elevation.rs, PROVIDERS): both have an entry."""
+    assert {s["duckosm_source"] for s in dem_sources.load() if s["duckosm_source"]} == {"copernicus", "eudtm"}
+    assert dem_sources.get("eudtm")["coverage"]["bbox"] == [-25.0, 34.0, 45.0, 72.0]
+    assert dem_sources.get("copernicus-glo30")["product"] == "DSM" and dem_sources.get("eudtm")["product"] == "DTM"
 
 
 def test_the_docs_page_has_the_tables_of_the_catalog():

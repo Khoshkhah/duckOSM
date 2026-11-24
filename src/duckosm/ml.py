@@ -55,14 +55,6 @@ def to_rustworkx(net, mode=None, graph="turns", weight="time"):
 
 DEFAULT_FEATURES = ("length_m", "maxspeed_kmh", "lanes")
 DEFAULT_NODE_FEATURES = ("lon", "lat")
-# the vertex features of the junction graph that duckOSM computes; any other name is a column of <mode>.nodes (for
-# example ele after duckosm.analysis.add_elevation)
-_NODE_COMPUTED = {"lon": "ST_X(n.geom)", "lat": "ST_Y(n.geom)",
-                  "in_degree": "(SELECT count(*) FROM {e} x WHERE x.target = n.node_id)",
-                  "out_degree": "(SELECT count(*) FROM {e} x WHERE x.source = n.node_id)",
-                  "degree": "(SELECT count(*) FROM {e} x WHERE x.source = n.node_id OR x.target = n.node_id)"}
-
-
 def graph_arrays(net, mode=None, graph="nodes", features=DEFAULT_FEATURES, node_features=DEFAULT_NODE_FEATURES):
     """The arrays of :func:`to_pyg` and :func:`to_dgl`, as numpy: ``src``, ``dst`` (node indices of each arc), ``x``
     (node features), ``x_names``, ``edge_attr`` (arc features), ``edge_attr_names``, ``num_nodes``, and ``edge_id`` (of
@@ -79,59 +71,24 @@ def graph_arrays(net, mode=None, graph="nodes", features=DEFAULT_FEATURES, node_
 
     >>> a = duckosm.ml.graph_arrays(net.driving, node_features=["lon", "lat", "in_degree", "out_degree"])"""
     import numpy as np
-    import pandas as pd
+
+    from duckosm import _api
     if graph not in ("nodes", "turns"):
         raise ValueError(f"graph must be 'nodes' or 'turns', not {graph!r}")
     db, mode = resolve(net, mode)
-    cols = "".join(f', "{c}"' for c in features)
     node_features = list(node_features)
     if graph == "turns" and node_features != list(DEFAULT_NODE_FEATURES):
         raise ValueError("node_features is for the junction graph (graph='nodes'); in the turn graph each vertex is an "
                          "edge, and features= chooses its columns")
-
-    def read(con):
-        e = f'"{mode}".edges'
-        if graph == "nodes":
-            sel = ", ".join(f'{_NODE_COMPUTED[c].format(e=e)} AS "{c}"' if c in _NODE_COMPUTED else f'n."{c}"'
-                            for c in node_features)
-            nodes = con.execute(f"""SELECT n.node_id, {sel}, row_number() OVER (ORDER BY n.node_id) - 1 AS i
-                                    FROM "{mode}".nodes n ORDER BY n.node_id""").df()
-            arcs = con.execute(f"""WITH n AS (SELECT node_id, row_number() OVER (ORDER BY node_id) - 1 AS i FROM "{mode}".nodes)
-                                   SELECT s.i AS src, t.i AS dst, e.edge_id{cols} FROM {e} e
-                                   JOIN n s ON s.node_id = e.source JOIN n t ON t.node_id = e.target
-                                   ORDER BY e.edge_id""").df()
-            return nodes, arcs
-        nodes = con.execute(f"SELECT edge_id{cols} FROM {e} ORDER BY edge_id").df()
-        uses = {"driving": "car", "walking": "walk", "cycling": "bike"}.get(mode, mode)
-        arcs = con.execute(f"""WITH n AS (SELECT edge_id, row_number() OVER (ORDER BY edge_id) - 1 AS i FROM {e})
-                               SELECT a.i AS src, b.i AS dst, g.cost FROM "{mode}".edge_graph g
-                               JOIN n a ON a.edge_id = g.from_edge JOIN n b ON b.edge_id = g.to_edge
-                               WHERE g.uses IS NULL OR g.uses = '{uses}' ORDER BY a.i, b.i""").df()
-        return nodes, arcs
-    nodes, arcs = _with_connection(db, read)
-
-    def matrix(df):
-        df = df.copy()
-        for c in df.columns:
-            if df[c].dtype == bool:
-                df[c] = df[c].astype("float32")
-        text = [c for c in df.columns if not pd.api.types.is_numeric_dtype(df[c])]
-        if text:
-            df = pd.get_dummies(df, columns=text, prefix_sep="=", dtype="float32")
-        return df.fillna(0).to_numpy(dtype="float32"), list(df.columns)
-
-    out = {"src": arcs.src.to_numpy("int64"), "dst": arcs.dst.to_numpy("int64"), "num_nodes": len(nodes),
-           "graph": graph, "mode": mode}
+    with _api._file(db) as path:
+        src, dst, x, xn, ea, en, n, edge_id, node_id = _api._rust().graph_arrays(path, mode, graph, list(features), node_features)
+    out = {"src": np.array(src, dtype="int64"), "dst": np.array(dst, dtype="int64"), "num_nodes": n, "graph": graph, "mode": mode,
+           "x": np.array(x, dtype="float32").reshape(n, len(xn)), "x_names": xn,
+           "edge_attr": np.array(ea, dtype="float32").reshape(len(src), len(en)), "edge_attr_names": en,
+           "edge_id": np.array(edge_id, dtype="int64")}
     if graph == "nodes":
-        out["x"], out["x_names"] = matrix(nodes[node_features])
-        out["edge_attr"], out["edge_attr_names"] = matrix(arcs[list(features)])
-        out["edge_id"], out["node_id"] = arcs.edge_id.to_numpy("int64"), nodes.node_id.to_numpy("int64")
-    else:
-        out["x"], out["x_names"] = matrix(nodes[list(features)])
-        out["edge_attr"], out["edge_attr_names"] = matrix(arcs[["cost"]])
-        out["edge_id"] = nodes.edge_id.to_numpy("int64")
+        out["node_id"] = np.array(node_id, dtype="int64")
     return out
-
 
 def to_pyg(net, mode=None, graph="nodes", features=DEFAULT_FEATURES, node_features=DEFAULT_NODE_FEATURES):
     """The graph of one mode as a ``torch_geometric.data.Data``: ``edge_index``, ``x``, ``edge_attr``, ``num_nodes``,
