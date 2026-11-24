@@ -183,7 +183,23 @@
   line-height: 1.3;
   transition: transform 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
 }
-.md-typeset .dk-levels a.lv:hover {
+/* the card is a div: its link (.lv-go) covers the card, and the database tag is a link of its own above it */
+.md-typeset .dk-levels .lv .lv-go {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: inherit;
+}
+.md-typeset .dk-levels .lv a.db-tag {
+  position: relative;
+  z-index: 2;
+  text-decoration: none;
+}
+.md-typeset .dk-levels .lv a.db-tag:hover {
+  background: var(--dk-yellow);
+  color: var(--dk-ink);
+}
+.md-typeset .dk-levels .lv:hover {
   background: #ffd43b18;
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(255, 212, 59, 0.15);
