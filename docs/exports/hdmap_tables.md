@@ -66,20 +66,6 @@ erDiagram
     signal_phase }o--o{ movement : serves
 ```
 
-### Schema: the project
-
-One `project` row for each database. It lists the data sources (`source`), holds the carriageways, and uses one design
-profile: the design values of the build, for example the lane widths (`design_criterion`). A profile can take the values
-that it does not have from a parent profile.
-
-```mermaid
-erDiagram
-    project ||--o{ source : registers
-    project ||--o{ carriageway : has
-    project ||--|| design_profile : uses
-    design_profile ||--o{ design_criterion : has
-    design_profile ||--o| design_profile : "falls back to"
-```
 
 ## The tables
 

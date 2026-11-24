@@ -98,10 +98,9 @@ def short(text, key):
 
 
 diagrams = re.findall(r"```mermaid\n.*?```", (sim / "docs/2-model/schema.md").read_text(), re.S)
-# the first diagram is too wide for the page: its lines of the project and the design profile go into a third one
+# the lines of the project and the design profile are SimReady's bookkeeping, not the road: they stay out of the diagram
 road = diagrams[0].splitlines()
 is_project = [ln.strip().startswith(("project", "design_profile")) for ln in road]
-project = "\n".join(["```mermaid", "erDiagram"] + [ln for ln, p in zip(road, is_project) if p] + ["```"])
 # left to right: the seven children of carriageway go down the page, not across it
 diagrams[0] = "\n".join(ln for ln, p in zip(road, is_project) if not p).replace("erDiagram", "erDiagram\n    direction LR", 1)
 w = [f"""# HD map tables
@@ -141,13 +140,6 @@ joins a lane that ends at the junction to a lane that starts there.
 
 {diagrams[1]}
 
-### Schema: the project
-
-One `project` row for each database. It lists the data sources (`source`), holds the carriageways, and uses one design
-profile: the design values of the build, for example the lane widths (`design_criterion`). A profile can take the values
-that it does not have from a parent profile.
-
-{project}
 
 ## The tables
 """]
