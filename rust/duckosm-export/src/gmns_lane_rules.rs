@@ -434,27 +434,44 @@ fn hermite(p0: P, t0: P, p1: P, t1: P) -> Vec<P> {
         .collect()
 }
 
-fn wkt(pts: &[P]) -> String {
-    format!("LINESTRING ({})", pts.iter().map(|p| format!("{:.8} {:.8}", p.0, p.1)).collect::<Vec<_>>().join(", "))
+/// `v` with 8 decimals, as the text `{v:.8}` read back: the integer nearest to the exact v·10⁸ (the product with no rounding,
+/// from a fused multiply-add), divided by 10⁸ (one correctly rounded division gives the f64 nearest to the decimal).
+fn round8(v: f64) -> f64 {
+    let p = v * 1e8;
+    let err = v.mul_add(1e8, -p);
+    let mut q = p.round();
+    let d = (p - q) + err;
+    if d > 0.5 || (d == 0.5 && (q / 2.0).fract() != 0.0) {
+        q += 1.0;
+    } else if d < -0.5 || (d == -0.5 && (q / 2.0).fract() != 0.0) {
+        q -= 1.0;
+    }
+    q / 1e8
+}
+
+/// A line as WKB (little-endian LINESTRING). `round`: each coordinate to 8 decimals, as `wkt` writes it.
+pub(crate) fn wkb(pts: &[P], round: bool) -> Vec<u8> {
+    let f = |v: f64| if round { round8(v) } else { v };
+    let mut b = Vec::with_capacity(9 + 16 * pts.len());
+    b.push(1u8);
+    b.extend_from_slice(&2u32.to_le_bytes());
+    b.extend_from_slice(&(pts.len() as u32).to_le_bytes());
+    for p in pts {
+        b.extend_from_slice(&f(p.0).to_le_bytes());
+        b.extend_from_slice(&f(p.1).to_le_bytes());
+    }
+    b
+}
+
+fn from_wkb(b: &[u8]) -> Vec<P> {
+    let n = u32::from_le_bytes(b[5..9].try_into().unwrap()) as usize;
+    let d = |i: usize| f64::from_le_bytes(b[i..i + 8].try_into().unwrap());
+    (0..n).map(|k| (d(9 + 16 * k), d(17 + 16 * k))).collect()
 }
 
 /// The number of junctions (nodes with movements) in one chunk of `lanes_from_rules`, and of lanes in one chunk of the cuts.
 const CHUNK_NODES: usize = 50_000;
 const CHUNK_LANES: i64 = 200_000;
-
-/// The points of a line as text with all their digits (Rust prints the shortest text that reads back as the same f64).
-fn exact(pts: &[P]) -> String {
-    pts.iter().map(|p| format!("{} {}", p.0, p.1)).collect::<Vec<_>>().join(",")
-}
-
-fn from_exact(t: &str) -> Vec<P> {
-    t.split(',')
-        .filter_map(|xy| {
-            let (x, y) = xy.split_once(' ')?;
-            Some((x.parse().ok()?, y.parse().ok()?))
-        })
-        .collect()
-}
 
 /// The rows of one query, each row mapped by `f`.
 fn rows<T>(c: &Ctx, sql: &str, f: impl FnMut(&duckdb::Row) -> duckdb::Result<T>) -> Result<Vec<T>> {
@@ -463,11 +480,11 @@ fn rows<T>(c: &Ctx, sql: &str, f: impl FnMut(&duckdb::Row) -> duckdb::Result<T>)
     v
 }
 
-/// `_cut(lane_id, wkt, pts)`: each lane cut at the junction radius of its two ends (`_rad`), in chunks of lanes, on all cores.
-/// `pts`: the points with all their digits (`exact`), for the lane connectors.
+/// `_cut(lane_id, g, pts)`: each lane cut at the junction radius of its two ends (`_rad`), in chunks of lanes, on all cores.
+/// `g`: the cut as WKB with 8 decimals (`geom_cut`); `pts`: the cut as WKB with all digits, for the lane connectors.
 fn lane_cuts(c: &Ctx, sch: &str) -> Result<()> {
     use rayon::prelude::*;
-    c.exec("CREATE OR REPLACE TEMP TABLE _cut(lane_id VARCHAR, wkt VARCHAR, pts VARCHAR)")?;
+    c.exec("CREATE OR REPLACE TEMP TABLE _cut(lane_id VARCHAR, g BLOB, pts BLOB)")?;
     let n = c.count(&format!("SELECT coalesce(max(rowid) + 1, 0) FROM {sch}.lane"))?;
     let mut lo = 0;
     while lo < n {
@@ -481,7 +498,7 @@ fn lane_cuts(c: &Ctx, sch: &str) -> Result<()> {
             ),
             |r| Ok((r.get::<_, String>(0)?, r.get::<_, f64>(1)?, r.get::<_, f64>(2)?, r.get::<_, String>(3)?)),
         )?;
-        let cut: Vec<(String, String, String)> = got
+        let cut: Vec<(String, Vec<u8>, Vec<u8>)> = got
             .into_par_iter()
             .filter_map(|(lid, ra, rb, w)| {
                 let pts = shp::wkt_points(&w);
@@ -495,7 +512,7 @@ fn lane_cuts(c: &Ctx, sch: &str) -> Result<()> {
                 // a lane shorter than its two cuts keeps its middle 10 %
                 let (s0, s1) = if ra + rb < 0.9 * n { (ra, n - rb) } else { (0.45 * n, 0.55 * n) };
                 let piece: Vec<P> = shp::substring(&loc, s0, s1).iter().map(|p| (o.0 + p.0 / kx, o.1 + p.1 / ky)).collect();
-                (piece.len() >= 2).then(|| (lid, wkt(&piece), exact(&piece)))
+                (piece.len() >= 2).then(|| (lid, wkb(&piece, true), wkb(&piece, false)))
             })
             .collect();
         let mut app = c.con.appender("_cut").map_err(|e| e.to_string())?;
@@ -525,10 +542,10 @@ pub(crate) fn lanes_from_rules(c: &Ctx, sch: &str, mode: &str, geometry: bool, d
     if geometry {
         junction_radius(c, sch)?;
         lane_cuts(c, sch)?;
-        c.exec("CREATE OR REPLACE TEMP TABLE _con(connector_id VARCHAR, mvmt_id VARCHAR, from_lane_id VARCHAR, to_lane_id VARCHAR, width DOUBLE, wkt VARCHAR)")?;
+        c.exec("CREATE OR REPLACE TEMP TABLE _con(connector_id VARCHAR, mvmt_id VARCHAR, from_lane_id VARCHAR, to_lane_id VARCHAR, width DOUBLE, g BLOB)")?;
     }
     // the rows of each chunk together, by one sort: each chunk reads only its own rows (DuckDB skips the other row groups)
-    let cut_sel = if geometry { "c.pts" } else { "NULL::VARCHAR" };
+    let cut_sel = if geometry { "c.pts" } else { "NULL::BLOB" };
     let cut_join = if geometry { "LEFT JOIN _cut c USING (lane_id)" } else { "" };
     c.exec(&format!(
         "CREATE OR REPLACE TEMP TABLE _jn AS SELECT node_id, (row_number() OVER (ORDER BY node_id) - 1) // {CHUNK_NODES} AS ch
@@ -566,11 +583,11 @@ pub(crate) fn lanes_from_rules(c: &Ctx, sch: &str, mode: &str, geometry: bool, d
             c,
             &format!("SELECT link_id, lane_num, uses, turn, lane_id, width, cut FROM _jlane WHERE ch = {ch} ORDER BY link_id, lane_num"),
             |r| {
-                Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, String>(2)?, r.get::<_, Option<String>>(3)?, r.get::<_, String>(4)?, r.get::<_, f64>(5)?, r.get::<_, Option<String>>(6)?))
+                Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, String>(2)?, r.get::<_, Option<String>>(3)?, r.get::<_, String>(4)?, r.get::<_, f64>(5)?, r.get::<_, Option<Vec<u8>>>(6)?))
             },
         )? {
             if let Some(x) = x {
-                cut.insert(lid.clone(), from_exact(&x));
+                cut.insert(lid.clone(), from_wkb(&x));
             }
             let has = |u: &str| uses.split(',').any(|x| x.trim() == u);
             // a bike lane is its own lane only in the driving network; in the cycling network each lane is a bike lane
@@ -662,7 +679,7 @@ pub(crate) fn lanes_from_rules(c: &Ctx, sch: &str, mode: &str, geometry: bool, d
         }
         if geometry {
             // the path of each lane pair: a Hermite curve between the cuts of the two lanes
-            let cons: Vec<(String, String, String, String, f64, String)> = lane_pairs
+            let cons: Vec<(String, String, String, String, f64, Vec<u8>)> = lane_pairs
                 .par_iter()
                 .filter_map(|(m, ib, a, ob, b)| {
                     let (la, lb) = (lid_of.get(&(*ib, *a))?, lid_of.get(&(*ob, *b))?);
@@ -674,7 +691,7 @@ pub(crate) fn lanes_from_rules(c: &Ctx, sch: &str, mode: &str, geometry: bool, d
                     let path = hermite(pa[pa.len() - 1], tangent(&pa, true), pb[0], tangent(&pb, false));
                     let ll: Vec<P> = path.iter().map(|p| (o.0 + p.0 / kx, o.1 + p.1 / ky)).collect();
                     let w = width_of.get(la).copied().unwrap_or(3.25).min(width_of.get(lb).copied().unwrap_or(3.25));
-                    Some((format!("{la}>{lb}"), m.clone(), la.clone(), lb.clone(), w, wkt(&ll)))
+                    Some((format!("{la}>{lb}"), m.clone(), la.clone(), lb.clone(), w, wkb(&ll, true)))
                 })
                 .collect();
             let mut app = c.con.appender("_con").map_err(e)?;
@@ -695,12 +712,17 @@ pub(crate) fn lanes_from_rules(c: &Ctx, sch: &str, mode: &str, geometry: bool, d
     c.exec("DROP TABLE _jn; DROP TABLE _jm; DROP TABLE _jlink; DROP TABLE _jlane")?;
     crate::gmns_sumo::mv_new_apply(c, sch)?;
     if geometry {
+        // the full-precision cuts were for the connectors only
         c.exec(&format!(
-            "ALTER TABLE {sch}.lane ADD COLUMN IF NOT EXISTS geom_cut GEOMETRY;
-             CREATE OR REPLACE TABLE {sch}.lane_connector(connector_id VARCHAR, mvmt_id VARCHAR, from_lane_id VARCHAR, to_lane_id VARCHAR, width DOUBLE, geom GEOMETRY);
-             UPDATE {sch}.lane l SET geom_cut = ST_GeomFromText(c.wkt) FROM _cut c WHERE c.lane_id = l.lane_id;
-             INSERT INTO {sch}.lane_connector SELECT connector_id, mvmt_id, from_lane_id, to_lane_id, width, ST_GeomFromText(wkt) FROM _con ORDER BY connector_id;
-             DROP TABLE _cut; DROP TABLE _con; DROP TABLE _rad"
+            "ALTER TABLE _cut DROP COLUMN pts; ALTER TABLE {sch}.lane DROP COLUMN IF EXISTS geom_cut;
+             CREATE TABLE {sch}._lane_cut AS SELECT l.*, ST_GeomFromWKB(c.g) AS geom_cut FROM {sch}.lane l LEFT JOIN _cut c USING (lane_id);
+             DROP TABLE {sch}.lane; DROP TABLE _cut;
+             ALTER TABLE {sch}._lane_cut RENAME TO lane"
+        ))?;
+        c.exec(&format!(
+            "CREATE OR REPLACE TABLE {sch}.lane_connector(connector_id VARCHAR, mvmt_id VARCHAR, from_lane_id VARCHAR, to_lane_id VARCHAR, width DOUBLE, geom GEOMETRY);
+             INSERT INTO {sch}.lane_connector SELECT connector_id, mvmt_id, from_lane_id, to_lane_id, width, ST_GeomFromWKB(g) FROM _con ORDER BY connector_id;
+             DROP TABLE _con; DROP TABLE _rad"
         ))?;
     }
     eprintln!("GMNS[{mode}] lanes from the lane rules: {n_mv} movements -> {n_rows} rows, {n_pairs} lane pairs, {n_check} checks");
@@ -750,10 +772,17 @@ mod tests {
     }
 
     #[test]
-    fn exact_reads_back() {
-        let p = vec![(7.415907823456789, 43.73685647123), (-0.1 + 0.2, 1e-9)];
-        assert_eq!(from_exact(&exact(&p)), p);
+    fn round8_as_text() {
+        let mut x = 7.4159078234567891_f64;
+        for _ in 0..200_000 {
+            assert_eq!(round8(x), format!("{x:.8}").parse::<f64>().unwrap(), "{x}");
+            x = x * 1.000_000_7 + 1.3e-9;
+            if x > 180.0 {
+                x -= 360.0;
+            }
+        }
     }
+
 
     #[test]
     fn hermite_ends() {

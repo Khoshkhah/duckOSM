@@ -263,10 +263,10 @@ pub(crate) fn build_crossings(c: &Ctx, sch: &str, has_raw: bool) -> Result<()> {
         return Ok(());
     }
     type LaneRow = (String, i64, f64, String, i64, Option<String>, Option<String>, Option<String>, bool);
-    // the lanes and the lane connectors stay in DuckDB (`_xl`, numbered `k` in the order of the query): only their envelopes and
+    // the lanes and the lane connectors stay in DuckDB (`_xl`; `k` is its rowid, the order of the query): only their envelopes and
     // the lanes near a crossing come into memory (docs/design/gmns_streaming.md, step 3)
     c.exec(&format!(
-        "CREATE OR REPLACE TEMP TABLE _xl AS SELECT row_number() OVER () - 1 AS k, * FROM (
+        "CREATE OR REPLACE TEMP TABLE _xl AS SELECT * FROM (
            SELECT l.lane_id, l.link_id, COALESCE(l.width, {DEFAULT_LANE_W})::DOUBLE AS width, ST_AsText(l.geom) AS wkt, k.osm_id,
                   k.layer::VARCHAR AS layer, k.bridge::VARCHAR AS bridge, k.tunnel::VARCHAR AS tunnel, false AS conn
            FROM {sch}.lane l JOIN {sch}.link k ON k.link_id = l.link_id
@@ -274,7 +274,7 @@ pub(crate) fn build_crossings(c: &Ctx, sch: &str, has_raw: bool) -> Result<()> {
     ))?;
     if c.count(&format!("SELECT count(*) FROM duckdb_tables() WHERE schema_name = '{sch}' AND table_name = 'lane_connector'"))? > 0 {
         c.exec(&format!(
-            "INSERT INTO _xl SELECT (SELECT count(*) FROM _xl) + row_number() OVER () - 1, * FROM (
+            "INSERT INTO _xl SELECT * FROM (
                SELECT c.connector_id, l.link_id, COALESCE(c.width, {DEFAULT_LANE_W})::DOUBLE, ST_AsText(c.geom), k.osm_id,
                       k.layer::VARCHAR, k.bridge::VARCHAR, k.tunnel::VARCHAR, true
                FROM {sch}.lane_connector c JOIN {sch}.lane l ON l.lane_id = c.from_lane_id
@@ -335,7 +335,7 @@ pub(crate) fn build_crossings(c: &Ctx, sch: &str, has_raw: bool) -> Result<()> {
         c.exec("DROP TABLE _xl")?;
         return Ok(());
     }
-    let (x0, y0) = shp::wkt_points(&c.strings("SELECT wkt FROM _xl WHERE k = 0")?[0])[0];
+    let (x0, y0) = shp::wkt_points(&c.strings("SELECT wkt FROM _xl WHERE rowid = 0")?[0])[0];
     let kx = crate::gmns_lanes::kx_of(y0);
     const M: f64 = 111320.0;
     let to_m = |lon: f64, lat: f64| ((lon - x0) * kx * M, (lat - y0) * M);
@@ -383,7 +383,7 @@ pub(crate) fn build_crossings(c: &Ctx, sch: &str, has_raw: bool) -> Result<()> {
     let (mut env_all, mut near_k): (Vec<(f64, f64, f64, f64)>, Vec<(usize, i64)>) = (Vec::new(), Vec::new());
     let mut lo = 0;
     while lo < n_lanes {
-        let rows = lane_rows(&format!("SELECT k, lane_id, link_id, width, wkt, osm_id, layer, bridge, tunnel, conn FROM _xl WHERE k >= {lo} AND k < {} ORDER BY k", lo + CHUNK))?;
+        let rows = lane_rows(&format!("SELECT rowid, lane_id, link_id, width, wkt, osm_id, layer, bridge, tunnel, conn FROM _xl WHERE rowid >= {lo} AND rowid < {} ORDER BY rowid", lo + CHUNK))?;
         // each lane: None (too short), Some(None) (the buffer failed), or its envelope and whether it is near a crossing
         let made: Vec<Option<Option<((f64, f64, f64, f64), bool)>>> = rows
             .par_iter()
@@ -392,9 +392,16 @@ pub(crate) fn build_crossings(c: &Ctx, sch: &str, has_raw: bool) -> Result<()> {
                 if shp::length(&g) < 0.5 {
                     return None;
                 }
-                let Some(gp) = surface(&g, w / 2.0, &mut 0) else { return Some(None) };
+                // the envelope of the raw flat-capped outline: the same as of the surface polygon, without the polygon
+                let env = match crate::offset::flat_buffer_envelope(&g, w / 2.0) {
+                    Some(e) => e,
+                    None => {
+                        let Some(gp) = surface(&g, w / 2.0, &mut 0) else { return Some(None) };
+                        env_of(&mp(&gp))
+                    }
+                };
                 let (e, h) = (shp_env(&g), w / 2.0);
-                Some(Some((env_of(&mp(&gp)), cells((e.0 - h, e.1 - h, e.2 + h, e.3 + h)).any(|q| hot.contains(&q)))))
+                Some(Some((env, cells((e.0 - h, e.1 - h, e.2 + h, e.3 + h)).any(|q| hot.contains(&q)))))
             })
             .collect();
         for ((k, _), m) in rows.iter().zip(made) {
@@ -429,7 +436,7 @@ pub(crate) fn build_crossings(c: &Ctx, sch: &str, has_raw: bool) -> Result<()> {
         }
         app.flush().map_err(|e| e.to_string())?;
     }
-    let rows = lane_rows("SELECT k, lane_id, link_id, width, wkt, osm_id, layer, bridge, tunnel, conn FROM _xl SEMI JOIN _xh USING (k) ORDER BY k")?;
+    let rows = lane_rows("SELECT rowid, lane_id, link_id, width, wkt, osm_id, layer, bridge, tunnel, conn FROM _xl WHERE rowid IN (SELECT k FROM _xh) ORDER BY rowid")?;
     c.exec("DROP TABLE _xh; DROP TABLE _xl")?;
     let made: Vec<(Vec<P>, (f64, f64, f64, f64), MultiPolygon<f64>, Vec<crate::geos::Polygon>)> = rows
         .par_iter()
