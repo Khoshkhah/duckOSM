@@ -102,7 +102,8 @@ diagrams = re.findall(r"```mermaid\n.*?```", (sim / "docs/2-model/schema.md").re
 road = diagrams[0].splitlines()
 is_project = [ln.strip().startswith(("project", "design_profile")) for ln in road]
 project = "\n".join(["```mermaid", "erDiagram"] + [ln for ln, p in zip(road, is_project) if p] + ["```"])
-diagrams[0] = "\n".join(ln for ln, p in zip(road, is_project) if not p)
+# left to right: the seven children of carriageway go down the page, not across it
+diagrams[0] = "\n".join(ln for ln, p in zip(road, is_project) if not p).replace("erDiagram", "erDiagram\n    direction LR", 1)
 w = [f"""# HD map tables
 
 Each table of the HD map database, and each of its columns. [SimReady](https://github.com/Khoshkhah/simready) builds

@@ -23,6 +23,7 @@ Two trees meet at the lane: along the road, and at the junction. The project hol
 
 ```mermaid
 erDiagram
+    direction LR
     carriageway ||--o{ attribute : "described by"
     carriageway ||--o{ event : "cut by"
     carriageway ||--o{ lane_section : "divided into"
