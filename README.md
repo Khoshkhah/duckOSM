@@ -122,7 +122,7 @@ All outputs come from one `.osm.pbf` file, in five levels, and all take your OSM
 | [1. OSM data](https://khoshkhah.github.io/duckOSM/exports/osm-data/) | `from .osm.pbf` | QuackOSM · GDAL · Geofabrik · osm2pgsql · PMTiles | `duckosm quack` |
 | [2. Routable network](https://khoshkhah.github.io/duckOSM/exports/routable-network/) | `DuckDB` | Drive, walk, bike · GeoPackage · networkx | `duckosm build`, `export-gis`, `export-graph` |
 | [3. GMNS network](https://khoshkhah.github.io/duckOSM/exports/gmns-network/) | `GMNS DuckDB` | Multi-scale (macro, meso, micro) · GMNS · MATSim · SUMO | `duckosm gmns`, `sumo`, `matsim` |
-| [4. HD map](https://khoshkhah.github.io/duckOSM/exports/hd-map/) *(experimental)* | `HD map DuckDB` | Lane shape in 3D · Lanelet2 · OpenDRIVE | `duckosm lanelet2`, `opendrive` |
+| [4. HD map](https://khoshkhah.github.io/duckOSM/exports/hd-map/) *(experimental)* | `HD map DuckDB` | Lane shape in 3D · SimReady · Lanelet2 · OpenDRIVE | `duckosm hdmap`, `lanelet2`, `opendrive` |
 
 ## Quick start
 

@@ -8,7 +8,9 @@ pip install "duckosm[sim,hdmap]"     # netconvert (the lanes of GMNS) and common
 
 ## Level 3 GMNS as the Foundation for HD Maps
 
-Lanelet2, CommonRoad and the lane graph read the **Level 3 GMNS DuckDB** network (`duckosm gmns data/<area>.duckdb -o out/gmns.duckdb`): its `lane` and `lane_connector` tables. Thus they have the same lanes, turn connectors and fixes. OpenDRIVE reads the Level 2 db for the roads only; with `--junctions` it reads the GMNS db.
+Lanelet2, CommonRoad and the lane graph read the **Level 3 GMNS DuckDB** network (`duckosm gmns data/<area>.duckdb -o out/gmns.duckdb`): its `lane` and `lane_connector` tables. Thus they have the same lanes, turn connectors and fixes. OpenDRIVE reads the Level 2 db for the roads only; with `--junctions` it reads the GMNS db. The HD map database of
+SimReady (a separate program, not public yet) reads the Level 2 db and the GMNS db: `duckosm hdmap`
+([4. HD map](../exports/hd-map/index.md#the-hd-map-database)).
 
 ```bash
 # 1. Generate GMNS DuckDB with physical lane and movement tables

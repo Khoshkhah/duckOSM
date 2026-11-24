@@ -9,8 +9,8 @@ this database from two duckOSM databases of the same build:
   ([`raw.*`](../reference/database.md#raw-schema), with the fixes) for the kerbs, the building walls and the bridges,
   and the DEM grid ([`main.elevation_grid`](../reference/database.md#elevation_grid)) for the ground.
 
-SimReady is a separate, optional program that is not public yet. The planned command `duckosm hdmap DB GMNS_DB`
-(not built yet) gives the two databases to SimReady and writes `<area>_hdmap.duckdb`.
+SimReady is a separate, optional program that is not public yet. The command [`duckosm hdmap DB GMNS_DB`](../reference/cli.md#hdmap)
+gives the two databases to SimReady and writes `<area>_hdmap.duckdb` ([4. HD map](hd-map/index.md)).
 
 | Rule | |
 |---|---|
