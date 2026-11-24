@@ -47,7 +47,7 @@ In `<area>_gmns.duckdb`, **every table belongs to a network schema** (the defaul
 
 ### One link for each edge
 
-duckOSM cuts roads where a footpath or a cycleway crosses them. Thus the walking, cycling and driving networks meet at the same `node_id`.
+duckOSM cuts roads where a footpath or a cycleway crosses them. Thus the walking, cycling and driving networks meet at the same `node_id`. Why GMNS keeps the edges, and where each level uses chains: [Edges and chains](../concepts/edges-and-chains.md).
 
 Each `gmns_<mode>.link` is one Level 2 edge: `link_id` = `edge_id`. GMNS does not merge links. Thus each crossing node stays in each mode, and `gmns_all` can join the modes on `link_id`.
 

@@ -197,6 +197,7 @@ nav:
       - Browser and native builds: concepts/browser-native.md
       - Memory at each step: concepts/memory-by-step.md
       - Stable edge ids: concepts/edge-ids.md
+      - Edges and chains: concepts/edges-and-chains.md
       - What each network contains: concepts/networks.md
       - Network clean-up: concepts/cleanup.md
       - Lanes at junctions: concepts/lane-rules.md
