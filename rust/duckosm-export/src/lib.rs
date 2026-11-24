@@ -16,6 +16,7 @@ pub mod gmns_meso;
 pub mod gmns_sumo;
 pub mod gmns_viewer;
 pub mod gmns_walk;
+pub mod hdmap_run;
 pub mod gtfs;
 pub mod matsim;
 pub mod matsim_lanes;
