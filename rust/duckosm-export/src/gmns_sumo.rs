@@ -297,16 +297,33 @@ pub(crate) fn runs(pairs: &[(i64, i64)]) -> Vec<Vec<(i64, i64)>> {
 /// kept as it was). A movement becomes one row for each of its runs of lanes; a row of no connection keeps its lanes. Shared by
 /// netconvert's lanes and the lane rules (gmns_lane_rules).
 #[allow(clippy::type_complexity)]
-pub(crate) fn apply_rows(c: &Ctx, sch: &str, rows: &[(String, String, Option<(i64, i64, i64, i64)>, bool, bool)]) -> Result<()> {
-    c.exec("CREATE OR REPLACE TEMP TABLE _mv_new(old VARCHAR, new VARCHAR, keep BOOLEAN, sil INT, eil INT, sol INT, eol INT, bike BOOLEAN, k BIGINT)")?;
-    {
-        let mut app = c.con.appender("_mv_new").map_err(|e| e.to_string())?;
-        for (k, (old, new, l, bike, keep)) in rows.iter().enumerate() {
-            app.append_row(duckdb::params![old, new, keep, l.map(|x| x.0 as i32), l.map(|x| x.1 as i32), l.map(|x| x.2 as i32), l.map(|x| x.3 as i32), bike, k as i64])
-                .map_err(|e| e.to_string())?;
-        }
-        app.flush().map_err(|e| e.to_string())?;
+pub(crate) fn apply_rows(c: &Ctx, sch: &str, rows: &[MvRow]) -> Result<()> {
+    mv_new_table(c)?;
+    let k: Vec<(i64, MvRow)> = rows.iter().cloned().enumerate().map(|(k, r)| (k as i64, r)).collect();
+    mv_new_append(c, &k)?;
+    mv_new_apply(c, sch)
+}
+
+/// A movement row of `apply_rows`: (old id, new id, lanes, bike row, kept as it was).
+pub(crate) type MvRow = (String, String, Option<(i64, i64, i64, i64)>, bool, bool);
+
+/// `_mv_new`: the movement rows of `apply_rows`, filled in parts by `mv_new_append`.
+pub(crate) fn mv_new_table(c: &Ctx) -> Result<()> {
+    c.exec("CREATE OR REPLACE TEMP TABLE _mv_new(old VARCHAR, new VARCHAR, keep BOOLEAN, sil INT, eil INT, sol INT, eol INT, bike BOOLEAN, k BIGINT)")
+}
+
+/// Add `rows` to `_mv_new`, each with its place `k` in the order of the new movement table.
+pub(crate) fn mv_new_append(c: &Ctx, rows: &[(i64, MvRow)]) -> Result<()> {
+    let mut app = c.con.appender("_mv_new").map_err(|e| e.to_string())?;
+    for (k, (old, new, l, bike, keep)) in rows {
+        app.append_row(duckdb::params![old, new, keep, l.map(|x| x.0 as i32), l.map(|x| x.1 as i32), l.map(|x| x.2 as i32), l.map(|x| x.3 as i32), bike, k])
+            .map_err(|e| e.to_string())?;
     }
+    app.flush().map_err(|e| e.to_string())
+}
+
+/// Replace the movements of `sch` with the rows of `_mv_new`, in the order of `k`.
+pub(crate) fn mv_new_apply(c: &Ctx, sch: &str) -> Result<()> {
     c.exec(&format!(
         "CREATE OR REPLACE TEMP TABLE _mv_old AS SELECT * FROM {sch}.movement;
          DELETE FROM {sch}.movement;
