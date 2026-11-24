@@ -21,7 +21,7 @@ extracts of every continent, country and many regions, updated daily. Monaco has
 curl -LO https://download.geofabrik.de/europe/monaco-latest.osm.pbf       # 0.7 MB
 ```
 
-For your own area, download the smallest region that contains it. Soon, `duckosm get` does steps 1 to 3 in one command.
+For your own area, download the smallest region that contains it. `duckosm get "Monaco"` does steps 1 to 3 in one command ([Prepare an area](guides/prepare-area.md)).
 
 ## 3. Make the boundary file
 
@@ -103,8 +103,8 @@ In Python or Jupyter, `duckosm.build` gives a `duckosm.Network`. Its methods giv
 import duckosm
 
 net = duckosm.build(pbf="monaco.osm.pbf", boundary="monaco.geojson")   # or duckosm.open("monaco.duckdb")
-edges = net.edges()            # the driving edges as a GeoDataFrame
-net.map()                      # the live map in Jupyter (needs pip install roadstyle)
+edges = net.edges()            # the driving edges as a GeoDataFrame (needs pip install "duckosm[gis]")
+net.map()                      # the live map in Jupyter (needs pip install "duckosm[viz]")
 ```
 
 The [notebooks](notebooks/index.md) show more.

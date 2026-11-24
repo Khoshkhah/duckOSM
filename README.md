@@ -98,7 +98,7 @@ The open standard (General Modeling Network Specification) in DuckDB: links, lan
 <td valign="top">
 
 **Traffic simulation**<br>
-SUMO, MATSim and DTALite exports; SUMO can join the edges of a road into one (`--merge`)
+SUMO and MATSim exports, and GMNS tables that DTALite reads; SUMO and MATSim can join the edges of a road into one (`--merge`)
 ([Exports](https://khoshkhah.github.io/duckOSM/exports/)).
 
 </td>
@@ -142,7 +142,7 @@ area = duckosm.get("Monaco")
 db = duckosm.build(pbf=area.pbf, boundary=area.boundary)  # Level 2 routable database
 
 # Route on the turn graph
-r = duckosm.route_points(db, (7.4155, 43.7285), (7.4400, 43.7480))   # Fontvieille to Larvotto
+r = duckosm.route_points(db, (7.4155, 43.7285), (7.4335, 43.7468))   # Fontvieille to Larvotto
 r["time_s"], r["length_m"], r["edges"]
 
 # Export to Level 3 GMNS or GIS

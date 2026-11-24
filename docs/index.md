@@ -31,7 +31,7 @@ All outputs come from one `.osm.pbf` file, in five levels, and all take your OSM
 <a class="lv" href="exports/hd-map/"><span class="n">4</span><b>HD map</b><span class="db-tag db">HD map DuckDB</span><span class="desc">Lane shape in 3D (experimental)</span><span class="tools">Lanelet2 · OpenDRIVE</span></a>
 </div>
 
-All outputs, by level: [Export](exports/index.md). Speed against other tools: [Compare](compare/index.md).
+All outputs, by level: [Export](exports/index.md). duckOSM and the other tools, for each group of users: [Compare](compare/index.md).
 
 ## Highlights
 
@@ -77,7 +77,7 @@ All outputs, by level: [Export](exports/index.md). Speed against other tools: [C
 
     ---
 
-    SUMO, MATSim, and DTALite exports with automated validation. Simplifies continuous roads for
+    SUMO and MATSim exports, and GMNS tables that DTALite reads, with automated validation. Simplifies continuous roads for
     faster simulation while preserving stable `edge_id`s.
     [Exports](exports/index.md)
 
