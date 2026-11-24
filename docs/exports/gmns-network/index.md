@@ -4,11 +4,11 @@ The multi-resolution network in the GMNS standard, from macro (links) to micro (
 
 ```mermaid
 flowchart LR
-  l2[("<area>.duckdb (Level 2)")] --> gmns[("<area>_gmns.duckdb (GMNS)")]
+  l2[("#lt;area#gt;.duckdb<br/>(Level 2)")] --> gmns[("#lt;area#gt;_gmns.duckdb<br/>(GMNS)")]
   gmns --> sumo["SUMO"]
-  gmns --> matsim["MATSim network, lanes and signals"]
+  gmns --> matsim["MATSim network,<br/>lanes and signals"]
   gmns --> dta["DTALite & Path4GMNS"]
-  gmns --> hd["HD map: Lanelet2, CommonRoad"]
+  gmns --> hd["HD map: Lanelet2,<br/>CommonRoad"]
 ```
 
 | Read by | Export | Reads | Command |

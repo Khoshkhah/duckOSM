@@ -4,7 +4,7 @@ The routable network of each mode: the edges with their `edge_id`, the nodes and
 
 ```mermaid
 flowchart LR
-  db[("<area>.duckdb (DuckDB)")] --> gis["GIS (GeoPackage, shp)"]
+  db[("#lt;area#gt;.duckdb<br/>(DuckDB)")] --> gis["GIS (GeoPackage, shp)"]
   db --> nx["networkx / rustworkx"]
   db --> tr["Turn graph router"]
   db --> rail["railML"]
