@@ -224,7 +224,7 @@ nav:
       - Rust SDK: reference/rust.md
       - Configuration: reference/configuration.md
       - The boundary file: reference/boundary.md
-      - Database schema: reference/database.md
+      - Routable network tables: reference/database.md
       - GMNS tables: exports/gmns_tables.md
       - HD map tables: exports/hdmap_tables.md
       - Base-map layers: reference/features.md

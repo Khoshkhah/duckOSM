@@ -29,7 +29,7 @@ pip install -e ".[dev,networkx]"
   timezonefinder (`[project.dependencies]` in `pyproject.toml`).
 - **Paths are relative to the current folder**: a pip install has no repo, so only files inside
   `src/duckosm/` ship.
-- **A change to a table** updates [Database schema](reference/database.md); a new command or
+- **A change to a table** updates [Routable network tables](reference/database.md); a new command or
   option updates [Command line](reference/cli.md) (a test fails if a command is missing).
 
 ## Tests
