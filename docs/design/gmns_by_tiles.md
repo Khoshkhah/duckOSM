@@ -1,6 +1,7 @@
 # GMNS by tiles
 
-Status: built, 2026-11-20. The section "Result" gives the numbers.
+Status: removed, 2026-11-24. [GMNS by work units](gmns_streaming.md) replaced it: each step works in chunks, so GMNS needs
+no tiles. This page stays for its history and its numbers.
 
 `duckosm gmns` kept the rows of the whole area in memory in some steps (the lanes: all edges with their OSM tags and
 lines; the SUMO step: all lanes, then netconvert on the whole area). Kentucky (driving): 1085 s and 25.9 GB on the

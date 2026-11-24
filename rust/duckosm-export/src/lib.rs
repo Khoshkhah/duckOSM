@@ -14,7 +14,6 @@ pub mod gmns_lanes;
 pub mod gmns_lane_rules;
 pub mod gmns_meso;
 pub mod gmns_sumo;
-pub mod gmns_tiles;
 pub mod gmns_viewer;
 pub mod gmns_walk;
 pub mod gtfs;

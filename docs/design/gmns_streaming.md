@@ -1,6 +1,6 @@
 # GMNS by work units
 
-Status: design, 2026-11-24. Not built. It replaces [GMNS by tiles](gmns_by_tiles.md) when all steps are done.
+Status: built, 2026-11-24 (duckOSM PRs 459, 464, 465, 467 and the removal of the tiles). It replaced [GMNS by tiles](gmns_by_tiles.md).
 
 `duckosm gmns` reads the whole area into Rust maps in some steps, and keeps those maps until the step ends. GMNS by
 tiles limits that memory with map tiles, a band of 2 km and owner rules. With the lane rules

@@ -108,9 +108,6 @@ pub struct ModeSummary {
     pub counts: Vec<(&'static str, i64)>,
 }
 
-/// The default zoom of GMNS by tiles (`duckosm gmns --tile-zoom`).
-pub const TILE_ZOOM: u8 = 9;
-
 /// The options of `to_gmns` (the options of `duckosm gmns`).
 #[derive(Clone)]
 pub struct GmnsOptions {
@@ -136,16 +133,15 @@ pub struct GmnsOptions {
     pub walk_frame: bool,
     /// The gap in metres between the kerb and a sidewalk placed by `walk_frame`.
     pub walk_clearance_m: f64,
-    /// The zoom of the map tiles of GMNS by tiles (docs/design/gmns_by_tiles.md). None: the whole area at once.
-    pub tile_zoom: Option<u8>,
-    /// Which lane goes to which: `netconvert`, `rules` (SimReady's lane rules) or `auto` (netconvert when it is installed,
-    /// else the rules). docs/design/gmns_lane_rules.md.
+    /// Which lane goes to which: `rules` (SimReady's lane rules, the default), `netconvert`, or `auto` (netconvert when it
+    /// is installed, else the rules). docs/design/gmns_lane_rules.md. netconvert reads the whole area at once: it needs much
+    /// memory on a large area (Kentucky: about 26 GB).
     pub lane_source: String,
 }
 
 impl Default for GmnsOptions {
     fn default() -> Self {
-        GmnsOptions { modes: vec![], lane_geometry: true, pair_carriageways: true, drive_side: "right".into(), combined: false, to_csv: None, csv_extensions: false, gtfs: vec![], gtfs_max_m: 30.0, walk_frame: false, walk_clearance_m: 0.0, tile_zoom: Some(TILE_ZOOM), lane_source: "auto".into() }
+        GmnsOptions { modes: vec![], lane_geometry: true, pair_carriageways: true, drive_side: "right".into(), combined: false, to_csv: None, csv_extensions: false, gtfs: vec![], gtfs_max_m: 30.0, walk_frame: false, walk_clearance_m: 0.0, lane_source: "rules".into() }
     }
 }
 
@@ -232,24 +228,10 @@ fn build_gmns(source: &Path, out: &Path, name: &str, o: &GmnsOptions) -> Result<
     if let Some(s) = &stops {
         eprintln!("GTFS: {} stops", s.len());
     }
-    let tiles = match o.tile_zoom {
-        Some(z) => crate::gmns_tiles::tiles_of(&c, &chosen, z)?,
-        None => vec![],
-    };
+    // the whole area at once: each step works in chunks (docs/design/gmns_streaming.md), and DuckDB spills to disk at its limit
+    c.exec(&format!("SET memory_limit = '{}'", crate::MEMORY_LIMIT))?;
     let mut summary = Vec::new();
-    if tiles.len() > 1 {
-        c.exec(&format!("SET memory_limit = '{}'", crate::MEMORY_LIMIT))?;
-        let one = GmnsOptions { modes: chosen.clone(), tile_zoom: None, ..o.clone() };
-        crate::gmns_tiles::by_tiles(&c, out, &tiles, &present, has_raw, &one, |s, d, oo| build_gmns(s, d, &name, oo).map(|_| ()))?;
-        for mode in &chosen {
-            let mut counts = Vec::new();
-            for t in ["node", "link", "lane", "movement", "signal_controller", "curb_seg"] {
-                counts.push((t, c.count(&format!("SELECT count(*) FROM gmns_{mode}.{t}"))?));
-            }
-            summary.push(ModeSummary { mode: mode.clone(), counts });
-        }
-    }
-    for mode in chosen.iter().filter(|_| tiles.len() <= 1) {
+    for mode in &chosen {
         let sch = format!("gmns_{mode}");
         let uses = mode_use(mode);
         c.exec(&format!("CREATE SCHEMA {sch}"))?;
