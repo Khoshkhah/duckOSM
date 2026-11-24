@@ -51,6 +51,9 @@ the road as a surface of its own, at its road height.
 
 Two files of one area with different ground ids do not go together: a tool that reads both stops with an error.
 
+duckOSM writes the first row. The other rows are the rule for the tools that make those files (SimReady, roadstyle).
+The `duckosm opendrive` and `duckosm sumo` exports do not write a ground id yet.
+
 ## Checks
 
 | Check | Passes when |
@@ -59,6 +62,9 @@ Two files of one area with different ground ids do not go together: a tool that 
 | the road on its ground | where the ground holds the road, the road minus the conformed ground is at most 0.05 m |
 | the map terrain | the terrain tiles of a map minus the conformed ground is at most 0.10 m |
 | one ground in an area | each product of the area has the same ground id |
+
+The build stops when a reference DEM has no product, no vertical datum or no license. The other checks are for the
+tools that make the conformed ground and the maps.
 
 Related: [The terrain of an area](terrain.md), [Add elevation](../guides/elevation.md),
 [Elevation sources](../reference/elevation-sources.md).
