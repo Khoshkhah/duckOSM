@@ -70,11 +70,12 @@ def _netconvert_env(netconvert_bin):
         os.environ["DUCKOSM_NETCONVERT"] = str(netconvert_bin)
     else:
         os.environ.pop("DUCKOSM_NETCONVERT", None)
-    try:
-        import sumo as _sumo_wheel
-        os.environ.setdefault("SUMO_HOME", os.path.dirname(_sumo_wheel.__file__))
-    except ImportError:
-        pass
+    # the folder of the wheel, found without importing it: `import sumo` sets PROJ_LIB and PROJ_DATA to SUMO's old PROJ
+    # database for the whole process, and rasterio then fails
+    import importlib.util
+    spec = importlib.util.find_spec("sumo")
+    if spec is not None and spec.origin:
+        os.environ.setdefault("SUMO_HOME", os.path.dirname(spec.origin))
 
 
 def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network", run_netconvert: bool = False,
