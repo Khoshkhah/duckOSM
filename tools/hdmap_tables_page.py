@@ -106,8 +106,12 @@ diagrams[0] = "\n".join(ln for ln, p in zip(road, is_project) if not p).replace(
 w = [f"""# HD map tables
 
 Each table of the HD map database, and each of its columns. [SimReady](https://github.com/Khoshkhah/simready) builds
-this database from the GMNS database of [`duckosm gmns`](gmns.md), and from the raw OSM data of the area
-([`raw.*`](../reference/database.md#raw-schema): the node tags, the kerbs and the limits of the street space).
+this database from two duckOSM databases:
+
+- the routable network (`<area>.duckdb`, [Database schema](../reference/database.md)), with the raw OSM data of the
+  area ([`raw.*`](../reference/database.md#raw-schema): the node tags, the kerbs and the limits of the street space);
+- the GMNS network (`<area>_gmns.duckdb` of [`duckosm gmns`](gmns.md), [GMNS tables](gmns_tables.md)): its chains
+  are the carriageways.
 
 | Rule | |
 |---|---|
