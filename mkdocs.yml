@@ -93,6 +93,7 @@ plugins:
           - exports/matsim.md
           - exports/gmns.md
           - exports/gmns_tables.md
+          - exports/hdmap_tables.md
           - exports/gis.md
           - exports/networkx.md
           - exports/opendrive.md
@@ -175,7 +176,6 @@ nav:
           - SUMO: exports/sumo.md
       - 4. HD map:
           - exports/hd-map/index.md
-          - HD map tables: exports/hdmap_tables.md
           - Lane-level routing: exports/lane-routing.md
           - Lanelet2: exports/lanelet2.md
           - OpenDRIVE: exports/opendrive.md
