@@ -110,13 +110,13 @@ the reads of the database file:
 
 | Call | Time |
 |---|---|
-| `route`, one pair | 58 ms |
-| `routes`, 100 pairs | 110 ms |
-| `k_shortest_paths`, `k=3` | 127 ms |
-| `matrix`, 100 × 100 edges | 117 ms |
-| `matrix`, 200 × 2,844 edges (all) | 158 ms |
-| `isochrones`, walking, 1 origin × 3 times | 0.96 s |
-| `accessibility`, walking, 11,934 origins × 3 targets | 0.45 s |
+| `route`, one pair | 51 ms |
+| `routes`, 100 pairs | 92 ms |
+| `k_shortest_paths`, `k=3` | 91 ms |
+| `matrix`, 100 × 100 edges | 84 ms |
+| `matrix`, 200 × 2,844 edges (all) | 116 ms |
+| `isochrones`, walking, 1 origin × 3 times | 0.79 s |
+| `accessibility`, walking, 11,934 origins × 3 targets | 0.39 s |
 
 ```python
 net = duckosm.network("Monaco")
