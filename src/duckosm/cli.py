@@ -218,16 +218,6 @@ def boundary(args):
     _rust_cli("boundary", args)
 
 
-@main.command(**_PASSTHROUGH)
-@click.argument('args', nargs=-1, type=click.UNPROCESSED)
-def hdmap(args):
-    """The HD map of an area, made by SimReady, from DB and GMNS_DB (the Rust `duckosm hdmap`).
-
-    Writes SimReady's input folder, then runs `duckosm-sim build`. SimReady is a separate program.
-    """
-    _rust_cli("hdmap", args)
-
-
 @main.command(name="clip-pbf", **_PASSTHROUGH)
 @click.argument('args', nargs=-1, type=click.UNPROCESSED)
 def clip_pbf_cmd(args):
