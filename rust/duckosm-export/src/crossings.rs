@@ -334,11 +334,49 @@ pub(crate) fn build_crossings(c: &Ctx, sch: &str, has_raw: bool) -> Result<()> {
     const M: f64 = 111320.0;
     let to_m = |lon: f64, lat: f64| ((lon - x0) * kx * M, (lat - y0) * M);
     let to_ll = |x: f64, y: f64| (x / (kx * M) + x0, y / M + y0);
+    let ref_ids: Vec<i64> = ways.iter().flat_map(|w| w.4.iter().copied()).collect::<HashSet<_>>().into_iter().collect();
+    let mut node_xy: HashMap<i64, P> = HashMap::new();
+    if !ref_ids.is_empty() {
+        c.exec("CREATE OR REPLACE TEMP TABLE _refs(osm_id BIGINT)")?;
+        let mut app = c.con.appender("_refs").map_err(|e| e.to_string())?;
+        for r in &ref_ids {
+            app.append_row([r]).map_err(|e| e.to_string())?;
+        }
+        app.flush().map_err(|e| e.to_string())?;
+        drop(app);
+        let sql = "SELECT n.osm_id, n.lon, n.lat FROM s.raw.nodes n JOIN _refs r USING (osm_id)";
+        let mut st = c.con.prepare(sql).map_err(|e| e.to_string())?;
+        for r in st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, f64>(1)?, r.get::<_, f64>(2)?))).map_err(|e| e.to_string())? {
+            let (o, lon, lat) = r.map_err(|e| e.to_string())?;
+            node_xy.insert(o, to_m(lon, lat));
+        }
+        drop(st);
+        c.exec("DROP TABLE _refs")?;
+    }
+    // only the lanes near a crossing need a surface: a surface for each lane of the area took most of the time and the
+    // memory of this step (Kentucky: 124 s)
+    const HOT_M: f64 = 50.0;
+    let mut hot: HashSet<(i64, i64)> = HashSet::new();
+    let mut heat = |e: (f64, f64, f64, f64)| hot.extend(cells((e.0 - HOT_M, e.1 - HOT_M, e.2 + HOT_M, e.3 + HOT_M)));
+    for w in &ways {
+        let pts: Vec<P> = w.4.iter().filter_map(|r| node_xy.get(r).copied()).collect();
+        if pts.len() >= 2 {
+            heat(shp_env(&pts));
+        }
+    }
+    for n in &nodes {
+        let p = to_m(n.1, n.2);
+        heat((p.0, p.1, p.0, p.1));
+    }
     let mut unbuffered = 0;
     let mut l = Lanes { id: vec![], link: vec![], way: vec![], width: vec![], level: vec![], conn: vec![], geom: vec![], poly: vec![], gpoly: vec![], env: vec![], tree: vec![], rank: vec![], grid: HashMap::new() };
     for (lid, lk, w, wkt, osm, ly, br, tu, is_conn) in &lanes {
         let g: Vec<P> = shp::wkt_points(wkt).into_iter().map(|(x, y)| to_m(x, y)).collect();
         if shp::length(&g) < 0.5 {
+            continue;
+        }
+        let (e, h) = (shp_env(&g), w / 2.0);
+        if !cells((e.0 - h, e.1 - h, e.2 + h, e.3 + h)).any(|k| hot.contains(&k)) {
             continue;
         }
         let Some(gp) = surface(&g, w / 2.0, &mut unbuffered) else { continue };
@@ -374,25 +412,6 @@ pub(crate) fn build_crossings(c: &Ctx, sch: &str, has_raw: bool) -> Result<()> {
         line: Vec<P>,
         only: Option<HashSet<usize>>,
         level: Option<i64>,
-    }
-    let ref_ids: Vec<i64> = ways.iter().flat_map(|w| w.4.iter().copied()).collect::<HashSet<_>>().into_iter().collect();
-    let mut node_xy: HashMap<i64, P> = HashMap::new();
-    if !ref_ids.is_empty() {
-        c.exec("CREATE OR REPLACE TEMP TABLE _refs(osm_id BIGINT)")?;
-        let mut app = c.con.appender("_refs").map_err(|e| e.to_string())?;
-        for r in &ref_ids {
-            app.append_row([r]).map_err(|e| e.to_string())?;
-        }
-        app.flush().map_err(|e| e.to_string())?;
-        drop(app);
-        let sql = "SELECT n.osm_id, n.lon, n.lat FROM s.raw.nodes n JOIN _refs r USING (osm_id)";
-        let mut st = c.con.prepare(sql).map_err(|e| e.to_string())?;
-        for r in st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, f64>(1)?, r.get::<_, f64>(2)?))).map_err(|e| e.to_string())? {
-            let (o, lon, lat) = r.map_err(|e| e.to_string())?;
-            node_xy.insert(o, to_m(lon, lat));
-        }
-        drop(st);
-        c.exec("DROP TABLE _refs")?;
     }
     let mut cands: Vec<Cand> = Vec::new();
     for (osm, ct, mk, wd, refs, ly, br, tu) in &ways {
