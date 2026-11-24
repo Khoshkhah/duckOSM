@@ -61,6 +61,10 @@ impl Db for NativeDb {
 
     fn build(&mut self, config: &str, dir: &Path, fixes: &Path, db: &Path) -> Result<String, String> {
         let fixes = std::fs::canonicalize(fixes).map_err(|e| format!("{}: {e}", fixes.display()))?;
+        // the build by tiles makes no base-map layers (features.*): an area that has them is built again as it was built first
+        if read_config(config, dir)?.params.features {
+            return build_whole(config, dir, db, &fixes);
+        }
         build_by_tiles(config, dir, db, Some(&fixes), &|_| {})
     }
 }
@@ -101,6 +105,30 @@ pub fn build_by_tiles(config: &str, dir: &Path, db: &Path, fixes: Option<&Path>,
     }
     record(db, config, dir)?;
     Ok(lines.join("\n"))
+}
+
+/// The build of the whole area in one process (`duckosm build -c`, the build of the first run), into the `.duckdb` file `db`, with the
+/// OSM fixes file `fixes`: for an area with the base-map layers, which the build by tiles does not make. The build writes the record.
+fn build_whole(config: &str, dir: &Path, db: &Path, fixes: &Path) -> Result<String, String> {
+    let file = dir.join("config.yaml");
+    std::fs::write(&file, config).map_err(|e| format!("{}: {e}", file.display()))?;
+    let db = std::path::absolute(db).map_err(|e| e.to_string())?;
+    let out = duckosm_build::self_command()
+        .map_err(|e| e.to_string())?
+        .current_dir(dir)
+        .args(["build", "-c"])
+        .arg(&file)
+        .arg("-o")
+        .arg(&db)
+        .arg("--fixes")
+        .arg(fixes)
+        .output()
+        .map_err(|e| format!("the build: {e}"))?;
+    let text = String::from_utf8_lossy(&out.stderr).to_string();
+    if !out.status.success() {
+        return Err(format!("the build failed: {}", text.lines().last().unwrap_or("")));
+    }
+    Ok(text)
 }
 
 /// Write the build's record into `db` (main.visualization_metadata: `build_config`, the config as YAML, and `build_dir`, the folder of

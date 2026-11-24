@@ -77,8 +77,9 @@ def test_cycleway_lane_is_an_explicit_bike_lane_beside_the_motor_lanes(tmp_path)
     lanes = c.execute(f"SELECT lane_num, allowed_uses, width FROM gmns_driving.lane WHERE link_id = {b} ORDER BY lane_num").fetchall()
     assert [(n, u) for n, u, _ in lanes] == [(1, "auto"), (2, "bike")] and lanes[1][2] == 1.8
     assert c.execute(f"SELECT lanes FROM gmns_driving.link WHERE link_id = {b}").fetchone()[0] == 1      # motor lanes only
-    # the movement into B still uses lane 1 only: the bike lane is not a place to turn into
-    assert c.execute(f"SELECT DISTINCT start_ob_lane, end_ob_lane FROM gmns_driving.movement WHERE ob_link_id = {b}").fetchall() == [(1, 1)]
+    # the car movement into B still uses lane 1 only: the bike lane is not a place for a car to turn into (with netconvert lanes a bike
+    # row of its own, allowed_uses bike, goes into the bike lane)
+    assert c.execute(f"SELECT DISTINCT start_ob_lane, end_ob_lane FROM gmns_driving.movement WHERE ob_link_id = {b} AND allowed_uses <> 'bike'").fetchall() == [(1, 1)]
     # and the bike lane lies right of the car lane (B heads south: right is west, x smaller)
     x = dict(c.execute(f"SELECT lane_num, ST_X(ST_StartPoint(geom)) FROM gmns_driving.lane WHERE link_id = {b}").fetchall())
     assert x[2] < x[1]
@@ -101,7 +102,7 @@ def test_a_left_bike_lane_on_a_one_way_road_is_lane_minus_one(tmp_path):
     c, b, _ = _bike_lane(tmp_path, {"oneway": "yes", "cycleway:left": "lane"})
     lanes = c.execute(f"SELECT lane_num, allowed_uses, width FROM gmns_driving.lane WHERE link_id = {b} ORDER BY lane_num").fetchall()
     assert [(n, u) for n, u, _ in lanes] == [(-1, "bike"), (1, "auto")] and lanes[0][2] < lanes[1][2]
-    assert c.execute(f"SELECT DISTINCT start_ob_lane, end_ob_lane FROM gmns_driving.movement WHERE ob_link_id = {b}").fetchall() == [(1, 1)]
+    assert c.execute(f"SELECT DISTINCT start_ob_lane, end_ob_lane FROM gmns_driving.movement WHERE ob_link_id = {b} AND allowed_uses <> 'bike'").fetchall() == [(1, 1)]
     # B heads south: its left is east (x larger)
     x = dict(c.execute(f"SELECT lane_num, ST_X(ST_StartPoint(geom)) FROM gmns_driving.lane WHERE link_id = {b}").fetchall())
     assert x[-1] > x[1]
