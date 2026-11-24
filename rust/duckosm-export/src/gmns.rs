@@ -138,11 +138,14 @@ pub struct GmnsOptions {
     pub walk_clearance_m: f64,
     /// The zoom of the map tiles of GMNS by tiles (docs/design/gmns_by_tiles.md). None: the whole area at once.
     pub tile_zoom: Option<u8>,
+    /// Which lane goes to which: `netconvert`, `rules` (SimReady's lane rules) or `auto` (netconvert when it is installed,
+    /// else the rules). docs/design/gmns_lane_rules.md.
+    pub lane_source: String,
 }
 
 impl Default for GmnsOptions {
     fn default() -> Self {
-        GmnsOptions { modes: vec![], lane_geometry: true, pair_carriageways: true, drive_side: "right".into(), combined: false, to_csv: None, csv_extensions: false, gtfs: vec![], gtfs_max_m: 30.0, walk_frame: false, walk_clearance_m: 0.0, tile_zoom: Some(TILE_ZOOM) }
+        GmnsOptions { modes: vec![], lane_geometry: true, pair_carriageways: true, drive_side: "right".into(), combined: false, to_csv: None, csv_extensions: false, gtfs: vec![], gtfs_max_m: 30.0, walk_frame: false, walk_clearance_m: 0.0, tile_zoom: Some(TILE_ZOOM), lane_source: "auto".into() }
     }
 }
 
@@ -268,13 +271,30 @@ fn build_gmns(source: &Path, out: &Path, name: &str, o: &GmnsOptions) -> Result<
         if mode == "driving" || mode == "cycling" {
             // which lane goes to which, from SUMO netconvert; driving: also the paths through the junctions and geom_cut. GMNS does
             // not need SUMO: without netconvert the movements have no lane ranges, and there is no lane_connector
-            if crate::sumo::find_netconvert().is_ok() {
-                crate::gmns_sumo::lanes_from_sumo(&c, source, &sch, mode, o.lane_geometry && mode == "driving", drive_side)?;
+            let netconvert = crate::sumo::find_netconvert().is_ok();
+            let use_rules = match o.lane_source.as_str() {
+                "rules" => true,
+                "netconvert" => {
+                    if !netconvert {
+                        return Err("--lane-source netconvert: netconvert (SUMO) not found. Install SUMO (`pip install eclipse-sumo`), or use --lane-source rules".into());
+                    }
+                    false
+                }
+                _ => !netconvert,
+            };
+            if use_rules {
+                // SimReady's lane rules (docs/design/gmns_lane_rules.md): the roundabout links of the source are the ring
+                let ring: HashSet<i64> = if c.src_cols(mode, "edges")?.contains("junction") {
+                    let sql = format!("SELECT edge_id FROM s.{mode}.edges WHERE junction IN ('roundabout', 'circular')");
+                    let mut st = c.con.prepare(&sql).map_err(|e| format!("{e}\n{sql}"))?;
+                    let v = st.query_map([], |r| r.get::<_, i64>(0)).map_err(|e| e.to_string())?.collect::<std::result::Result<_, _>>().map_err(|e| e.to_string())?;
+                    v
+                } else {
+                    HashSet::new()
+                };
+                crate::gmns_lane_rules::lanes_from_rules(&c, &sch, mode, o.lane_geometry && mode == "driving", drive_side, &ring)?;
             } else {
-                eprintln!(
-                    "GMNS[{mode}]: netconvert (SUMO) not found: the movements have no lanes (start_ib_lane ... end_ob_lane are empty) and \
-                     there is no lane_connector. Install SUMO (`pip install eclipse-sumo`) for them"
-                );
+                crate::gmns_sumo::lanes_from_sumo(&c, source, &sch, mode, o.lane_geometry && mode == "driving", drive_side)?;
             }
             if o.lane_geometry {
                 meet_lanes(&c, &sch)?;

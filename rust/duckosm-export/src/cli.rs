@@ -244,6 +244,10 @@ enum Cmd {
         /// Check the values of the result (ends on nodes, lengths, lane numbers, movements); exit 1 if a check fails.
         #[arg(long)]
         check: bool,
+        /// Which lane goes to which at each junction: netconvert (SUMO), rules (SimReady's lane rules, no SUMO needed), or auto
+        /// (netconvert when it is installed, else the rules). docs/design/gmns_lane_rules.md.
+        #[arg(long, default_value = "auto", value_parser = ["auto", "rules", "netconvert"])]
+        lane_source: String,
     },
     /// Export a Lanelet2 map (.osm) from a GMNS db: each lane is a lanelet, with left and right boundaries (the centerline
     /// offset by half the lane width) and the tags subtype, one_way and speed_limit. A lane map in the format of Autoware and
@@ -421,6 +425,7 @@ pub fn run(args: &[String]) -> Result<()> {
             csv_extensions,
             check,
             tile_zoom,
+            lane_source,
             ..
         } => {
             check_db(&db)?;
@@ -441,6 +446,7 @@ pub fn run(args: &[String]) -> Result<()> {
                 walk_frame,
                 walk_clearance_m: walk_clearance,
                 tile_zoom: (tile_zoom > 0).then_some(tile_zoom),
+                lane_source,
             };
             let res = crate::gmns::to_gmns_with(&db, &out, &o)?;
             println!("wrote {}", out.display());
