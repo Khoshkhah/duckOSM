@@ -1361,12 +1361,12 @@ fn meet_lanes(c: &Ctx, sch: &str) -> Result<usize> {
             app.flush().map_err(|e| e.to_string())?;
         }
         let at_rid: HashMap<i64, usize> = need.iter().map(|&j| (rid[j], j)).collect();
-        let sql = format!("SELECT rowid, ST_AsText(geom) FROM {sch}.lane WHERE rowid IN (SELECT r FROM _need)");
+        let sql = format!("SELECT rowid, ST_AsWKB(geom)::BLOB FROM {sch}.lane WHERE rowid IN (SELECT r FROM _need)");
         let mut st = c.con.prepare(&sql).map_err(|e| format!("{e}\n{sql}"))?;
         let mut line: HashMap<usize, Vec<P>> = HashMap::new();
-        for r in st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))).map_err(|e| e.to_string())? {
+        for r in st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, Vec<u8>>(1)?))).map_err(|e| e.to_string())? {
             let (r0, w) = r.map_err(|e| e.to_string())?;
-            line.insert(at_rid[&r0], shp::wkt_points(&w));
+            line.insert(at_rid[&r0], crate::gmns_lane_rules::from_wkb(&w));
         }
         drop(st);
         let get = |moved: &Vec<(usize, Vec<P>)>, at: &HashMap<usize, usize>, j: usize| -> Vec<P> { at.get(&j).map(|&i| moved[i].1.clone()).unwrap_or_else(|| line[&j].clone()) };
@@ -1626,7 +1626,7 @@ fn build_movement(c: &Ctx, sch: &str, mode: &str, uses: &str) -> Result<()> {
     let eg_uses = if has_uses { "uses".to_string() } else { own.clone() };
     let bez = bezier_line_sql("t.x0", "t.y0", "t.cx0", "t.cy0", "t.cx1", "t.cy1", "t.x1", "t.y1");
     c.exec(&format!(
-        "CREATE TEMP TABLE _mv_all AS
+        "CREATE TABLE {sch}.movement AS
       WITH mv AS (
         SELECT eg.from_edge AS ib, eg.to_edge AS ob, fe.target AS node_id, eg.uses = {own} AS _own,
                CASE WHEN eg._perm THEN eg.uses WHEN eg.uses = {own} THEN '{uses}'
@@ -1691,10 +1691,13 @@ fn build_movement(c: &Ctx, sch: &str, mode: &str, uses: &str) -> Result<()> {
       FROM cp t
       LEFT JOIN _sig sig ON sig.osm_id = t.node_id"
     ))?;
-    c.exec(&format!("CREATE TABLE {sch}.movement AS SELECT * EXCLUDE (_own) FROM _mv_all WHERE _own"))?;
-    c.exec("CREATE TEMP TABLE _mv_bus AS SELECT * EXCLUDE (_own) FROM _mv_all WHERE node_id IN (SELECT node_id FROM _mv_all WHERE NOT _own)")?;
-    c.exec("CREATE TEMP TABLE _bus_mv_ids AS SELECT mvmt_id FROM _mv_all WHERE NOT _own")?;
-    c.exec("DROP TABLE _mv_all")?;
+    // the movement table with all rows at once (a copy of 3.8 million rows took 5.6 s on Kentucky); the bus-only rows go out
+    c.exec(&format!(
+        "CREATE TEMP TABLE _mv_bus AS SELECT * EXCLUDE (_own) FROM {sch}.movement WHERE node_id IN (SELECT node_id FROM {sch}.movement WHERE NOT _own);
+         CREATE TEMP TABLE _bus_mv_ids AS SELECT mvmt_id FROM {sch}.movement WHERE NOT _own;
+         DELETE FROM {sch}.movement WHERE NOT _own;
+         ALTER TABLE {sch}.movement DROP COLUMN _own"
+    ))?;
     let n_bus = c.count("SELECT count(*) FROM _bus_mv_ids")?;
     fork_types(c, sch, &format!("{sch}.movement"))?;
     if n_bus > 0 {
@@ -1874,67 +1877,82 @@ impl LaneGeo {
             roads_at.entry(v.source).or_default().insert(v.osm_id);
             roads_at.entry(v.target).or_default().insert(v.osm_id);
         }
-        for e in &order {
-            let Some(ce) = g.centring(*e) else { continue };
-            let v = g.info[e].clone();
-            let on: Vec<i64> = at_src
-                .get(&v.target)
-                .map(|fs| {
-                    fs.iter()
-                        .copied()
-                        .filter(|f| *f != *e && g.info[f].target != v.source && g.centring(*f).is_some() && (lanes::pymod(g.info[f].h0 - v.h1 + 180.0, 360.0) - 180.0).abs() < 30.0)
-                        .collect()
-                })
-                .unwrap_or_default();
-            if on.len() != 1 || roads_at[&v.target] != HashSet::from([v.osm_id, g.info[&on[0]].osm_id]) {
-                continue;
-            }
-            let f = on[0];
-            let ds = g.centring(f).unwrap() - ce;
-            if ds.abs() < 0.05 {
-                continue;
-            }
-            let half_l = ds.abs() * lanes::LANE_TAPER_PER_M / 2.0;
-            let te = g.taper.entry(*e).or_insert([0.0; 4]);
+        // each edge on its own, on all cores; the results go in, in the order of the edges, as before
+        use rayon::prelude::*;
+        let tapers: Vec<(i64, i64, f64, f64)> = order
+            .par_iter()
+            .filter_map(|e| {
+                let ce = g.centring(*e)?;
+                let v = &g.info[e];
+                let on: Vec<i64> = at_src
+                    .get(&v.target)
+                    .map(|fs| {
+                        fs.iter()
+                            .copied()
+                            .filter(|f| *f != *e && g.info[f].target != v.source && g.centring(*f).is_some() && (lanes::pymod(g.info[f].h0 - v.h1 + 180.0, 360.0) - 180.0).abs() < 30.0)
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                if on.len() != 1 || roads_at[&v.target] != HashSet::from([v.osm_id, g.info[&on[0]].osm_id]) {
+                    return None;
+                }
+                let f = on[0];
+                let ds = g.centring(f).unwrap() - ce;
+                if ds.abs() < 0.05 {
+                    return None;
+                }
+                Some((*e, f, ds, ds.abs() * lanes::LANE_TAPER_PER_M / 2.0))
+            })
+            .collect();
+        for (e, f, ds, half_l) in tapers {
+            let te = g.taper.entry(e).or_insert([0.0; 4]);
             te[2] = ds / 2.0;
-            te[3] = half_l.min(facts[e].length_m / 2.0);
+            te[3] = half_l.min(facts[&e].length_m / 2.0);
             let tf = g.taper.entry(f).or_insert([0.0; 4]);
             tf[0] = -ds / 2.0;
             tf[1] = half_l.min(facts[&f].length_m / 2.0);
         }
         // a carriageway leaves a two-way road in OSM's V: its lanes go straight on from the two-way road's lanes
-        for e in &order {
-            if g.centring(*e).is_none() {
-                continue;
-            }
-            let v = g.info[e].clone();
-            for (at_end, node) in [(true, v.target), (false, v.source)] {
-                if roads_at[&node].len() != 3 {
-                    continue;
+        let vs: Vec<(i64, i64, bool)> = order
+            .par_iter()
+            .flat_map_iter(|e| {
+                let mut got = Vec::new();
+                if g.centring(*e).is_none() {
+                    return got;
                 }
-                let empty = Vec::new();
-                let cands = if at_end { at_src.get(&node).unwrap_or(&empty) } else { at_tgt.get(&node).unwrap_or(&empty) };
-                let on: Vec<i64> = cands
-                    .iter()
-                    .copied()
-                    .filter(|f| {
-                        let fi = &g.info[f];
-                        let d = if at_end { fi.h0 - v.h1 } else { v.h0 - fi.h1 };
-                        fi.oneway && fi.osm_id != v.osm_id && g.w_of[f].len() == g.w_of[e].len() && lanes::pymod((d + 180.0).abs(), 360.0) - 180.0 < 30.0
-                    })
-                    .collect();
-                if on.len() != 1 {
-                    continue;
+                let v = &g.info[e];
+                for (at_end, node) in [(true, v.target), (false, v.source)] {
+                    if roads_at[&node].len() != 3 {
+                        continue;
+                    }
+                    let empty = Vec::new();
+                    let cands = if at_end { at_src.get(&node).unwrap_or(&empty) } else { at_tgt.get(&node).unwrap_or(&empty) };
+                    let on: Vec<i64> = cands
+                        .iter()
+                        .copied()
+                        .filter(|f| {
+                            let fi = &g.info[f];
+                            let d = if at_end { fi.h0 - v.h1 } else { v.h0 - fi.h1 };
+                            fi.oneway && fi.osm_id != v.osm_id && g.w_of[f].len() == g.w_of[e].len() && lanes::pymod((d + 180.0).abs(), 360.0) - 180.0 < 30.0
+                        })
+                        .collect();
+                    if on.len() != 1 {
+                        continue;
+                    }
+                    let third: HashSet<i64> = roads_at[&node].iter().copied().filter(|x| *x != v.osm_id && *x != g.info[&on[0]].osm_id).collect();
+                    let (bl, al) = if at_end { (at_tgt.get(&node), at_src.get(&node)) } else { (at_src.get(&node), at_tgt.get(&node)) };
+                    let back: Vec<i64> = bl.unwrap_or(&empty).iter().copied().filter(|x| third.contains(&g.info[x].osm_id)).collect();
+                    let ahead = al.unwrap_or(&empty).iter().any(|x| third.contains(&g.info[x].osm_id));
+                    if back.len() != 1 || ahead || !g.info[&back[0]].oneway {
+                        continue;
+                    }
+                    got.push((on[0], *e, at_end));
                 }
-                let third: HashSet<i64> = roads_at[&node].iter().copied().filter(|x| *x != v.osm_id && *x != g.info[&on[0]].osm_id).collect();
-                let (bl, al) = if at_end { (at_tgt.get(&node), at_src.get(&node)) } else { (at_src.get(&node), at_tgt.get(&node)) };
-                let back: Vec<i64> = bl.unwrap_or(&empty).iter().copied().filter(|x| third.contains(&g.info[x].osm_id)).collect();
-                let ahead = al.unwrap_or(&empty).iter().any(|x| third.contains(&g.info[x].osm_id));
-                if back.len() != 1 || ahead || !g.info[&back[0]].oneway {
-                    continue;
-                }
-                g.vfix.insert(on[0], (*e, at_end));
-            }
+                got
+            })
+            .collect();
+        for (k, e, at_end) in vs {
+            g.vfix.insert(k, (e, at_end));
         }
         if !lane_geometry {
             return Ok(g);
@@ -2166,7 +2184,17 @@ fn build_lane_curb(c: &Ctx, sch: &str, mode: &str, uses: &str, has_raw: bool, dr
     let mut w_of: HashMap<i64, Vec<f64>> = HashMap::new();
     let mut facts: HashMap<i64, EdgeFacts> = HashMap::new();
     {
-        let sql = format!("SELECT {LANE_COLS} FROM _lc ORDER BY rowid");
+        // with the lane profile, this pass reads only these tags (placement, level, roundabout, foot): a full tag map for
+        // each row was slow
+        let cols = if has_prof {
+            LANE_COLS.replace(
+                "tags,",
+                "map_from_entries(list_filter(map_entries(tags), x -> x.key IN ('highway', 'placement', 'placement:forward', 'placement:backward', 'layer', 'bridge', 'tunnel', 'junction'))) AS tags,",
+            )
+        } else {
+            LANE_COLS.to_string()
+        };
+        let sql = format!("SELECT {cols} FROM _lc ORDER BY rowid");
         let mut st = c.con.prepare(&sql).map_err(|e| format!("{e}\n{sql}"))?;
         for r in st.query_map([], lane_row).map_err(|e| e.to_string())? {
             let r = r.map_err(|e| e.to_string())?;
