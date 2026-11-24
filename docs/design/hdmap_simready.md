@@ -1,6 +1,6 @@
 # The HD map: duckOSM runs SimReady (`duckosm hdmap`)
 
-Status: design, waits for sign-off. No code yet.
+Status: approved by Kaveh on 2026-11-24 (with both databases as required inputs, and the name `duckosm-sim build`).
 
 | Date | Decision (Kaveh) |
 |---|---|
@@ -49,6 +49,7 @@ The command writes one folder, `<area>_hdmap_input/`. It is the contract between
 | `gmns.duckdb` | the network: links with `refs` and `z_vertices`, lanes, movements, chains, crossings, nodes, `config`, `main.elevation_metadata` | the GMNS database (a copy, or a link to it) |
 | `raw_nodes.parquet`, `raw_ways.parquet`, `raw_relations.parquet` | the OSM tags, with the fixes of the build: kerbs, building walls, bridge relations, widths, `ele` | `raw.*` of the routing database |
 | `elevation_grid.parquet` | the ground raster | `main.elevation_grid` of the routing database. Not written when the build has none |
+| `fixes.yaml` | the fixes file of the build, as it was at the build | `main.fixes.yaml` of the routing database. Not written when the build had no fixes file |
 | `input.json` | the manifest (below) | new |
 
 `input.json`:
@@ -59,8 +60,7 @@ The command writes one folder, `<area>_hdmap_input/`. It is the contract between
 | `area` | the area name |
 | `duckosm_version` | the version that wrote the input |
 | `ground_id` | the `sha256` of `main.elevation_metadata`, or empty |
-| `files` | each file with its `sha256` |
-| `fixes` | the fixes file of the build (`osm_overrides`), when the build named one |
+| `files` | each file with its `sha256` (DuckDB `sha256(content)` of `read_blob`) |
 
 Checks before SimReady runs. Each failed check stops the command with a message:
 
@@ -119,12 +119,11 @@ SimReady must add this `build` command (its own work, in its repository):
 
 ## Steps after sign-off
 
-1. duckOSM: `src/duckosm/hdmap_run.py` (the input folder, the checks, the run) and the CLI command `duckosm hdmap`;
+1. duckOSM, in Rust (the library is Rust; Python is a thin layer): `rust/duckosm-export/src/hdmap_run.rs` (the input
+   folder, the checks, the run), the command `hdmap` in `duckosm-export/src/cli.rs`, and a pass-through `duckosm hdmap`
+   in `cli.py`;
    tests with a fake `duckosm-sim` (a small script that checks the input folder and writes an empty output), and a
    real run on Monaco when SimReady is installed.
 2. SimReady (its session): the `build` command on the input folder.
 3. Docs: the Level 4 page, the command line page, the SDK page.
 
-## Questions for Kaveh
-
-1. Name of SimReady's new command: `duckosm-sim build` (`duckosm-sim` is SimReady's program today), or another name?
