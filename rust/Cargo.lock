@@ -858,7 +858,7 @@ dependencies = [
 
 [[package]]
 name = "duckosm-build"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "arrow-array 60.0.0",
  "dbase",
@@ -887,7 +887,7 @@ dependencies = [
 
 [[package]]
 name = "duckosm-cli"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "clap",
  "duckdb",
@@ -903,7 +903,7 @@ dependencies = [
 
 [[package]]
 name = "duckosm-core"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "flate2",
  "geo",
@@ -924,7 +924,7 @@ dependencies = [
 
 [[package]]
 name = "duckosm-duckdb"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "arrow-array 60.0.0",
  "arrow-schema 60.0.0",
@@ -935,7 +935,7 @@ dependencies = [
 
 [[package]]
 name = "duckosm-edit"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "base64 0.22.1",
  "clap",
@@ -956,11 +956,11 @@ dependencies = [
 
 [[package]]
 name = "duckosm-editor"
-version = "0.8.0"
+version = "0.9.0"
 
 [[package]]
 name = "duckosm-export"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "clap",
  "duckdb",
@@ -975,7 +975,7 @@ dependencies = [
 
 [[package]]
 name = "duckosm-parquet"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "arrow-array 60.0.0",
  "arrow-schema 60.0.0",
@@ -989,7 +989,7 @@ dependencies = [
 
 [[package]]
 name = "duckosm-planner"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "duckosm-router",
  "serde_json",
@@ -997,7 +997,7 @@ dependencies = [
 
 [[package]]
 name = "duckosm-py"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "clap",
  "duckdb",
@@ -1015,7 +1015,7 @@ dependencies = [
 
 [[package]]
 name = "duckosm-route"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "clap",
  "duckdb",
@@ -1030,11 +1030,11 @@ dependencies = [
 
 [[package]]
 name = "duckosm-router"
-version = "0.8.0"
+version = "0.9.0"
 
 [[package]]
 name = "duckosm-tools"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "clap",
  "duckdb",

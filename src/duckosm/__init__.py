@@ -13,7 +13,7 @@ module for each group of users: ``analysis``, ``gis``, ``routing``, ``sim``, ``p
 >>> net.map()
 """
 
-__version__ = "0.8.0"
+__version__ = "0.9.0"
 
 _NAMES = {
     "DuckOSM": "duckosm.importer", "Config": "duckosm.config",

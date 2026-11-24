@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.9.0 (2026-11-24)
 
 - **`duckosm gmns`: the lane rules by default, the whole area at once, no tiles.** Each GMNS step works in chunks (junctions,
   road runs, lanes), so the memory stays about the same on a large area (docs/design/gmns_streaming.md). Kentucky (driving,
@@ -23,7 +23,7 @@
   `docs/reference/database.md`: `SELECT comment FROM duckdb_columns()`. The Rust build reads the page at compile time;
   the sdist includes it. The step writes a comment only for a table or a column that is in the file. Monaco, three
   modes: 247 of 428 columns have a comment, before 0.
-- **`duckosm gmns` by tiles.** An area with nodes in two or more map tiles (zoom 9, the tiles of `cut` and the build by
+- **`duckosm gmns` by tiles** (replaced in this release: GMNS now works in chunks with no tiles, the first entry). An area with nodes in two or more map tiles (zoom 9, the tiles of `cut` and the build by
   tiles; `--tile-zoom`, 0: the whole area) is made one tile at a time: a tile source with a band of 2 km, the GMNS steps
   without a change, then the rows that the tile owns. Kentucky (driving, with netconvert): 4.9 GB, before 25.9 GB.
   Without netconvert, each column but `lane.geom` is equal to the whole export; the lane lines can differ (the whole
