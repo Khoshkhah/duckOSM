@@ -125,15 +125,15 @@ Made from SimReady's `schema.sql` (commit `{commit}`) by `tools/hdmap_tables_pag
 
 Two trees meet at the lane: along the road, and at the junction. The project holds both.
 
-**Along the road**
+### Schema: along the road
 
 {diagrams[0]}
 
-**At the junction**
+### Schema: at the junction
 
 {diagrams[1]}
 
-**The project**
+### Schema: the project
 
 {project}
 

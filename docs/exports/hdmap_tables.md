@@ -19,7 +19,7 @@ Made from SimReady's `schema.sql` (commit `df192a3`) by `tools/hdmap_tables_page
 
 Two trees meet at the lane: along the road, and at the junction. The project holds both.
 
-**Along the road**
+### Schema: along the road
 
 ```mermaid
 erDiagram
@@ -37,7 +37,7 @@ erDiagram
     lane ||--o| lane : "succeeds"
 ```
 
-**At the junction**
+### Schema: at the junction
 
 ```mermaid
 erDiagram
@@ -58,7 +58,7 @@ erDiagram
     signal_phase }o--o{ movement : serves
 ```
 
-**The project**
+### Schema: the project
 
 ```mermaid
 erDiagram
