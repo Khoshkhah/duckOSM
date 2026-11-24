@@ -225,7 +225,7 @@ nav:
       - Configuration: reference/configuration.md
       - The boundary file: reference/boundary.md
       - Routable network tables: reference/database.md
-      - GMNS tables: exports/gmns_tables.md
+      - GMNS network tables: exports/gmns_tables.md
       - HD map tables: exports/hdmap_tables.md
       - Base-map layers: reference/features.md
       - Elevation sources: reference/elevation-sources.md

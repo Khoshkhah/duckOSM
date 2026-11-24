@@ -52,4 +52,4 @@ The GMNS tables have the entities of a heterogeneous graph, and you can read the
 | `movement` | a legal turn, with its lanes in and out | `mvmt_id`, `node_id`, `ib_link_id`, `ob_link_id` |
 | `signal_controller` | a node with traffic lights (OSM has no signal timing) | `controller_id`, `node_id` |
 
-For the full specification, see [GMNS](../gmns.md) and the [GMNS tables reference](../gmns_tables.md).
+For the full specification, see [GMNS](../gmns.md) and the [GMNS network tables](../gmns_tables.md).

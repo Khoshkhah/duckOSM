@@ -9,7 +9,8 @@ Every command, function, setting and table, for look-up.
 | [Rust SDK](rust.md) | The Rust crates of the engine and how to use them. |
 | [Configuration](configuration.md) | Every setting of the YAML config file of a build. |
 | [The boundary file](boundary.md) | The format of a boundary file, and how to make one. |
-| [Routable network tables](database.md) | Every table and column that a build writes. |
-| [GMNS tables](../exports/gmns_tables.md) | Every table and column of the GMNS database of `duckosm gmns`. |
+| [Routable network tables](database.md) | Every table and column of the routable network database (`<area>.duckdb`) of `duckosm build`. |
+| [GMNS network tables](../exports/gmns_tables.md) | Every table and column of the GMNS network database (`<area>_gmns.duckdb`) of `duckosm gmns`. |
+| [HD map tables](../exports/hdmap_tables.md) | Every table and column of the HD map database (`<area>_hdmap.duckdb`) of `duckosm hdmap` (SimReady). |
 | [Base-map layers](features.md) | The layers of the `features` schema and their classes. |
 | [Elevation sources](elevation-sources.md) | Where `duckosm elevation` gets its heights, and how the sources compare. |

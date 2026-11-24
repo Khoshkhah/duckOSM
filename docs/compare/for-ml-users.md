@@ -54,7 +54,7 @@ The GMNS db (`<area>_gmns.duckdb`) has the entities of a heterogeneous graph. Yo
 | `movement` | a legal turn, with its lanes in and out | `mvmt_id`, `node_id`, `ib_link_id`, `ob_link_id` |
 | `signal_controller` | a node with traffic lights (OSM has no signal timing) | `controller_id`, `node_id` |
 
-The columns of each table are in the [GMNS tables reference](../exports/gmns_tables.md).
+The columns of each table are in the [GMNS network tables](../exports/gmns_tables.md).
 
 ## duckOSM and city2graph
 

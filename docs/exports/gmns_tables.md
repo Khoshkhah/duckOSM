@@ -1,4 +1,4 @@
-# GMNS tables
+# GMNS network tables
 
 Each table of the GMNS database of [`duckosm gmns`](gmns.md), and each of its columns. The standard: the
 [GMNS specification](https://zephyr-data-specs.github.io/GMNS/spec/) 0.97.
