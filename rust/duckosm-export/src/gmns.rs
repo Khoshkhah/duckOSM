@@ -361,12 +361,19 @@ fn build_gmns(source: &Path, out: &Path, name: &str, o: &GmnsOptions) -> Result<
             dump_csv(&c, &["all".to_string()], &dir.join("combined"), o.csv_extensions)?;
         }
     }
+    // the ground of the heights (docs/concepts/ground-reference.md): the same table as in the source db
+    if c.exists("main", "elevation_metadata")? {
+        c.exec("CREATE OR REPLACE TABLE main.elevation_metadata AS SELECT * FROM s.main.elevation_metadata")?;
+    }
     c.exec("DETACH s")?;
     Ok(GmnsSummary { modes: summary, combined })
 }
 
 /// `_build_combined`: one mode-tagged `gmns_all` network: the modes' nodes and links merged on their id, `allowed_uses` the
 /// union of the modes that have the link. Returns (nodes, links).
+/// `config.duckosm_version`: the duckOSM version that wrote the GMNS database, as in `main.elevation_metadata`.
+const DUCKOSM_VERSION: &str = concat!("duckosm ", env!("CARGO_PKG_VERSION"));
+
 fn build_combined(c: &Ctx, modes: &[String], name: &str) -> Result<(i64, i64)> {
     let union = |t: &str, all: &str| modes.iter().map(|m| format!("SELECT * FROM gmns_{m}.{t}")).collect::<Vec<_>>().join(all);
     // the node and link rows with the place of their mode: a column takes the first value in the order of the modes
@@ -374,8 +381,8 @@ fn build_combined(c: &Ctx, modes: &[String], name: &str) -> Result<(i64, i64)> {
     c.exec(&format!(
         "CREATE SCHEMA gmns_all;
          CREATE TABLE gmns_all.config AS SELECT * FROM (VALUES
-           ('{name}_all', 'meter', 'meter', 'kmh', 'EPSG:4326', 'wkt', NULL::VARCHAR, 0.97::DOUBLE, 'integer')
-         ) t(dataset_name, short_length, long_length, speed, crs, geometry_field_format, currency, version_number, id_type);
+           ('{name}_all', 'meter', 'meter', 'kmh', 'EPSG:4326', 'wkt', NULL::VARCHAR, 0.97::DOUBLE, 'integer', '{DUCKOSM_VERSION}')
+         ) t(dataset_name, short_length, long_length, speed, crs, geometry_field_format, currency, version_number, id_type, duckosm_version);
          CREATE TABLE gmns_all.use_definition AS {};
          CREATE TABLE gmns_all.use_group AS {};
          CREATE TABLE gmns_all.node AS
@@ -413,8 +420,9 @@ fn build_combined(c: &Ctx, modes: &[String], name: &str) -> Result<(i64, i64)> {
 /// The non-spec columns of each table, left out of the CSVs (`_CSV_EXCLUDE`).
 fn csv_exclude(t: &str) -> &'static [&'static str] {
     match t {
+        "config" => &["duckosm_version"],
         "node" => &["geom"],
-        "link" => &["geom", "osm_id", "edge_ref", "footway", "crossing", "crossing_markings", "along_link_id", "along_mode", "along_gap_m", "along_kind", "bridge", "tunnel", "layer"],
+        "link" => &["geom", "osm_id", "edge_ref", "footway", "crossing", "crossing_markings", "along_link_id", "along_mode", "along_gap_m", "along_kind", "bridge", "tunnel", "layer", "refs", "z_vertices"],
         "geometry" => &["geom"],
         "lane" => &["geom", "geom_cut", "turn"],
         "location" => &["osm_id", "name", "geom"],
@@ -444,9 +452,10 @@ fn dump_csv(c: &Ctx, modes: &[String], to_csv: &Path, extensions: bool) -> Resul
             let excl: Vec<&str> = csv_exclude(t).iter().copied().filter(|col| kinds.contains_key(*col)).collect();
             let mut sel = if excl.is_empty() { "*".to_string() } else { format!("* EXCLUDE ({})", excl.join(", ")) };
             if !excl.is_empty() && extensions {
-                // the extension columns as the spec's user-defined u_ fields
+                // the extension columns as the spec's user-defined u_ fields; not a geometry and not a list
                 for col in &excl {
-                    if kinds.get(*col).map(|k| k.as_str()) != Some("GEOMETRY") {
+                    let k = kinds.get(*col).map(|k| k.as_str()).unwrap_or("");
+                    if k != "GEOMETRY" && !k.ends_with("[]") {
                         sel.push_str(&format!(", {col} AS u_{col}"));
                     }
                 }
@@ -462,10 +471,10 @@ fn dump_csv(c: &Ctx, modes: &[String], to_csv: &Path, extensions: bool) -> Resul
 fn build_fixed(c: &Ctx, sch: &str, name: &str, mode: &str, uses: &str) -> Result<()> {
     c.exec(&format!(
         "CREATE TABLE {sch}.config AS SELECT * FROM (VALUES
-      ('{name}_{mode}', 'meter', 'meter', 'kmh', 'EPSG:4326', 'wkt', NULL::VARCHAR, 0.97::DOUBLE, 'integer')
+      ('{name}_{mode}', 'meter', 'meter', 'kmh', 'EPSG:4326', 'wkt', NULL::VARCHAR, 0.97::DOUBLE, 'integer', '{DUCKOSM_VERSION}')
     ) t(dataset_name, short_length, long_length, speed, crs, geometry_field_format,
-        currency, version_number, id_type)"
-    ))?;
+        currency, version_number, id_type, duckosm_version)"
+    ).replace("{DUCKOSM_VERSION}", DUCKOSM_VERSION))?;
     // every use a lane can carry must be defined: a driving network's lanes are auto, bus or bike
     let mut defined = vec![uses];
     if mode == "driving" {
@@ -652,6 +661,9 @@ fn build_link(c: &Ctx, sch: &str, mode: &str, uses: &str, has_raw: bool) -> Resu
     let lvl: Vec<String> =
         ["bridge", "tunnel", "layer"].iter().map(|k| if cols.contains(*k) { format!("e.{k}") } else { format!("NULL::VARCHAR AS {k}") }).collect();
     let edge_ref = if cols.contains("edge_ref") { "e.edge_ref AS edge_ref" } else { "NULL::VARCHAR AS edge_ref" };
+    // the OSM node ids and the ground heights at each vertex of the line (`duckosm elevation`), as the source edge has them
+    let refs = if cols.contains("refs") { "e.refs AS refs" } else { "NULL::BIGINT[] AS refs" };
+    let zv = if cols.contains("z_vertices") { "e.z_vertices::DOUBLE[] AS z_vertices" } else { "NULL::DOUBLE[] AS z_vertices" };
     let footway = if has_raw { "w.tags['footway'] AS footway" } else { "NULL::VARCHAR AS footway" };
     let crossing = if has_raw {
         "CASE WHEN w.tags['footway'] = 'crossing' THEN w.tags['crossing'] END AS crossing, \
@@ -690,7 +702,7 @@ fn build_link(c: &Ctx, sch: &str, mode: &str, uses: &str, has_raw: bool) -> Resu
       e.maxspeed_kmh AS free_speed, CASE WHEN e._bus THEN 1 WHEN {motor} THEN COALESCE(li.lanes, e.lanes) END AS lanes,
       {bike} AS bike_facility, {ped} AS ped_facility, NULL::VARCHAR AS parking,
       CASE WHEN e._bike THEN 'bus,bike' WHEN e._bus THEN 'bus' ELSE '{uses}' END AS allowed_uses,
-      NULL::DOUBLE AS toll, NULL::VARCHAR AS jurisdiction, NULL::DOUBLE AS row_width, abs(e.osm_id) AS osm_id, {edge_ref}, {footway}, {crossing}, {lvl}, e.geometry AS geom
+      NULL::DOUBLE AS toll, NULL::VARCHAR AS jurisdiction, NULL::DOUBLE AS row_width, abs(e.osm_id) AS osm_id, {edge_ref}, {footway}, {crossing}, {lvl}, {refs}, {zv}, e.geometry AS geom
     FROM {from} e {raw_join} LEFT JOIN _lanes_inf li ON li.edge_id = e.edge_id",
             lvl = lvl.join(", ")
         )

@@ -22,11 +22,10 @@ The column "Spec" says where a column comes from:
 
 ## The tables
 
-In the GMNS database (`<area>_gmns.duckdb`), **every table belongs to a network schema**. There are no tables in the default `main` schema.
+In the GMNS database (`<area>_gmns.duckdb`), **every network table belongs to a network schema**. The default `main`
+schema has one table: [`elevation_metadata`](#elevation_metadata), when the source db has heights.
 
 ### The network schemas
-
-In the GMNS database (`<area>_gmns.duckdb`), **every table belongs to a schema**. There are no tables in the default `main` schema.
 
 #### Macro schemas (`duckosm gmns`)
 * **`gmns_driving` (18 tables, with netconvert):** Driving network for cars, buses, and trucks. Includes lanes, turns, signals, curb parking, crosswalks, intersection turn curves, and the road chains (`chains`).
@@ -81,6 +80,7 @@ In the GMNS database (`<area>_gmns.duckdb`), **every table belongs to a schema**
 | `geometry_field_format` | VARCHAR | ✅ | `wkt` |
 | `version_number` | DOUBLE | ✅ | `0.97` |
 | `id_type` | VARCHAR | ✅ | `integer` |
+| `duckosm_version` | VARCHAR | ➕ | the duckOSM version that wrote the database, for example `duckosm 0.8.0` |
 | `currency` | VARCHAR | ∅ | empty |
 
 ## use_definition
@@ -140,6 +140,8 @@ In the GMNS database (`<area>_gmns.duckdb`), **every table belongs to a schema**
 | `footway`, `crossing`, `crossing_markings` | VARCHAR | ➕ | the OSM tags of a footway or a crossing |
 | `along_link_id`, `along_mode`, `along_gap_m`, `along_kind` | | ➕ | on a footpath: the road it runs along, its network, the distance, and `sidewalk` or `adjacent` |
 | `bridge`, `tunnel`, `layer` | VARCHAR | ➕ | the OSM tags |
+| `refs` | BIGINT[] | ➕ | the OSM node ids at each vertex of the shape, in its order. Copied from the source db's `edges.refs` |
+| `z_vertices` | DOUBLE[] | ➕ | the ground height in metres at each vertex of the shape, in its order, after [`duckosm elevation`](../guides/elevation.md). Copied from `edges.z_vertices`. Empty on a bus-only link |
 | `geom` | GEOMETRY | ➕ | the shape |
 
 ## geometry
@@ -267,9 +269,10 @@ end of each footway to the nearest road lane, where they meet at a node.
 ## chains
 
 Driving only. One row for each chain: the links of one road between two real junctions, joined again over the footway
-crossings. It comes from the Level 2 [`driving.chains`](../reference/database.md#chains), with two changes: a chain is cut
-where the GMNS lanes change (a merged SUMO edge has the lanes of its last link), and a link in no Level 2 chain (a bus-only
-link) is a chain of one link. Each driving link is in one chain. A source db with no `driving.chains` (an old build, or
+crossings. It comes from the Level 2 [`driving.chains`](../reference/database.md#chains), with three changes: a chain is cut
+where the GMNS lanes change (a merged SUMO edge has the lanes of its last link); a link in no Level 2 chain (a bus-only
+link) is a chain of one link; and a chain is cut at each node inside it where another chain ends, so the two directions of
+a two-way road end at the same nodes. Each driving link is in one chain. A source db with no `driving.chains` (an old build, or
 `--no-chains`) gives one chain for each link, so `--merge` changes nothing. `duckosm sumo --merge` and `duckosm matsim --merge` read it.
 
 | Column | Type | Holds |
@@ -279,6 +282,13 @@ link) is a chain of one link. Each driving link is in one chain. A source db wit
 | `link_ids` | BIGINT[] | the links, in driving order |
 | `length` | DOUBLE | metres, the sum of the link lengths |
 | `geom` | GEOMETRY | the link lines joined into one line |
+
+## elevation_metadata
+
+In the `main` schema, when the source db has heights: a copy of the source db's
+[`main.elevation_metadata`](../reference/database.md#elevation_metadata). It names the
+[ground of the area](../concepts/ground-reference.md) that `node.z_coord`, `link.grade` and `link.z_vertices` come
+from: `sha256` is the ground id, with `product` and `vertical_datum`.
 
 ## lane_check
 

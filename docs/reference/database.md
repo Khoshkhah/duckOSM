@@ -271,7 +271,9 @@ Driving only, with `options.chains` (on; `--no-chains` turns it off). One row fo
 footway crossing). The edges keep every cut, because the multimodal routing needs them. An export can write one
 edge or link for each chain: `to_sumo(..., merge=True)`, `to_matsim(..., merge=True)`. `duckosm gmns` copies the chains into `gmns_driving.chains`. Each driving edge is in one chain. Edge `a` joins the next edge `b`
 only where no other driving road meets the node, the two edges have the same values in the columns below and the
-same lanes in `lane_profile`, the node has no traffic light or stop sign, and no turn rule names the two edges.
+same lanes in `lane_profile`, the node has no traffic light or stop sign, and no turn rule names the two edges. The two
+directions of a two-way road end at the same nodes: a chain is cut at each node inside it where another chain ends (where
+the other direction did not join, for example at a turn rule on one side only).
 
 | Column | Type | Description |
 |---|---|---|
