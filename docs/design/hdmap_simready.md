@@ -49,7 +49,7 @@ The command writes one folder, `<area>_hdmap_input/`. It is the contract between
 | File | Holds | From |
 |---|---|---|
 | `gmns.duckdb` | the network: links with `refs` and `z_vertices`, lanes, movements, chains, crossings, nodes, `config`, `main.elevation_metadata` | the GMNS database (a copy, or a link to it) |
-| `raw_nodes.parquet`, `raw_ways.parquet`, `raw_relations.parquet` | the OSM tags, with the fixes of the build: kerbs, building walls, bridge relations, widths, `ele` | `raw.*` of the routing database |
+| `raw_nodes.parquet`, `raw_ways.parquet`, `raw_relations.parquet` | the OSM tags, with the fixes of the build: kerbs, building walls, bridge relations, widths, `ele` | `raw.*` of the routing database. `raw_ways` also has `line`, the WKB line of the way's nodes, as the build's own `raw_ways.parquet` |
 | `elevation_grid.parquet` | the ground raster | `main.elevation_grid` of the routing database. Not written when the build has none |
 | `fixes.yaml` | the fixes file of the build, as it was at the build | `main.fixes.yaml` of the routing database. Not written when the build had no fixes file |
 | `input.json` | the manifest (below) | new |
@@ -75,6 +75,7 @@ Checks before SimReady runs. Each failed check stops the command with a message:
 | chains | `gmns_driving.chains` is there, and each driving link is in one chain |
 | GMNS values | `link.refs`, `link.z_vertices` (can be empty) and `config.duckosm_version` are there (duckOSM main from PR 468) |
 | raw OSM | `DB` has `raw.nodes`, `raw.ways` and `raw.relations`. A build cut from a parent database has none: the message says to build from the PBF |
+| heights | the GMNS database has `main.elevation_metadata`: SimReady needs a DEM. The message says to run `duckosm elevation`, then `duckosm gmns` again |
 
 ## Step 2: run SimReady
 

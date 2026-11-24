@@ -670,7 +670,8 @@ duckosm hdmap [OPTIONS] DB GMNS_DB
 ```
 
 `DB` is the routing database. `GMNS_DB` is its GMNS database, made with `duckosm gmns --lane-source rules`. Both are
-required, and `DB` must have the raw OSM tables (a build from a PBF).
+required. `DB` must have the raw OSM tables (a build from a PBF) and heights (run [`elevation`](#elevation) before
+`duckosm gmns`): SimReady needs both.
 
 | Option | Does | Default |
 |---|---|---|

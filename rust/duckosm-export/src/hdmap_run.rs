@@ -57,6 +57,11 @@ fn check(con: &Connection) -> Result<()> {
     if !table("g", "gmns_driving", "link")? {
         return Err("the GMNS database has no gmns_driving.link: make it with `duckosm gmns --lane-source rules`".into());
     }
+    if !table("g", "main", "elevation_metadata")? {
+        return Err("the GMNS database has no heights (main.elevation_metadata), and SimReady needs them: run \
+                    `duckosm elevation` on the routing database, then `duckosm gmns` again"
+            .into());
+    }
     if !table("g", "gmns_driving", "chains")? {
         return Err("the GMNS database has no gmns_driving.chains: make it again with this duckOSM version".into());
     }
@@ -107,9 +112,23 @@ pub fn write_input(db: &Path, gmns_db: &Path, dir: &Path, area_opts: &HdmapArea)
     let x = |sql: &str| con.execute_batch(sql).map_err(|e| format!("{e}\n{sql}"));
     x(&format!("ATTACH '{}' AS s (READ_ONLY); ATTACH '{}' AS g (READ_ONLY)", sql_str(db), sql_str(gmns_db)))?;
     check(&con)?;
-    for t in ["nodes", "ways", "relations"] {
+    for t in ["nodes", "relations"] {
         x(&format!("COPY s.raw.{t} TO '{}' (FORMAT parquet)", sql_str(&dir.join(format!("raw_{t}.parquet")))))?;
     }
+    // raw_ways with the column `line` of the build's raw_ways.parquet (duckosm-parquet raw_load.rs): the WKB line of the
+    // way's nodes in order, a node with no coordinates left out, NULL below 2 points
+    // ponytail: one join of all way nodes in memory; the streaming join of raw_load when an input outgrows the memory
+    x("INSTALL spatial; LOAD spatial;")?;
+    x(&format!(
+        "COPY (WITH p AS (SELECT w.osm_id, list(ST_Point(n.lon, n.lat) ORDER BY u.i) AS pts
+                          FROM s.raw.ways w, unnest(w.refs) WITH ORDINALITY AS u(r, i) JOIN s.raw.nodes n ON n.osm_id = u.r
+                          GROUP BY w.osm_id)
+               SELECT w.osm_id, w.tags, w.refs,
+                      CASE WHEN len(p.pts) >= 2 THEN ST_AsWKB(ST_MakeLine(p.pts))::BLOB END AS line
+               FROM s.raw.ways w LEFT JOIN p USING (osm_id) ORDER BY w.rowid)
+         TO '{}' (FORMAT parquet)",
+        sql_str(&dir.join("raw_ways.parquet"))
+    ))?;
     let has = |sch: &str, t: &str| -> Result<bool> {
         con.query_row(
             "SELECT count(*) FROM duckdb_tables() WHERE database_name = 's' AND schema_name = ? AND table_name = ?",

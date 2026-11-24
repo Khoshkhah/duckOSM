@@ -22,7 +22,7 @@ fn dbs(d: &Path, extra_link: bool, chains: &str) -> (PathBuf, PathBuf) {
     c.execute_batch(
         "CREATE SCHEMA driving; CREATE SCHEMA raw;
          CREATE TABLE driving.edges(edge_id BIGINT); INSERT INTO driving.edges VALUES (1), (2);
-         CREATE TABLE raw.nodes(osm_id BIGINT, tags MAP(VARCHAR, VARCHAR)); INSERT INTO raw.nodes VALUES (10, MAP{'barrier': 'kerb'});
+         CREATE TABLE raw.nodes(osm_id BIGINT, lat DOUBLE, lon DOUBLE, tags MAP(VARCHAR, VARCHAR)); INSERT INTO raw.nodes VALUES (10, 43.7, 7.41, MAP{'barrier': 'kerb'});
          CREATE TABLE raw.ways(osm_id BIGINT, tags MAP(VARCHAR, VARCHAR), refs BIGINT[]);
          CREATE TABLE raw.relations(osm_id BIGINT, tags MAP(VARCHAR, VARCHAR));
          CREATE TABLE main.elevation_grid(x DOUBLE, y DOUBLE, z DOUBLE); INSERT INTO main.elevation_grid VALUES (7.4, 43.7, 12.5);
@@ -103,6 +103,41 @@ fn stops_on_a_gmns_database_of_another_area() {
     let (db, gmns) = dbs(&d, true, "[1], [2], [3]");
     let e = write_input(&db, &gmns, &d.join("in"), &HdmapArea::default()).err().unwrap();
     assert!(e.contains("not of this routing database"), "{e}");
+}
+
+#[test]
+fn stops_without_heights() {
+    let d = dir("noheights");
+    let (db, gmns) = dbs(&d, false, "[1], [2]");
+    Connection::open(&gmns).unwrap().execute_batch("DROP TABLE main.elevation_metadata").unwrap();
+    let e = write_input(&db, &gmns, &d.join("in"), &HdmapArea::default()).err().unwrap();
+    assert!(e.contains("duckosm elevation"), "{e}");
+}
+
+#[test]
+fn the_ways_get_their_line() {
+    let d = dir("line");
+    let (db, gmns) = dbs(&d, false, "[1], [2]");
+    Connection::open(&db)
+        .unwrap()
+        .execute_batch(
+            "INSERT INTO raw.nodes VALUES (11, 43.7, 7.411, MAP{}), (12, 43.7, 7.412, MAP{});
+             INSERT INTO raw.ways VALUES (100, MAP{}, [10, 11, 99, 12]), (101, MAP{}, [10])",
+        )
+        .unwrap();
+    write_input(&db, &gmns, &d.join("in"), &HdmapArea::default()).unwrap();
+    let c = Connection::open_in_memory().unwrap();
+    c.execute_batch("INSTALL spatial; LOAD spatial;").unwrap();
+    let p = d.join("in").join("raw_ways.parquet").display().to_string();
+    let wkt: Vec<Option<String>> = c
+        .prepare(&format!("SELECT ST_AsText(ST_GeomFromWKB(line)) FROM '{p}' ORDER BY osm_id"))
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .map(|r| r.unwrap())
+        .collect();
+    // node 99 has no coordinates: left out; one node: no line
+    assert_eq!(wkt, [Some("LINESTRING (7.41 43.7, 7.411 43.7, 7.412 43.7)".to_string()), None]);
 }
 
 #[test]
