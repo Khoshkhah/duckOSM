@@ -3,7 +3,7 @@
 Each table of the HD map database, and each of its columns. [SimReady](https://github.com/Khoshkhah/simready) builds
 this database from two duckOSM databases of the same build:
 
-- the GMNS network (`<area>_gmns.duckdb` of [`duckosm gmns`](gmns.md), [GMNS tables](gmns_tables.md)): the road
+- the GMNS network (`<area>_gmns.duckdb` of [`duckosm gmns`](gmns.md), [GMNS network tables](gmns_tables.md)): the road
   network. Its chains are the carriageways;
 - the routable network (`<area>.duckdb`, [Routable network tables](../reference/database.md)): only the raw OSM data
   ([`raw.*`](../reference/database.md#raw-schema), with the fixes) for the kerbs, the building walls and the bridges,
@@ -15,7 +15,7 @@ gives the two databases to SimReady and writes `<area>_hdmap.duckdb` ([4. HD map
 | Rule | |
 |---|---|
 | Schema | all tables are in the schema `sim` |
-| Carriageway | one carriageway for each chain of `gmns_driving.chains`, with the same `chain_id` ([GMNS tables](gmns_tables.md#chains), [Edges and chains](../concepts/edges-and-chains.md)) |
+| Carriageway | one carriageway for each chain of `gmns_driving.chains`, with the same `chain_id` ([GMNS network tables](gmns_tables.md#chains), [Edges and chains](../concepts/edges-and-chains.md)) |
 | Ids | a 64-bit hash of the content keys, with the hash of duckOSM's [`edge_id`](../concepts/edge-ids.md). `node_id` is the OSM node id |
 | Units | in the column name: `_m` metres, `_s` seconds, `_deg` degrees, `_kmh` km/h |
 | Geometry | DuckDB `GEOMETRY` in the CRS of `project.crs`: metres, in the UTM zone of the area |
