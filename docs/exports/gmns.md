@@ -68,7 +68,7 @@ One road section between two junctions is one row of [`gmns_driving.chains`](gmn
 * **In DuckDB (`.duckdb`):** Stores all tables with native DuckDB spatial geometries (`geom`) for fast spatial SQL queries and map rendering.
 * **In CSV (`--to-csv`):** Exports the standard specification tables with WKT text geometries (`geometry`), ready for DTALite and Path4GMNS.
 
-See the complete table matrix and column definitions in **[GMNS network tables](gmns_tables.md)**.
+See the complete table matrix and column definitions in **[GMNS tables](gmns_tables.md)**.
 
 ![One junction in GMNS: a node, a link with two lanes, and the movements each lane can take](../images/gmns_junction.svg)
 
