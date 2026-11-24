@@ -8,7 +8,7 @@ Traffic simulation. The id of each SUMO edge and MATSim link is the duckOSM `edg
 | `to_matsim(net, out_path, mode=None, crs=None, gzip=True, merge=False)` | the MATSim `network.xml`; `mode` can be a list. `merge=True`: one link for each chain of `driving.chains` | yes |
 | `to_matsim_lanes(gmns_db, out_dir=".", mode="driving", signals=True, cycle_s=90, merge=False)` | MATSim lanes and signals, from a GMNS database | yes |
 | `sumo_net(path)` | the SUMO network (a `.net.xml`, or the dict of `to_sumo`) read with sumolib, with the internal edges: a `sumolib.net.Net` | yes |
-| `edge_map(path)` | a DataFrame of the id of each SUMO edge (`.net.xml`, `.edg.xml`) or MATSim link (`network.xml`, `.xml.gz`) and its `edge_id`. A netconvert id `123#1` gives 123; `123+456` gives a row for each edge; SUMO's internal edges are not in it. With `geometry.remove=true` (the default of `to_sumo` is `false`), netconvert joins edges and keeps only the id of the first edge, without `+`: the other edges of the join are not in the table (on Monaco driving, 1615 of 2840 edges) | yes |
+| `edge_map(path)` | a DataFrame of the id of each SUMO edge (`.net.xml`, `.edg.xml`) or MATSim link (`network.xml`, `.xml.gz`) and its `edge_id`. A netconvert id `123#1` gives 123; `123+456` gives a row for each edge; SUMO's internal edges are not in it. With `geometry.remove=true` (the default of `to_sumo` is `false`), netconvert joins edges and keeps only the id of the first edge, without `+`: the other edges of the join are not in the table (on Monaco driving, the table has 1,629 of the 2,840 edges) | yes |
 
 ```python
 files = net.driving.to_sumo("out/sumo")            # = duckosm.sim.to_sumo(net.driving, "out/sumo")

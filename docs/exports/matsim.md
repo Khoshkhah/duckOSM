@@ -42,7 +42,8 @@ The node coordinates are in metres, in the UTM zone of the data (`--crs` gives a
 duckOSM cuts roads where footways and cycleways cross them, so that the modes meet. A MATSim network of cars only does not
 need these cuts. `--merge` (`to_matsim(..., merge=True)`) writes one link for each chain of
 [`driving.chains`](../reference/database.md#chains) (a GMNS db: [`gmns_driving.chains`](gmns_tables.md#chains)): the edges of
-one road between two real junctions. On Monaco, 2,840 links become 1,775.
+one road between two real junctions. On Monaco, the 2,840 links of the routable network become 1,787, and the 2,858 links of the GMNS db
+become 1,812.
 
 ```bash
 duckosm matsim monaco_gmns.duckdb --merge                  # one link for each chain
