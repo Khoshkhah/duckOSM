@@ -8,7 +8,7 @@ ranges of `movement`, and `lane_connector`). Two engines can decide this:
 | Code | SUMO's netconvert (C++): duckOSM writes the network to SUMO and reads the connections back | `rust/duckosm-export/src/gmns_lane_rules.rs`, ported from SimReady's lane rules |
 | Needs | a SUMO install | nothing |
 | Option | `--lane-source netconvert` | `--lane-source rules` |
-| Default (`auto`) | when SUMO is installed | when SUMO is not installed |
+| Default | no | yes |
 
 Neither engine decides **which turns are legal**. GMNS decides that before, in `movement`, from the OSM turn restrictions.
 The engines only decide **which lanes** serve each legal turn.

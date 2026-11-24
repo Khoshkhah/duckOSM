@@ -15,6 +15,11 @@ fn data() -> PathBuf {
 }
 
 /// The Monaco database, built once for all tests of this file.
+/// The GMNS options of the golden files: the lanes from netconvert, as the Python export made them.
+fn netconvert() -> duckosm_export::gmns::GmnsOptions {
+    duckosm_export::gmns::GmnsOptions { lane_source: "netconvert".into(), ..Default::default() }
+}
+
 fn db() -> &'static Path {
     static DB: OnceLock<PathBuf> = OnceLock::new();
     DB.get_or_init(|| {
@@ -330,8 +335,8 @@ const GMNS_BY_PROPERTIES: [&str; 16] = [
 #[test]
 fn gmns_lanes_by_properties() {
     let (a, b) = (out("gmns_a").join("monaco_gmns.duckdb"), out("gmns_b").join("monaco_gmns.duckdb"));
-    duckosm_export::gmns::to_gmns(db(), &a, &[]).unwrap();
-    duckosm_export::gmns::to_gmns(db(), &b, &[]).unwrap();
+    duckosm_export::gmns::to_gmns_with(db(), &a, &netconvert()).unwrap();
+    duckosm_export::gmns::to_gmns_with(db(), &b, &netconvert()).unwrap();
     let lanes = |p: &Path| -> Vec<String> {
         gmns_columns(p, "gmns\\_%").into_iter().filter(|l| l.contains(".lane\tgeom\t")).collect()
     };
@@ -371,7 +376,7 @@ fn gmns_viewer_equals_python() {
 /// the Rust export, GMNS_LANES_WRITE=1).
 #[test]
 fn gmns_walk_frame() {
-    let opts = duckosm_export::gmns::GmnsOptions { modes: vec!["driving".into(), "walking".into()], walk_frame: true, ..Default::default() };
+    let opts = duckosm_export::gmns::GmnsOptions { modes: vec!["driving".into(), "walking".into()], walk_frame: true, ..netconvert() };
     let (a, b) = (out("walk_frame_a").join("monaco_gmns.duckdb"), out("walk_frame_b").join("monaco_gmns.duckdb"));
     duckosm_export::gmns::to_gmns_with(db(), &a, &opts).unwrap();
     duckosm_export::gmns::to_gmns_with(db(), &b, &opts).unwrap();
@@ -408,7 +413,7 @@ fn gmns_equals_python() {
     let o = out("gmns").join("monaco_gmns.duckdb");
     let csv = out("gmns").join("csv");
     let _ = std::fs::remove_dir_all(&csv);
-    let opts = duckosm_export::gmns::GmnsOptions { combined: true, to_csv: Some(csv.clone()), ..Default::default() };
+    let opts = duckosm_export::gmns::GmnsOptions { combined: true, to_csv: Some(csv.clone()), ..netconvert() };
     duckosm_export::gmns::to_gmns_with(db(), &o, &opts).unwrap();
     // the CSVs: the header and the sorted rows of each file (the order of some tables is that of a parallel query)
     let mut files: Vec<PathBuf> = Vec::new();
@@ -454,7 +459,7 @@ fn gmns_equals_python() {
     bad.extend(columns_differ(&got, &text(&data().join("exports/monaco_gmns_meso_columns.tsv"))));
     // --gtfs: the stops of a feed as location rows
     let g = out("gmns").join("gtfs.duckdb");
-    let opts = duckosm_export::gmns::GmnsOptions { gtfs: vec![data().join("exports/monaco_gtfs.zip")], ..Default::default() };
+    let opts = duckosm_export::gmns::GmnsOptions { gtfs: vec![data().join("exports/monaco_gtfs.zip")], ..netconvert() };
     duckosm_export::gmns::to_gmns_with(db(), &g, &opts).unwrap();
     let got: Vec<String> = gmns_columns(&g, "gmns\\_%").into_iter().filter(|l| l.starts_with("table\t") || l.contains(".location\t")).collect();
     bad.extend(columns_differ(&got, &text(&data().join("exports/monaco_gmns_gtfs_location.tsv"))));

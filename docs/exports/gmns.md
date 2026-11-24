@@ -16,7 +16,7 @@ give 18 links and 4 nodes more than `driving.edges` and `driving.nodes`.
 | Check | the CSV files pass the schemas of the specification, and Path4GMNS loads them and finds a route. `--check` checks the values: link ends, lengths, lane numbers, movements. [How each output is checked](../concepts/checks.md) |
 
 ```bash
-pip install "duckosm[sumo]"                      # optional: without netconvert, the lane rules give the lanes (--lane-source)
+pip install "duckosm[sumo]"                      # optional: only for --lane-source netconvert
 
 # Input: Level 2 routable database (monaco.duckdb)
 # Output: Level 3 GMNS database (monaco_gmns.duckdb by default, or with -o)
@@ -118,10 +118,11 @@ Driving network, with netconvert. Input is the Level 2 routable database (`<area
 | Area (input DuckDB) | Machine | Time | Memory | Output GMNS DuckDB |
 |---|---|---|---|---|
 | Monaco (38 MB `.duckdb`) | Mac mini (M6, 16 GB) | 0.8 s | 145 MB | 8.4 MB |
-| Kentucky (~1.2 GB `.duckdb`), 49 tiles | WSL (20 cores, 23 GB) | 23 min | 5.0 GB | 5.9 GB |
-| Île-de-France (2.2 GB `.duckdb`), 15 tiles | WSL (20 cores, 23 GB) | 23 min | 8.5 GB | 2.6 GB |
+| Kentucky (~1.2 GB `.duckdb`), driving | Mac mini (M6, 16 GB) | 2.5 min | 2.2 GB (Rust) + 2 GB (DuckDB) | 6.7 GB |
 | France (~35 GB `.duckdb`) | | not run | (estimated ~150 GB) | |
 
-Large areas run tile-by-tile (`--tile-zoom 9`), keeping peak memory bounded by the tile rather than the whole region.
+Each step works in chunks (a chunk of junctions, of road runs or of lanes), so the memory stays about the same on a large
+area. DuckDB has a limit of 2 GB and spills to disk above it. With `--lane-source netconvert`, netconvert reads the whole
+area at once and needs much more memory.
 
 All options: [Command line](../reference/cli.md#gmns).
