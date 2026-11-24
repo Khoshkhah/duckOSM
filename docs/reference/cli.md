@@ -467,7 +467,7 @@ duckosm sumo [OPTIONS] DB
 | `--connections` / `--no-connections` | write the allowed turns from `edge_graph`; off lets `netconvert` guess them | on |
 | `-c`, `--config PATH` | a `netconvert` config (`.netccfg`) instead of the built-in one | |
 | `--netconvert` / `--no-netconvert` | run `netconvert`: also the `.net.xml` and the signal programs (`.tll.xml`); off writes the plain XML files and the `.netccfg` | off |
-| `--merge` | driving only: one SUMO edge for each chain of `driving.chains`, with the id `chain_id` ([how](../exports/sumo.md#fewer-edges-merge)); not with `--join-junctions` | off |
+| `--merge` | driving only: one SUMO edge for each chain of `driving.chains` (a GMNS db: `gmns_driving.chains`), with the id `chain_id` ([how](../exports/sumo.md#fewer-edges-merge)); not with `--join-junctions` | off |
 | `--join-junctions` | join close junctions (netconvert's `junctions.join`): a crossroads mapped as two or three nodes becomes one junction ([how](../exports/sumo.md)); not with `-c` | off |
 
 ### `matsim`
@@ -484,6 +484,7 @@ duckosm matsim [OPTIONS] DB
 | `--crs TEXT` | projected CRS for node coordinates | UTM zone of the data |
 | `--gzip` / `--no-gzip` | gzip the file | on |
 | `-o`, `--out TEXT` | output file | `<name>_network.xml.gz` |
+| `--merge` | driving only: one link for each chain of `driving.chains` (a GMNS db: `gmns_driving.chains`), with the id `chain_id` and the attribute `edge_ids` ([how](../exports/matsim.md#fewer-links-merge)) | off |
 
 ### `matsim-lanes`
 
@@ -500,6 +501,7 @@ duckosm matsim-lanes [OPTIONS] GMNS_DB
 | `--signals` / `--no-signals` | also write `signalSystems`, `signalGroups`, `signalControl.xml` | on |
 | `--cycle INTEGER` | signal cycle length, seconds | `90` |
 | `-o`, `--out TEXT` | output folder | `.` |
+| `--merge` | the links of `matsim --merge`: one link for each chain of `gmns_driving.chains` | off |
 
 ### `gmns`
 

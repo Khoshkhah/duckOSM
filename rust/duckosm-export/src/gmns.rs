@@ -181,7 +181,15 @@ pub fn to_gmns_with(source: &Path, out: &Path, o: &GmnsOptions) -> Result<GmnsSu
     };
     remove(&partial);
     let name = out.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
-    let r = build_gmns(source, &partial, &name, o);
+    let mut r = build_gmns(source, &partial, &name, o);
+    // the driving chains, after the whole build (also by tiles: no chain stops at a tile border)
+    if r.as_ref().is_ok_and(|s| s.modes.iter().any(|m| m.mode == "driving")) {
+        match crate::gmns_chains::add_chains(source, &partial) {
+            Ok(Some(n)) => eprintln!("GMNS[driving]: {n} chains (gmns_driving.chains)"),
+            Ok(None) => {}
+            Err(e) => r = Err(e),
+        }
+    }
     if r.is_err() {
         remove(&partial);
         return r;

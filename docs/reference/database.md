@@ -269,7 +269,7 @@ Every driving edge's lanes, and every bus-only edge's (`private_edges` with `acc
 
 Driving only, with `options.chains` (on; `--no-chains` turns it off). One row for each chain: the edges joined at the nodes where the road only continues (for example a
 footway crossing). The edges keep every cut, because the multimodal routing needs them. An export can write one
-edge for each chain: `to_sumo(..., merge=True)`. Each driving edge is in one chain. Edge `a` joins the next edge `b`
+edge or link for each chain: `to_sumo(..., merge=True)`, `to_matsim(..., merge=True)`. `duckosm gmns` copies the chains into `gmns_driving.chains`. Each driving edge is in one chain. Edge `a` joins the next edge `b`
 only where no other driving road meets the node, the two edges have the same values in the columns below and the
 same lanes in `lane_profile`, the node has no traffic light or stop sign, and no turn rule names the two edges.
 

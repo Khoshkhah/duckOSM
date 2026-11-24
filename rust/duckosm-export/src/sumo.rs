@@ -644,14 +644,17 @@ pub fn to_sumo_with(db: &Path, out_dir: &Path, mode: &str, net_name: &str, conne
     let con = open(db)?;
     // a GMNS db: its own lanes and lane connections (docs/design/sim_from_gmns.md)
     if crate::matsim::is_gmns(&con)? {
-        if o.merge || o.bus_edges || o.lanes.is_some() || !o.edge_attrs.is_empty() {
-            return Err("a GMNS db: no --merge (its links are the network that GMNS describes)".into());
+        if o.bus_edges || o.lanes.is_some() || !o.edge_attrs.is_empty() {
+            return Err("a GMNS db has its own lanes and bus links: these options are for a duckOSM db".into());
+        }
+        if o.merge && mode != "driving" {
+            return Err(format!("merge: only the driving network has chains, not {mode}"));
         }
         if o.config.iter().any(|(k, v)| k == "junctions.join" && v.eq_ignore_ascii_case("true")) {
             return Err("a GMNS db: no --join-junctions (its lanes and connections are for the nodes that GMNS has)".into());
         }
         drop(con);
-        return crate::sumo_gmns::to_sumo_gmns(db, out_dir, mode, net_name, connections, config, netconvert);
+        return crate::sumo_gmns::to_sumo_gmns(db, out_dir, mode, net_name, connections, config, netconvert, o.merge);
     }
     let chains = match o.merge {
         true if mode != "driving" => return Err(format!("merge: only the driving network has chains, not {mode}")),

@@ -33,12 +33,13 @@ def to_matsim(net, out_path, mode=None, **kwargs):
     return _api.to_matsim(db, out_path, mode=mode, **kwargs)
 
 
-def to_matsim_lanes(gmns_db, out_dir=".", mode="driving", signals=True, cycle_s=90):
-    """MATSim lanes and signals from a GMNS database (:func:`duckosm.planning.to_gmns`).
+def to_matsim_lanes(gmns_db, out_dir=".", mode="driving", signals=True, cycle_s=90, merge=False):
+    """MATSim lanes and signals from a GMNS database (:func:`duckosm.planning.to_gmns`). ``merge=True``: the links of
+    ``to_matsim(..., merge=True)`` (one link for each chain of ``gmns_driving.chains``).
 
     >>> duckosm.sim.to_matsim_lanes("out/gmns.duckdb", "out/matsim")"""
     from duckosm import _api
-    return _api.to_matsim_lanes(gmns_db, out_dir, mode=mode, signals=signals, cycle_s=cycle_s)
+    return _api.to_matsim_lanes(gmns_db, out_dir, mode=mode, signals=signals, cycle_s=cycle_s, merge=merge)
 
 
 def sumo_net(path):
@@ -63,7 +64,7 @@ def edge_map(path):
     (a part of edge 123) gives 123; ``123+456`` (edges joined) gives one row for each edge. With ``geometry.remove=true`` (not the default of
     ``to_sumo``), netconvert joins edges and keeps only the id of the first edge, without ``+``: the other edges of the join
     are not in the table. An edge of ``to_sumo(merge=True)`` (a chain of ``driving.chains``) gives one row for each edge of its
-    ``<param key="edge_ids">``. Internal edges of SUMO
+    ``<param key="edge_ids">``, a link of ``to_matsim(merge=True)`` one row for each edge of its attribute ``edge_ids``. Internal edges of SUMO
     (``:junction_0``) are not in the table. Join the results of a simulation on ``id``, then the network on ``edge_id``.
 
     >>> m = duckosm.sim.edge_map("out/sumo/network.net.xml")"""
@@ -81,6 +82,8 @@ def edge_map(path):
             if el.tag in ("edge", "link") and el.get("function") != "internal":
                 i = el.get("id")
                 ids = next((p.get("value") for p in el.findall("param") if p.get("key") == "edge_ids"), None)
+                if ids is None:   # a MATSim link of to_matsim(merge=True): <attributes><attribute name="edge_ids">
+                    ids = next((a.text for a in el.iterfind("attributes/attribute") if a.get("name") == "edge_ids"), None)
                 if ids:
                     rows += [(i, int(p)) for p in ids.split()]
                 else:

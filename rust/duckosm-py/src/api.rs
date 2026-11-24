@@ -63,14 +63,16 @@ fn to_gis(py: Python<'_>, db: PathBuf, out: PathBuf, modes: Vec<String>, fmt: St
 }
 
 #[pyfunction]
-fn to_matsim(py: Python<'_>, db: PathBuf, out: PathBuf, mode: String, crs: Option<String>, gzip: bool) -> PyResult<String> {
-    let s = py.detach(|| duckosm_export::matsim::to_matsim(&db, &out, &mode, crs.as_deref(), gzip)).map_err(err)?;
+#[pyo3(signature = (db, out, mode, crs, gzip, merge=false))]
+fn to_matsim(py: Python<'_>, db: PathBuf, out: PathBuf, mode: String, crs: Option<String>, gzip: bool, merge: bool) -> PyResult<String> {
+    let s = py.detach(|| duckosm_export::matsim::to_matsim(&db, &out, &mode, crs.as_deref(), gzip, merge)).map_err(err)?;
     Ok(text(&json!({"nodes": s.nodes, "links": s.links, "crs": s.crs})))
 }
 
 #[pyfunction]
-fn to_matsim_lanes(py: Python<'_>, gmns_db: PathBuf, out_dir: PathBuf, mode: String, signals: bool, cycle_s: i64) -> PyResult<String> {
-    let s = py.detach(|| duckosm_export::matsim_lanes::to_matsim_lanes(&gmns_db, &out_dir, &mode, signals, cycle_s)).map_err(err)?;
+#[pyo3(signature = (gmns_db, out_dir, mode, signals, cycle_s, merge=false))]
+fn to_matsim_lanes(py: Python<'_>, gmns_db: PathBuf, out_dir: PathBuf, mode: String, signals: bool, cycle_s: i64, merge: bool) -> PyResult<String> {
+    let s = py.detach(|| duckosm_export::matsim_lanes::to_matsim_lanes(&gmns_db, &out_dir, &mode, signals, cycle_s, merge)).map_err(err)?;
     let mut v = json!({"lanes_links": s.lanes_links});
     if let Some(n) = s.signal_systems {
         v["signal_systems"] = json!(n);

@@ -96,6 +96,8 @@ struct Link {
     capacity: f64,
     permlanes: i64,
     modes: String,
+    /// `--merge`: the edges of a chain of more than one edge, space-separated (the link's `edge_ids` attribute)
+    edge_ids: Option<String>,
 }
 
 struct Row {
@@ -110,6 +112,8 @@ struct Row {
     cost: Option<f64>,
     /// GMNS `link.capacity` (vehicles/hour/lane); None: the class value of `hw`
     cap: Option<f64>,
+    /// `--merge`: the edges of the chain (more than one), space-separated
+    ids: Option<String>,
 }
 
 fn pos(v: Option<f64>) -> Option<f64> {
@@ -134,6 +138,7 @@ fn single_link(r: &Row) -> Link {
         capacity: pos(r.cap).unwrap_or_else(|| capacity(norm_hw(r.hw.as_deref()))) * permlanes as f64,
         permlanes,
         modes: modes_str(&BTreeSet::from([r.mode.as_str()])),
+        edge_ids: r.ids.clone(),
     }
 }
 
@@ -163,6 +168,7 @@ fn multi_link(rs: &[Row]) -> Link {
         capacity: drow.and_then(|d| pos(d.cap)).unwrap_or_else(|| capacity(norm_hw(hw))) * permlanes as f64,
         permlanes,
         modes: modes_str(&modes),
+        edge_ids: None,
     }
 }
 
@@ -178,10 +184,21 @@ pub struct Summary {
 /// the order of the rows of the edge tables (the modes in the order driving, cycling, walking), each with both its
 /// nodes; more than one mode: one link for each `edge_id`, at the place of its first row, from the rows of all modes.
 /// The nodes are the nodes of the links, in the order of their ids, in the CRS `crs` (default: the UTM zone of the data).
-pub fn to_matsim(db: &Path, out: &Path, mode: &str, crs: Option<&str>, gz: bool) -> Result<Summary> {
+/// `merge`: driving only, one link for each chain (`driving.chains`; GMNS: `gmns_driving.chains`), its id the `chain_id`
+/// and its edges in the attribute `edge_ids` (docs/design/sim_from_gmns.md, "Chains").
+pub fn to_matsim(db: &Path, out: &Path, mode: &str, crs: Option<&str>, gz: bool, merge: bool) -> Result<Summary> {
     let con = open(db)?;
     let gmns = is_gmns(&con)?;
     let modes = resolve_modes(&con, mode, gmns)?;
+    if merge {
+        if modes != ["driving"] {
+            return Err("merge: only the driving network has chains; give -m driving".into());
+        }
+        let (sch, t) = if gmns { ("gmns_driving", "chains") } else { ("driving", "chains") };
+        if !has_table(&con, sch, t)? {
+            return Err(format!("merge: {sch}.{t} is not in {}; make it again with this duckOSM version", db.display()));
+        }
+    }
     // the tables of a mode: duckOSM's, or GMNS's
     let nodes_of = |m: &str| if gmns { format!("gmns_{m}.node") } else { format!("{m}.nodes") };
     let crs = match crs {
@@ -201,7 +218,22 @@ pub fn to_matsim(db: &Path, out: &Path, mode: &str, crs: Option<&str>, gz: bool)
         .iter()
         .enumerate()
         .map(|(i, m)| {
-            if gmns {
+            if merge && gmns {
+                // a chain takes the values of its last link (the same on each link of the chain)
+                "SELECT c.rowid AS k, CASE WHEN l.allowed_uses IS NULL OR l.allowed_uses LIKE '%auto%' THEN 'driving' ELSE l.allowed_uses END AS mode, \
+                 c.chain_id AS edge_id, c.from_node_id AS source, c.to_node_id AS target, l.facility_type AS highway, l.lanes::BIGINT AS lanes, \
+                 l.free_speed::DOUBLE AS spd, c.length::DOUBLE AS len, NULL::DOUBLE AS cost, l.capacity::DOUBLE AS cap, \
+                 CASE WHEN len(c.link_ids) > 1 THEN array_to_string(c.link_ids, ' ') END AS ids \
+                 FROM gmns_driving.chains c JOIN gmns_driving.link l ON l.link_id = c.link_ids[len(c.link_ids)]"
+                    .to_string()
+            } else if merge {
+                format!(
+                    "SELECT {i} * 1099511627776 + rowid AS k, '{m}' AS mode, chain_id AS edge_id, source, target, highway, lanes::BIGINT AS lanes, \
+                     maxspeed_kmh::DOUBLE AS spd, length_m::DOUBLE AS len, cost_s::DOUBLE AS cost, NULL::DOUBLE AS cap, \
+                     CASE WHEN len(edge_ids) > 1 THEN array_to_string(edge_ids, ' ') END AS ids FROM {m}.chains \
+                     WHERE source IS NOT NULL AND target IS NOT NULL"
+                )
+            } else if gmns {
                 // a driving link that cars cannot use (a bus-only link): its own uses (`bus`, `bus,bike`) are its modes
                 let mode = if *m == "driving" {
                     "CASE WHEN allowed_uses IS NULL OR allowed_uses LIKE '%auto%' THEN 'driving' ELSE allowed_uses END".to_string()
@@ -211,12 +243,12 @@ pub fn to_matsim(db: &Path, out: &Path, mode: &str, crs: Option<&str>, gz: bool)
                 format!(
                     "SELECT {i} * 1099511627776 + rowid AS k, {mode} AS mode, link_id AS edge_id, from_node_id AS source, to_node_id AS target, \
                      facility_type AS highway, lanes::BIGINT AS lanes, free_speed::DOUBLE AS spd, length::DOUBLE AS len, NULL::DOUBLE AS cost, \
-                     capacity::DOUBLE AS cap FROM gmns_{m}.link WHERE from_node_id IS NOT NULL AND to_node_id IS NOT NULL"
+                     capacity::DOUBLE AS cap, NULL::VARCHAR AS ids FROM gmns_{m}.link WHERE from_node_id IS NOT NULL AND to_node_id IS NOT NULL"
                 )
             } else {
                 format!(
                     "SELECT {i} * 1099511627776 + rowid AS k, '{m}' AS mode, edge_id, source, target, highway, lanes::BIGINT AS lanes, \
-                     maxspeed_kmh::DOUBLE AS spd, length_m::DOUBLE AS len, cost_s::DOUBLE AS cost, NULL::DOUBLE AS cap FROM {m}.edges \
+                     maxspeed_kmh::DOUBLE AS spd, length_m::DOUBLE AS len, cost_s::DOUBLE AS cost, NULL::DOUBLE AS cap, NULL::VARCHAR AS ids FROM {m}.edges \
                      WHERE source IS NOT NULL AND target IS NOT NULL"
                 )
             }
@@ -288,8 +320,8 @@ pub fn to_matsim(db: &Path, out: &Path, mode: &str, crs: Option<&str>, gz: bool)
     let mut n_links = 0;
     let mut put_link = |o: &mut Out, l: Link| {
         n_links += 1;
-        o.put(&format!(
-            "\t\t<link id=\"{}\" from=\"{}\" to=\"{}\" length=\"{:.2}\" freespeed=\"{:.4}\" capacity=\"{:.1}\" permlanes=\"{}\" modes={}/>\n",
+        let head = format!(
+            "\t\t<link id=\"{}\" from=\"{}\" to=\"{}\" length=\"{:.2}\" freespeed=\"{:.4}\" capacity=\"{:.1}\" permlanes=\"{}\" modes={}",
             l.id,
             l.src,
             l.tgt,
@@ -298,7 +330,14 @@ pub fn to_matsim(db: &Path, out: &Path, mode: &str, crs: Option<&str>, gz: bool)
             l.capacity,
             l.permlanes,
             quoteattr(&l.modes)
-        ))
+        );
+        match &l.edge_ids {
+            // a merged link: its edges, so that edge_map maps the results back to each edge
+            Some(ids) => o.put(&format!(
+                "{head}>\n\t\t\t<attributes>\n\t\t\t\t<attribute name=\"edge_ids\" class=\"java.lang.String\">{ids}</attribute>\n\t\t\t</attributes>\n\t\t</link>\n"
+            )),
+            None => o.put(&format!("{head}/>\n")),
+        }
     };
     // the rows of one link (more than one mode): they come one after the other
     let (mut group, mut group_at): (Vec<Row>, i64) = (Vec::new(), i64::MIN);
@@ -316,6 +355,7 @@ pub fn to_matsim(db: &Path, out: &Path, mode: &str, crs: Option<&str>, gz: bool)
                 length: c.f64(9, i),
                 cost: c.f64(10, i),
                 cap: c.f64(11, i),
+                ids: c.str(12, i).map(String::from),
             };
             if modes.len() == 1 {
                 put_link(&mut o, single_link(&r))?;

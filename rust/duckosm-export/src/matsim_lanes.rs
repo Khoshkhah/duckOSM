@@ -47,8 +47,9 @@ pub struct Summary {
     pub signal_systems: Option<usize>,
 }
 
-/// Write `lanes.xml` (and the three signal files when `signals`) into `out_dir`, as `to_matsim_lanes`.
-pub fn to_matsim_lanes(gmns_db: &Path, out_dir: &Path, mode: &str, signals: bool, cycle_s: i64) -> Result<Summary> {
+/// Write `lanes.xml` (and the three signal files when `signals`) into `out_dir`, as `to_matsim_lanes`. `merge`: driving
+/// only, the links of `gmns_driving.chains` (the links of `duckosm matsim --merge`; docs/design/sim_from_gmns.md, "Chains").
+pub fn to_matsim_lanes(gmns_db: &Path, out_dir: &Path, mode: &str, signals: bool, cycle_s: i64, merge: bool) -> Result<Summary> {
     let con = open(gmns_db)?;
     let g = format!("gmns_{mode}");
     if !has_table(&con, &g, "movement")? {
@@ -67,6 +68,46 @@ pub fn to_matsim_lanes(gmns_db: &Path, out_dir: &Path, mode: &str, signals: bool
         let nz = |v: Option<f64>, d: f64| v.filter(|x| *x != 0.0).unwrap_or(d);
         links.insert(id, (lanes.filter(|l| *l != 0).unwrap_or(1).max(1), nz(cap, 800.0), nz(len, 50.0)));
     }
+    // `merge`: each link -> (its chain, the place in the chain, the number of links); a chain's lanes are those of its last
+    // link, its length the chain's length
+    let mut in_chain: HashMap<i64, (i64, usize, usize)> = HashMap::new();
+    if merge {
+        if mode != "driving" {
+            return Err(format!("merge: only the driving network has chains, not {mode}"));
+        }
+        if !has_table(&con, "gmns_driving", "chains")? {
+            return Err(format!("merge: no gmns_driving.chains in {}; make the GMNS db again with this duckOSM version", gmns_db.display()));
+        }
+        let mut st = con
+            .prepare("SELECT chain_id, link_ids, length::DOUBLE FROM gmns_driving.chains WHERE len(link_ids) > 1")
+            .map_err(e)?;
+        let rows = st
+            .query_map([], |r| {
+                let ids: Vec<i64> = match r.get::<_, duckdb::types::Value>(1)? {
+                    duckdb::types::Value::List(l) => l.into_iter().filter_map(|v| if let duckdb::types::Value::BigInt(i) = v { Some(i) } else { None }).collect(),
+                    _ => Vec::new(),
+                };
+                Ok((r.get::<_, i64>(0)?, ids, r.get::<_, Option<f64>>(2)?))
+            })
+            .map_err(e)?;
+        for row in rows {
+            let (cid, ids, len) = row.map_err(e)?;
+            for (k, id) in ids.iter().enumerate() {
+                in_chain.insert(*id, (cid, k, ids.len()));
+            }
+            if let Some(last) = links.get(ids.last().unwrap_or(&0)).copied() {
+                links.insert(cid, (last.0, last.1, len.filter(|x| *x > 0.0).unwrap_or(last.2)));
+            }
+        }
+    }
+    // the link of a movement's end: leaving (`from`) at the last link of a chain, entering at its first link; None: the
+    // movement is inside a chain
+    let end = |id: i64, from: bool| -> Option<i64> {
+        match in_chain.get(&id) {
+            None => Some(id),
+            Some((cid, k, n)) => ((from && *k == n - 1) || (!from && *k == 0)).then_some(*cid),
+        }
+    };
     // the movements of each inbound link, the links in the order of their first movement
     let mut order: Vec<i64> = Vec::new();
     let mut by_ib: HashMap<i64, Vec<Mv>> = HashMap::new();
@@ -77,7 +118,9 @@ pub fn to_matsim_lanes(gmns_db: &Path, out_dir: &Path, mode: &str, signals: bool
         ))
         .map_err(e)?;
     for r in st.query_map([], |r| Ok((r.get::<_, i64>(1)?, (r.get(0)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)))).map_err(e)? {
-        let (ib, m): (i64, Mv) = r.map_err(e)?;
+        let (ib, mut m): (i64, Mv) = r.map_err(e)?;
+        let (Some(ib), Some(ob)) = (end(ib, true), end(m.1, false)) else { continue };
+        m.1 = ob;
         by_ib.entry(ib).or_insert_with(|| {
             order.push(ib);
             Vec::new()

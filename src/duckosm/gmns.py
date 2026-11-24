@@ -677,6 +677,10 @@ def to_gmns(source_db, out_path, modes=None, to_csv=None, lane_geometry=True, co
         _build_walk_joins(con)              # after both modes: the road lane ends come from gmns_driving (docs/design/gmns_walk_joins.md)
 
     result["combined"] = None
+    if "driving" in chosen:
+        result["chains"] = _build_chains(con)
+        logger.info(f"GMNS[driving]: {result['chains']:,} chains (gmns_driving.chains)")
+
     if combined and len(chosen) > 1:
         c = _build_combined(con, chosen, name)
         result["combined"] = c
@@ -692,6 +696,66 @@ def to_gmns(source_db, out_path, modes=None, to_csv=None, lane_geometry=True, co
     con.execute("DETACH s")
     con.close()
     return result
+
+
+_MIX = 0xd6e8feb86659fd93
+_U64 = (1 << 64) - 1
+
+
+def _mix(x):
+    """duckosm_core::hash::mix: the integer mix of the edge_id hash."""
+    x &= _U64
+    x ^= x >> 32
+    x = (x * _MIX) & _U64
+    x ^= x >> 32
+    x = (x * _MIX) & _U64
+    return x ^ (x >> 32)
+
+
+def _chain_id(ids):
+    """duckosm_core::chains::chain_id: the edge_id for a chain of one edge, else a hash of the ids in order."""
+    if len(ids) == 1:
+        return ids[0]
+    h = 0x9e3779b97f4a7c15
+    for i in ids:
+        h = _mix(h ^ _mix(i))
+    return h >> 1
+
+
+def _build_chains(con):
+    """``gmns_driving.chains`` from the source's ``driving.chains``, as the Rust step ``gmns_chains::add_chains``
+    (docs/design/sim_from_gmns.md, "Chains"): a chain is cut where the GMNS lanes change, a link in no Level 2 chain is a
+    chain of one link, and a source with no ``driving.chains`` gives one chain for each link. Returns the number of chains."""
+    has = con.execute("SELECT count(*) FROM duckdb_tables() WHERE database_name = 's' AND schema_name = 'driving' "
+                      "AND table_name = 'chains'").fetchone()[0] > 0
+    src = "SELECT chain_id, edge_ids FROM s.driving.chains" if has else \
+          "SELECT NULL::BIGINT AS chain_id, NULL::BIGINT[] AS edge_ids WHERE false"
+    if not has:
+        logger.warning("GMNS: the source db has no driving.chains: each link is a chain of one link")
+    con.execute("""CREATE OR REPLACE TEMP TABLE _lane_sig AS SELECT link_id, string_agg(lane_num::VARCHAR || ':' ||
+        coalesce(allowed_uses, '') || ':' || coalesce(round(width, 2)::VARCHAR, ''), '|' ORDER BY lane_num) AS sig
+        FROM gmns_driving.lane GROUP BY link_id""")
+    con.execute(f"""CREATE OR REPLACE TEMP TABLE _chain_links AS
+        WITH u AS (SELECT c.chain_id AS old, m.e AS link_id, m.i FROM ({src}) c, unnest(c.edge_ids) WITH ORDINALITY AS m(e, i)
+                   WHERE m.e IN (SELECT link_id FROM gmns_driving.link)),
+        f AS (SELECT u.*, CASE WHEN lag(u.i) OVER w IS NULL OR lag(u.i) OVER w <> u.i - 1 OR g.sig IS DISTINCT FROM lag(g.sig) OVER w
+                               THEN 1 ELSE 0 END AS brk
+              FROM u LEFT JOIN _lane_sig g USING (link_id) WINDOW w AS (PARTITION BY u.old ORDER BY u.i))
+        SELECT old, sum(brk) OVER (PARTITION BY old ORDER BY i) AS seg, link_id, i FROM f
+        UNION ALL
+        SELECT link_id, 1, link_id, 1 FROM gmns_driving.link WHERE link_id NOT IN (SELECT link_id FROM u)""")
+    groups = con.execute("SELECT old, seg, list(link_id ORDER BY i) FROM _chain_links GROUP BY old, seg").fetchall()
+    con.execute("CREATE OR REPLACE TEMP TABLE _chain_ids(old BIGINT, seg BIGINT, chain_id BIGINT)")
+    if groups:
+        con.executemany("INSERT INTO _chain_ids VALUES (?, ?, ?)", [(o, s, _chain_id(ids)) for o, s, ids in groups])
+    con.execute("""CREATE OR REPLACE TABLE gmns_driving.chains AS
+        SELECT d.chain_id, arg_min(l.from_node_id, m.i) AS from_node_id, arg_max(l.to_node_id, m.i) AS to_node_id,
+               list(m.link_id ORDER BY m.i) AS link_ids, sum(l.length)::DOUBLE AS length,
+               ST_RemoveRepeatedPoints(ST_MakeLine(flatten(list([p.geom FOR p IN ST_Dump(ST_Points(l.geom))] ORDER BY m.i)))) AS geom
+        FROM _chain_links m JOIN _chain_ids d USING (old, seg) JOIN gmns_driving.link l USING (link_id)
+        GROUP BY d.chain_id ORDER BY d.chain_id;
+        DROP TABLE _chain_links; DROP TABLE _chain_ids; DROP TABLE _lane_sig""")
+    return con.execute("SELECT count(*) FROM gmns_driving.chains").fetchone()[0]
 
 
 def _build_walk_joins(con, max_gap_m=6.0, min_gap_m=0.3):

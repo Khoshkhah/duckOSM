@@ -23,14 +23,33 @@ impl Chains {
                 "merge: {mode}.chains is not in the file; build it again with this duckOSM version"
             ));
         }
-        let e = |x: duckdb::Error| x.to_string();
-        let mut st = con
-            .prepare(&format!(
+        Self::from_sql(
+            con,
+            &format!(
                 "SELECT c.chain_id, list(m.edge_id ORDER BY m.i), list(coalesce(e.length_m, 0)::DOUBLE ORDER BY m.i), any_value(ST_AsText(c.geometry)) \
                  FROM {mode}.chains c, unnest(c.edge_ids) WITH ORDINALITY AS m(edge_id, i) JOIN {mode}.edges e ON e.edge_id = m.edge_id \
                  WHERE len(c.edge_ids) > 1 GROUP BY c.chain_id"
-            ))
-            .map_err(e)?;
+            ),
+        )
+    }
+
+    /// The chains of a GMNS db (`gmns_driving.chains`, docs/design/sim_from_gmns.md).
+    pub fn read_gmns(con: &duckdb::Connection) -> Result<Chains> {
+        if !crate::has_table(con, "gmns_driving", "chains")? {
+            return Err("merge: gmns_driving.chains is not in the GMNS db; make it again with this duckOSM version (duckosm gmns)".into());
+        }
+        Self::from_sql(
+            con,
+            "SELECT c.chain_id, list(m.link_id ORDER BY m.i), list(coalesce(l.length, 0)::DOUBLE ORDER BY m.i), any_value(ST_AsText(c.geom)) \
+             FROM gmns_driving.chains c, unnest(c.link_ids) WITH ORDINALITY AS m(link_id, i) JOIN gmns_driving.link l ON l.link_id = m.link_id \
+             WHERE len(c.link_ids) > 1 GROUP BY c.chain_id",
+        )
+    }
+
+    /// The chains of `sql`: (chain_id, edges in order, their lengths, the chain's line as WKT).
+    fn from_sql(con: &duckdb::Connection, sql: &str) -> Result<Chains> {
+        let e = |x: duckdb::Error| x.to_string();
+        let mut st = con.prepare(sql).map_err(e)?;
         let rows = st
             .query_map([], |r| {
                 let ids: Vec<i64> = list(r.get::<_, duckdb::types::Value>(1)?);

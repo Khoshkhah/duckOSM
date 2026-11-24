@@ -29,7 +29,7 @@ In the GMNS database (`<area>_gmns.duckdb`), **every table belongs to a network 
 In the GMNS database (`<area>_gmns.duckdb`), **every table belongs to a schema**. There are no tables in the default `main` schema.
 
 #### Macro schemas (`duckosm gmns`)
-* **`gmns_driving` (16 tables):** Driving network for cars, buses, and trucks. Includes lanes, turns, signals, curb parking, crosswalks, and intersection turn curves.
+* **`gmns_driving` (18 tables, with netconvert):** Driving network for cars, buses, and trucks. Includes lanes, turns, signals, curb parking, crosswalks, intersection turn curves, and the road chains (`chains`).
 * **`gmns_walking` (15 tables):** Pedestrian network for sidewalks, paths, and crosswalks. Tracks parallel roads via `link_along`, connects footways to road crossings, and lists unpaired lanes in `lane_check`.
 * **`gmns_cycling` (13 tables):** Bicycle network for cycleways and bikeable roads. Tracks parallel roads via `link_along`.
 * **`gmns_all` (5 tables):** Created with `--combined`. Merges shared streets across modes into one link with `allowed_uses = 'auto,bike,walk'`. Lanes and turns stay in the mode schemas.
@@ -58,6 +58,7 @@ In the GMNS database (`<area>_gmns.duckdb`), **every table belongs to a schema**
 | [`crossing`](#crossing) | ➕ | — | ✅ | — | — | pedestrian crossing painted on a roadway |
 | [`lane_crossing`](#lane_crossing) | ➕ | — | ✅ | — | — | specific vehicular road lanes crossed by a crossing |
 | [`link_along`](#link_along) | ➕ | — | ✅ *(ref)* | ✅ | ✅ | footpath or cycle track running parallel to a road |
+| [`chains`](#chains) | ➕ | — | ✅ | — | — | the links of one road between two real junctions, for `sumo --merge` and `matsim --merge` |
 | [`lane_check`](#lane_check) | ➕ | — | optional | ✅ | optional | diagnostic log of unmapped lane arrows or disconnected turns |
 
 ### Table matrix: meso and micro schemas
@@ -262,6 +263,22 @@ In `gmns_driving`: one row for each lane pair of a movement. A turn from lanes 1
 
 When driving and walking are both exported, `gmns_walking.lane_connector` also has a short straight connector from the
 end of each footway to the nearest road lane, where they meet at a node.
+
+## chains
+
+Driving only. One row for each chain: the links of one road between two real junctions, joined again over the footway
+crossings. It comes from the Level 2 [`driving.chains`](../reference/database.md#chains), with two changes: a chain is cut
+where the GMNS lanes change (a merged SUMO edge has the lanes of its last link), and a link in no Level 2 chain (a bus-only
+link) is a chain of one link. Each driving link is in one chain. A source db with no `driving.chains` (an old build, or
+`--no-chains`) gives one chain for each link, so `--merge` changes nothing. `duckosm sumo --merge` and `duckosm matsim --merge` read it.
+
+| Column | Type | Holds |
+|---|---|---|
+| `chain_id` | BIGINT | the `link_id` for a chain of one link, else a hash of `link_ids`. A chain that is not cut has its Level 2 `chain_id` |
+| `from_node_id`, `to_node_id` | BIGINT | the first node and the last node |
+| `link_ids` | BIGINT[] | the links, in driving order |
+| `length` | DOUBLE | metres, the sum of the link lengths |
+| `geom` | GEOMETRY | the link lines joined into one line |
 
 ## lane_check
 

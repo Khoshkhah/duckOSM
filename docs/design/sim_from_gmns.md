@@ -98,3 +98,58 @@ Result on Monaco (2026-11-23):
 | SUMO driving: edges with the GMNS number of lanes | 2,858 of 2,858 |
 | SUMO walking and cycling from GMNS | netconvert builds both networks with no error |
 
+
+## Chains: `--merge` for SUMO and MATSim, from both inputs
+
+Added 2026-11-23. The edge is the id in each output. A chain (`driving.chains`) is an optional coarser view for a
+simulator: the edges of one road between two real junctions, joined again over the footway crossings. `--merge` writes one
+simulator element for each chain.
+
+| Output | Without `--merge` | With `--merge` |
+|---|---|---|
+| SUMO from Level 2 | one edge for each `edge_id` | one edge for each chain of `driving.chains` (before this change too) |
+| SUMO from GMNS | one edge for each link | one edge for each chain of `gmns_driving.chains` (new) |
+| MATSim `network.xml`, both inputs | one link for each edge | one link for each chain (new) |
+| MATSim `lanes.xml` and signals (`matsim-lanes`) | the links of the edges | the links of the chains, from `gmns_driving.chains` (new) |
+
+A merged element has the id `chain_id`, and lists its edges: SUMO `<param key="edge_ids">`, MATSim
+`<attributes><attribute name="edge_ids">`. `duckosm.sim.edge_map` reads both, so results still join on `edge_id`.
+
+`--merge` is for the driving network only: the chains are driving chains. MATSim `--merge` therefore takes `-m driving`.
+
+### `gmns_driving.chains`
+
+`duckosm gmns` writes it after the whole build (also after a build by tiles, so no chain stops at a tile border), from the
+source db's `driving.chains`:
+
+| Column | Holds |
+|---|---|
+| `chain_id` | the id: the `link_id` for a chain of one link, else the hash of `link_ids` (`duckosm_core::chains::chain_id`). A chain that is not cut has its Level 2 `chain_id` |
+| `from_node_id`, `to_node_id` | the first node and the last node |
+| `link_ids` | the links in driving order |
+| `length` | the sum of the link lengths, in metres |
+| `geom` | the link lines joined into one line |
+
+Two changes from `driving.chains`:
+
+1. **A chain is cut where the GMNS lanes change.** A merged SUMO edge has the lanes of its last link, so each link of a
+   chain must have the same lanes. GMNS can fill in lanes (a link takes the lanes of the road that it continues), so two
+   links of one Level 2 chain can have different GMNS lanes. The chain is cut where the lane list (`lane_num`,
+   `allowed_uses`, `width`) changes.
+2. **Each GMNS driving link is in one chain.** A bus-only link is not a Level 2 edge, so it is in no Level 2 chain. It is a
+   chain of one link. A source db with no `driving.chains` gives one chain for each link, so the table is always there.
+
+### MATSim `--merge`
+
+| MATSim | From the chain |
+|---|---|
+| `id` | `chain_id` |
+| `from`, `to` | the chain's first node and last node |
+| `length` | the chain's length |
+| `freespeed` | the speed of the chain (`maxspeed_kmh`; GMNS: `free_speed` of its last link), else `length / cost_s` |
+| `permlanes`, `capacity` | as one link, from the chain's lanes and road class (GMNS: of its last link) |
+
+`matsim-lanes --merge`: a movement leaves the chain whose last link is the movement's inbound link, and enters the chain
+whose first link is its outbound link. A movement between two links of one chain is inside a chain, and is not written.
+The lanes of a merged link are the lanes of its last link. Only nodes at the ends of chains have movements, so the signals
+stay the same.
