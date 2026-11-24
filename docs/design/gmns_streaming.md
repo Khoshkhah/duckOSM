@@ -113,6 +113,27 @@ the table above), and has a Kentucky measure.
 5. **Remove GMNS by tiles.** `--tile-zoom`, `gmns_tiles.rs` and the owner rules go when Kentucky and Île-de-France build
    by units under the memory of the tiles.
 
+## Result
+
+Kentucky, driving, `duckosm gmns` with the default options, Mac mini (M6, 16 GB):
+
+| | Time | Largest Rust heap of a step |
+|---|---|---|
+| GMNS by tiles, zoom 9, netconvert (WSL) | 1406 s | (5.0 GB with netconvert) |
+| Lane rules, whole area, before the steps | 170 s | 6.8 GB (lanes and curbs) |
+| Steps 1–3 and lane ends meet (PRs 459, 464, 465, 467) | 140 s | 2.2 GB (crossings) |
+| WKB in place of WKT, rowid in place of row_number (PR 476) | 94 s | 2.2 GB |
+| More steps on all cores, a direct movement table (PR 477) | 70 s | 2.2 GB |
+| One copy of each lane surface in the crossings step | 70 s | 1.75 GB (crossings) |
+
+Île-de-France (1.5 million links, Mac mini): 65 s, against 1373 s with GMNS by tiles and netconvert (WSL).
+
+Each change kept the rows: on Monaco, every GMNS table of driving, walking and cycling has the same rows as before.
+
+Two faults came out on the way. A `row_number() OVER ()` window on 6 million lane rows hung DuckDB under its 2 GB limit
+(all workers idle, the query waiting for a task); `rowid` replaced it. An `ORDER BY` over 2.2 million full lane rows ran out
+of the 2 GB limit; it only fixed a row order, and it went.
+
 ## The goal
 
 Kentucky, driving, lane rules, Mac mini: under 2 GB of peak memory, and under 60 s. Île-de-France and France build with
