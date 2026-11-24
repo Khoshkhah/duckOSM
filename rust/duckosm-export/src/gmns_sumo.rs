@@ -65,7 +65,7 @@ fn py_repr(s: &str) -> String {
     out
 }
 
-type Check = (String, String, String);
+pub(crate) type Check = (String, String, String);
 
 /// `_arrow_fit`: which painted arrows fit their link, read by order as SUMO's OSM import reads them. Returns the direction
 /// rank of each (link, exit) of the links whose arrows fit, the arrows of each lane, and the lane_check rows of the others.
@@ -282,7 +282,7 @@ fn path_of(via: Option<&str>, net: &Net) -> Vec<P> {
 }
 
 /// `_runs`: lane pairs -> runs that go on side by side.
-fn runs(pairs: &[(i64, i64)]) -> Vec<Vec<(i64, i64)>> {
+pub(crate) fn runs(pairs: &[(i64, i64)]) -> Vec<Vec<(i64, i64)>> {
     let mut out: Vec<Vec<(i64, i64)>> = Vec::new();
     for p in pairs.iter().copied().collect::<BTreeSet<_>>() {
         match out.last_mut() {
@@ -291,6 +291,35 @@ fn runs(pairs: &[(i64, i64)]) -> Vec<Vec<(i64, i64)>> {
         }
     }
     out
+}
+
+/// The movement rows back into `{sch}.movement`: (old id, new id, lanes (start in, end in, start out, end out), bike row,
+/// kept as it was). A movement becomes one row for each of its runs of lanes; a row of no connection keeps its lanes. Shared by
+/// netconvert's lanes and the lane rules (gmns_lane_rules).
+#[allow(clippy::type_complexity)]
+pub(crate) fn apply_rows(c: &Ctx, sch: &str, rows: &[(String, String, Option<(i64, i64, i64, i64)>, bool, bool)]) -> Result<()> {
+    c.exec("CREATE OR REPLACE TEMP TABLE _mv_new(old VARCHAR, new VARCHAR, keep BOOLEAN, sil INT, eil INT, sol INT, eol INT, bike BOOLEAN, k BIGINT)")?;
+    {
+        let mut app = c.con.appender("_mv_new").map_err(|e| e.to_string())?;
+        for (k, (old, new, l, bike, keep)) in rows.iter().enumerate() {
+            app.append_row(duckdb::params![old, new, keep, l.map(|x| x.0 as i32), l.map(|x| x.1 as i32), l.map(|x| x.2 as i32), l.map(|x| x.3 as i32), bike, k as i64])
+                .map_err(|e| e.to_string())?;
+        }
+        app.flush().map_err(|e| e.to_string())?;
+    }
+    c.exec(&format!(
+        "CREATE OR REPLACE TEMP TABLE _mv_old AS SELECT * FROM {sch}.movement;
+         DELETE FROM {sch}.movement;
+         INSERT INTO {sch}.movement SELECT m.* REPLACE (
+             n.new AS mvmt_id,
+             CASE WHEN n.keep THEN m.start_ib_lane ELSE n.sil END AS start_ib_lane,
+             CASE WHEN n.keep THEN m.end_ib_lane ELSE n.eil END AS end_ib_lane,
+             CASE WHEN n.keep THEN m.start_ob_lane ELSE n.sol END AS start_ob_lane,
+             CASE WHEN n.keep THEN m.end_ob_lane ELSE n.eol END AS end_ob_lane,
+             CASE WHEN n.bike THEN 'bike' ELSE m.allowed_uses END AS allowed_uses)
+           FROM _mv_new n JOIN _mv_old m ON m.mvmt_id = n.old ORDER BY n.k;
+         DROP TABLE _mv_new; DROP TABLE _mv_old"
+    ))
 }
 
 /// `lanes_from_sumo`: see the module comment. `source`: the duckOSM db. `geometry`: also `lane.geom_cut` and `lane_connector`.
@@ -430,28 +459,7 @@ pub(crate) fn lanes_from_sumo(c: &Ctx, source: &Path, sch: &str, mode: &str, geo
         }
     }
     // the rows go back into movement: a row of no connection keeps its lanes (-1 marks it)
-    c.exec("CREATE OR REPLACE TEMP TABLE _mv_new(old VARCHAR, new VARCHAR, keep BOOLEAN, sil INT, eil INT, sol INT, eol INT, bike BOOLEAN, k BIGINT)")?;
-    {
-        let mut app = c.con.appender("_mv_new").map_err(|e| e.to_string())?;
-        for (k, (old, new, l, bike, keep)) in rows.iter().enumerate() {
-            app.append_row(duckdb::params![old, new, keep, l.map(|x| x.0 as i32), l.map(|x| x.1 as i32), l.map(|x| x.2 as i32), l.map(|x| x.3 as i32), bike, k as i64])
-                .map_err(|e| e.to_string())?;
-        }
-        app.flush().map_err(|e| e.to_string())?;
-    }
-    c.exec(&format!(
-        "CREATE OR REPLACE TEMP TABLE _mv_old AS SELECT * FROM {sch}.movement;
-         DELETE FROM {sch}.movement;
-         INSERT INTO {sch}.movement SELECT m.* REPLACE (
-             n.new AS mvmt_id,
-             CASE WHEN n.keep THEN m.start_ib_lane ELSE n.sil END AS start_ib_lane,
-             CASE WHEN n.keep THEN m.end_ib_lane ELSE n.eil END AS end_ib_lane,
-             CASE WHEN n.keep THEN m.start_ob_lane ELSE n.sol END AS start_ob_lane,
-             CASE WHEN n.keep THEN m.end_ob_lane ELSE n.eol END AS end_ob_lane,
-             CASE WHEN n.bike THEN 'bike' ELSE m.allowed_uses END AS allowed_uses)
-           FROM _mv_new n JOIN _mv_old m ON m.mvmt_id = n.old ORDER BY n.k;
-         DROP TABLE _mv_new; DROP TABLE _mv_old"
-    ))?;
+    apply_rows(c, sch, &rows)?;
     // every lane of a link with movements has a way out and a way in (driving: the car lanes)
     let (mut outs, mut ins): (HashMap<i64, HashSet<i64>>, HashMap<i64, HashSet<i64>>) = (HashMap::new(), HashMap::new());
     for (ib, ob, lanes, _, _) in &row_ends {

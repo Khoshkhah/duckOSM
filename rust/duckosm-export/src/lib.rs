@@ -10,6 +10,7 @@ pub mod lanelet2;
 pub mod gmns;
 pub mod gmns_check;
 pub mod gmns_lanes;
+pub mod gmns_lane_rules;
 pub mod gmns_meso;
 pub mod gmns_sumo;
 pub mod gmns_tiles;

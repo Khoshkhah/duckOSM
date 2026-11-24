@@ -530,6 +530,7 @@ duckosm gmns [OPTIONS] DB
 | `--gtfs-max-m METRES` | how far from a link a GTFS stop can be and still go on it | `30.0` |
 | `--csv-extensions` | keep duckOSM's extra columns in the CSV files, as user-defined fields with a `u_` prefix | |
 | `--check` | check the values of the result; exit code 1 if a check fails | |
+| `--lane-source [auto\|rules\|netconvert]` | which lane goes to which at each junction: SUMO's netconvert, or the lane rules (ported from SimReady, no SUMO needed); `auto`: netconvert when it is installed, else the rules. [Design](https://github.com/Khoshkhah/duckOSM/blob/main/docs/design/gmns_lane_rules.md) | `auto` |
 | `--tile-zoom Z` | make an area with nodes in two or more map tiles of zoom `Z` one tile at a time, so the memory follows a tile, not the area. `0`: the whole area at once | `9` |
 
 ### `gmns-map`

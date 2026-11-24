@@ -138,11 +138,14 @@ pub struct GmnsOptions {
     pub walk_clearance_m: f64,
     /// The zoom of the map tiles of GMNS by tiles (docs/design/gmns_by_tiles.md). None: the whole area at once.
     pub tile_zoom: Option<u8>,
+    /// Which lane goes to which: `netconvert`, `rules` (SimReady's lane rules) or `auto` (netconvert when it is installed,
+    /// else the rules). docs/design/gmns_lane_rules.md.
+    pub lane_source: String,
 }
 
 impl Default for GmnsOptions {
     fn default() -> Self {
-        GmnsOptions { modes: vec![], lane_geometry: true, pair_carriageways: true, drive_side: "right".into(), combined: false, to_csv: None, csv_extensions: false, gtfs: vec![], gtfs_max_m: 30.0, walk_frame: false, walk_clearance_m: 0.0, tile_zoom: Some(TILE_ZOOM) }
+        GmnsOptions { modes: vec![], lane_geometry: true, pair_carriageways: true, drive_side: "right".into(), combined: false, to_csv: None, csv_extensions: false, gtfs: vec![], gtfs_max_m: 30.0, walk_frame: false, walk_clearance_m: 0.0, tile_zoom: Some(TILE_ZOOM), lane_source: "auto".into() }
     }
 }
 
@@ -242,11 +245,17 @@ fn build_gmns(source: &Path, out: &Path, name: &str, o: &GmnsOptions) -> Result<
         let sch = format!("gmns_{mode}");
         let uses = mode_use(mode);
         c.exec(&format!("CREATE SCHEMA {sch}"))?;
+        eprintln!("@STEP build_fixed {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64());
         build_fixed(&c, &sch, &name, mode, uses)?;
+        eprintln!("@STEP edge_view {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64());
         edge_view(&c, mode, has_raw)?;
+        eprintln!("@STEP build_node {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64());
         build_node(&c, &sch, mode)?;
+        eprintln!("@STEP infer_lanes {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64());
         infer_lanes(&c, mode, has_raw)?;
+        eprintln!("@STEP build_link {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64());
         build_link(&c, &sch, mode, uses, has_raw)?;
+        eprintln!("@STEP build_geometry {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64());
         build_geometry(&c, &sch)?;
         for (col, typ) in [("along_link_id", "BIGINT"), ("along_mode", "VARCHAR"), ("along_gap_m", "DOUBLE"), ("along_kind", "VARCHAR")] {
             c.exec(&format!("ALTER TABLE {sch}.link ADD COLUMN {col} {typ}"))?;
@@ -258,43 +267,75 @@ fn build_gmns(source: &Path, out: &Path, name: &str, o: &GmnsOptions) -> Result<
         if mode != "driving" {
             along = sidewalk_parents(&c, &sch, has_raw, drive_side)?;
         }
+        eprintln!("@STEP build_lane_curb {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64());
         build_lane_curb(&c, &sch, mode, uses, has_raw, drive_side, o.lane_geometry, o.pair_carriageways)?;
         if o.walk_frame && mode != "driving" && o.lane_geometry {
+            eprintln!("@STEP crate::gmns_walk::walk_frame {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64());
             crate::gmns_walk::walk_frame(&c, &sch, drive_side, &along, o.walk_clearance_m)?; // before the lane connectors
+            eprintln!("@STEP crate::gmns_walk::walk_kerb {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64());
             crate::gmns_walk::walk_kerb(&c, &sch, o.walk_clearance_m)?;
+            eprintln!("@STEP crate::gmns_walk::walk_join {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64());
             crate::gmns_walk::walk_join(&c, &sch)?;
         }
+        eprintln!("@STEP build_movement {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64());
         build_movement(&c, &sch, mode, uses)?;
         if mode == "driving" || mode == "cycling" {
             // which lane goes to which, from SUMO netconvert; driving: also the paths through the junctions and geom_cut. GMNS does
             // not need SUMO: without netconvert the movements have no lane ranges, and there is no lane_connector
-            if crate::sumo::find_netconvert().is_ok() {
-                crate::gmns_sumo::lanes_from_sumo(&c, source, &sch, mode, o.lane_geometry && mode == "driving", drive_side)?;
+            let netconvert = crate::sumo::find_netconvert().is_ok();
+            let use_rules = match o.lane_source.as_str() {
+                "rules" => true,
+                "netconvert" => {
+                    if !netconvert {
+                        return Err("--lane-source netconvert: netconvert (SUMO) not found. Install SUMO (`pip install eclipse-sumo`), or use --lane-source rules".into());
+                    }
+                    false
+                }
+                _ => !netconvert,
+            };
+            if use_rules {
+                // SimReady's lane rules (docs/design/gmns_lane_rules.md): the roundabout links of the source are the ring
+                let ring: HashSet<i64> = if c.src_cols(mode, "edges")?.contains("junction") {
+                    let sql = format!("SELECT edge_id FROM s.{mode}.edges WHERE junction IN ('roundabout', 'circular')");
+                    let mut st = c.con.prepare(&sql).map_err(|e| format!("{e}\n{sql}"))?;
+                    let v = st.query_map([], |r| r.get::<_, i64>(0)).map_err(|e| e.to_string())?.collect::<std::result::Result<_, _>>().map_err(|e| e.to_string())?;
+                    v
+                } else {
+                    HashSet::new()
+                };
+                eprintln!("@STEP crate::gmns_lane_rules::lanes_from_rules {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64());
+                crate::gmns_lane_rules::lanes_from_rules(&c, &sch, mode, o.lane_geometry && mode == "driving", drive_side, &ring)?;
             } else {
-                eprintln!(
-                    "GMNS[{mode}]: netconvert (SUMO) not found: the movements have no lanes (start_ib_lane ... end_ob_lane are empty) and \
-                     there is no lane_connector. Install SUMO (`pip install eclipse-sumo`) for them"
-                );
+                eprintln!("@STEP crate::gmns_sumo::lanes_from_sumo {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64());
+                crate::gmns_sumo::lanes_from_sumo(&c, source, &sch, mode, o.lane_geometry && mode == "driving", drive_side)?;
             }
             if o.lane_geometry {
+                eprintln!("@STEP meet_lanes {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64());
                 meet_lanes(&c, &sch)?;
             }
         } else {
+            eprintln!("@STEP walk_lanes {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64());
             walk_lanes(&c, &sch)?;
         }
         if mode == "driving" {
+            eprintln!("@STEP crate::crossings::build_crossings {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64());
             crate::crossings::build_crossings(&c, &sch, has_raw)?; // zebra crossings on the driving lanes
         }
         c.exec(&format!(
             "CREATE TABLE {sch}.signal_controller AS SELECT 'sig_' || node_id::VARCHAR AS controller_id, node_id, 'signal' AS control_type
              FROM {sch}.node WHERE ctrl_type = 'signal'"
         ))?;
+        eprintln!("@STEP build_location {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64());
         build_location(&c, &sch, mode, has_raw, stops.is_some())?;
         if let Some(s) = &stops {
+            eprintln!("@STEP crate::gtfs::add_transit_stops {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64());
             crate::gtfs::add_transit_stops(&c, &sch, mode, s, drive_side, o.gtfs_max_m)?;
         }
+        eprintln!("@STEP apply_signs {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64());
         apply_signs(&c, &sch, mode, has_raw)?;
+        eprintln!("@STEP node_types {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64());
         node_types(&c, &sch, has_raw)?;
+        eprintln!("@STEP build_zone {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64());
         build_zone(&c, &sch, name.strip_suffix("_gmns").unwrap_or(&name))?;
         let mut counts = Vec::new();
         for t in ["node", "link", "lane", "movement", "signal_controller", "curb_seg"] {

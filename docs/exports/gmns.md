@@ -16,7 +16,7 @@ give 18 links and 4 nodes more than `driving.edges` and `driving.nodes`.
 | Check | the CSV files pass the schemas of the specification, and Path4GMNS loads them and finds a route. `--check` checks the values: link ends, lengths, lane numbers, movements. [How each output is checked](../concepts/checks.md) |
 
 ```bash
-pip install "duckosm[sumo]"                      # optional: without netconvert, movements have no lanes
+pip install "duckosm[sumo]"                      # optional: without netconvert, the lane rules give the lanes (--lane-source)
 
 # Input: Level 2 routable database (monaco.duckdb)
 # Output: Level 3 GMNS database (monaco_gmns.duckdb by default, or with -o)
