@@ -1,16 +1,16 @@
-# GMNS tables
+# GMNS network tables
 
-Each table of the GMNS database of [`duckosm gmns`](gmns.md), and each of its columns. The standard: the
-[GMNS specification](https://zephyr-data-specs.github.io/GMNS/spec/) 0.97.
+Each table of the GMNS network database (`<area>_gmns.duckdb`, level 3) of [`duckosm gmns`](gmns.md), and each of its
+columns. The standard: the [GMNS specification](https://zephyr-data-specs.github.io/GMNS/spec/) 0.97.
 
 | Rule | |
 |---|---|
-| Schemas | Every table belongs to a schema: `gmns_driving`, `gmns_walking`, `gmns_cycling`, or `gmns_all` (with `--combined`). Outside them is only `main.elevation_metadata` (when the source db has heights). With `--meso`, `--micro` also `meso_<mode>`, `micro_<mode>`. See [network schemas](gmns.md#network-schemas). |
+| Schemas | one schema for each mode: `gmns_driving`, `gmns_walking`, `gmns_cycling`; `gmns_all` with `--combined`; `meso_<mode>` and `micro_<mode>` with `--meso` and `--micro`. The `main` schema has only [`elevation_metadata`](#elevation_metadata), when the source db has heights |
 | Ids | `link_id` is the duckOSM `edge_id` (BIGINT), the same after each build and in each mode. `node_id` is the OSM node id |
-| Units | metres, km/h, longitude and latitude (EPSG:4326) |
-| Geometry | `geometry` is WKT text (in the CSV files). `geom` is the same shape as a DuckDB `GEOMETRY` (not in the CSV files) |
 | Links | one link for each direction of a road. `directed` is always `true` |
 | Lane numbers | lane 1 is the leftmost lane in the direction of travel |
+| Units | metres, km/h, longitude and latitude (EPSG:4326) |
+| Geometry | `geometry` is WKT text (in the CSV files). `geom` is the same shape as a DuckDB `GEOMETRY` (not in the CSV files) |
 
 The column "Spec" says where a column comes from:
 
@@ -20,22 +20,22 @@ The column "Spec" says where a column comes from:
 | ∅ | a column of the standard that OSM has no data for: empty | yes, empty |
 | ➕ | a duckOSM column, not in the standard | only with `--csv-extensions`, with the prefix `u_` |
 
-## The tables
+## The schemas
 
-In the GMNS database (`<area>_gmns.duckdb`), **every network table belongs to a network schema**. The default `main`
-schema has one table: [`elevation_metadata`](#elevation_metadata), when the source db has heights.
+**Macro schemas** (`duckosm gmns`):
 
-### The network schemas
+- `gmns_driving` (18 tables): cars, buses and trucks. The lanes, the turns, the signals, the curb parking, the
+  crosswalks, the paths through the junctions and the road chains (`chains`).
+- `gmns_walking` (15 tables): sidewalks, paths and crosswalks. `link_along` gives the road beside each footpath,
+  `lane_connector` joins the footways at the crossings, and `lane_check` lists the lanes with no pair.
+- `gmns_cycling` (14 tables): cycleways and the roads that bicycles use. `link_along` gives the road beside each track.
+- `gmns_all` (5 tables, with `--combined`): one link for a street that more than one mode uses, with
+  `allowed_uses = 'auto,bike,walk'`. The lanes and the turns stay in the mode schemas.
 
-#### Macro schemas (`duckosm gmns`)
-* **`gmns_driving` (18 tables, with netconvert):** Driving network for cars, buses, and trucks. Includes lanes, turns, signals, curb parking, crosswalks, intersection turn curves, and the road chains (`chains`).
-* **`gmns_walking` (15 tables):** Pedestrian network for sidewalks, paths, and crosswalks. Tracks parallel roads via `link_along`, connects footways to road crossings, and lists unpaired lanes in `lane_check`.
-* **`gmns_cycling` (14 tables):** Bicycle network for cycleways and bikeable roads. Tracks parallel roads via `link_along`.
-* **`gmns_all` (5 tables):** Created with `--combined`. Merges shared streets across modes into one link with `allowed_uses = 'auto,bike,walk'`. Lanes and turns stay in the mode schemas.
+**Meso and micro schemas** (`--meso`, `--micro`):
 
-#### Meso and micro schemas (`--meso`, `--micro`)
-* **`meso_<mode>` (2 tables, via `--meso`):** Road sections and junction turn connectors for mesoscopic simulation (default: `meso_driving`).
-* **`micro_<mode>` (2 tables, via `--micro`):** Discrete 7-meter lane cells, lateral lane changes, and turn movements for microscopic simulation (default: `micro_driving`).
+- `meso_<mode>` (2 tables): the road sections and the connectors through the junctions, for mesoscopic simulation.
+- `micro_<mode>` (2 tables): lane cells of 7 m, the lane changes and the turns, for microscopic simulation.
 
 ### Table matrix: macro schemas
 
@@ -68,6 +68,31 @@ schema has one table: [`elevation_metadata`](#elevation_metadata), when the sour
 | `meso_<mode>` | `meso_link` | ➕ duckOSM | a road section or junction connector | `link_id`, `meso_type`, `from_node_id`, `to_node_id`, `length`, `lanes`, `free_speed`, `macro_link_id`, `movement_id`, `geom` |
 | `micro_<mode>` | `micro_node` | ➕ duckOSM | the boundary vertex of a lane cell | `node_id`, `x_coord`, `y_coord`, `lane_id`, `cell_k`, `macro_link_id`, `lane_no`, `geom` |
 | `micro_<mode>` | `micro_link` | ➕ duckOSM | a 7 m cell, lane change, or turn arc | `link_id`, `cell_type`, `from_node_id`, `to_node_id`, `length`, `width`, `lane_no`, `macro_link_id`, `meso_link_id`, `geom` |
+
+## The tables of one mode
+
+The macro tables of one mode. A box is a table. A line joins two tables, and its label names the columns that join them.
+The fork at the end of a line is the "many" side: one node starts many links.
+
+```mermaid
+erDiagram
+    direction LR
+    node ||--o{ link : "from_node_id, to_node_id"
+    link ||--|| geometry : "geometry_id"
+    link ||--o{ lane : "link_id"
+    node ||--o{ movement : "node_id"
+    link ||--o{ movement : "ib_link_id, ob_link_id"
+    movement ||--o{ lane_connector : "mvmt_id"
+    lane ||--o{ lane_connector : "from_lane_id, to_lane_id"
+    link ||--o{ location : "link_id"
+    link ||--o{ curb_seg : "link_id"
+    node ||--o| signal_controller : "node_id"
+    zone ||--o{ node : "zone_id"
+    crossing ||--o{ lane_crossing : "crossing_id"
+    lane ||--o{ lane_crossing : "lane_id"
+    link ||--o{ link_along : "link_id, along_link_id"
+    chains ||--|{ link : "link_ids"
+```
 
 ## config
 
