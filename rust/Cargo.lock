@@ -969,6 +969,7 @@ dependencies = [
  "flate2",
  "geo",
  "pbfcut",
+ "rayon",
  "rusqlite",
 ]
 
