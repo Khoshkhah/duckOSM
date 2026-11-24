@@ -20,7 +20,7 @@ car, walk, bike = net.driving, net.walking, net.cycling
 | **Fastest route** | ORS `directions`, OSRM `route`, OSMnx `shortest_path` | `car.route(a, b)` | Rust Dijkstra on the turn graph, with the OSM turn restrictions |
 | **Shortest route** | OSMnx `shortest_path(weight="length")` | `car.route(a, b, weight="length")` | Minimizes physical distance in metres |
 | **Route edges** | OSMnx `route_to_gdf` | `car.route(a, b).edge_ids` | The list of stable `edge_id`s of the route; `.edges` gives them as a GeoDataFrame |
-| **Turn-by-turn guidance** | ORS / OSRM `steps=true` | `car.route(a, b).directions()` | Generates street names, maneuver icons, turn angles, and segment lengths |
+| **Turn-by-turn guidance** | ORS / OSRM `steps=true` | `car.route(a, b).directions()` | Gives each step its type, its direction, the street name, the point, the length and a line of text |
 | **Multi-origin / destination** | OSMnx `shortest_path(G, origs, dests)` | `car.routes(origins, destinations)` | Vectorized parallel routing across coordinate or edge lists |
 | **Alternative routes (KSP)** | OSMnx `k_shortest_paths`, OSRM `alternatives` | `car.k_shortest_paths(a, b, k=3)` | Returns distinct viable detour paths |
 | **Travel time matrix (OD)** | ORS `matrix`, OSRM `table`, r5py `TravelTimeMatrix` | `car.matrix(origins, destinations)` | Parallel single-source searches computing full OD impedance matrix in seconds |

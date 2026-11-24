@@ -66,5 +66,5 @@ A `no_*` restriction removes one turn from `edge_graph`. An `only_*` restriction
 ## Bus routes
 
 OSM bus route relations are matched to the driving edges, in schema [`bus`](../reference/database.md#bus-schema)
-(`bus.routes`, `bus.route_edges`). A PBF build with driving makes them; [`duckosm bus DB`](../reference/cli.md#bus) adds them later.
+(`bus.routes`, `bus.route_edges`). A PBF build with a boundary and driving makes them; [`duckosm bus DB`](../reference/cli.md#bus) adds them later.
 `bus.routes.gaps` lists each way that the route cannot follow.

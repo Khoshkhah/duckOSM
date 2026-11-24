@@ -23,8 +23,8 @@ A place (`a`, `b`, an item of `origins`, `destinations` or `targets`) is one of 
 | `routes(view, origins, destinations, weight="time")` | the route from each origin to the destination at the same place in the list (`zip`), in parallel. A list of `Route` (`None`: not connected). |
 | `k_shortest_paths(view, a, b, k=3, weight="time")` | the `k` best routes that use no edge two times, the best first. A list of `Route`. |
 | `matrix(view, origins, destinations=None, weight="time", max_cost=None)` | a DataFrame: a row for each origin, a column for each destination. The cells are seconds (`weight="length"`: metres). `NaN`: not connected, more than `max_cost`, or an edge that is not in the graph of the mode (for example a bus-only edge). |
-| `isochrones(view, origins, minutes=(5, 10, 15), buffer_m=25.0, weight="time")` | a GeoDataFrame with a polygon for each origin and each time: `origin`, `minutes`, `n_edges`, `geometry` |
-| `accessibility(view, origins, targets, minutes=15, weight="time")` | a DataFrame with a row for each origin: `n_<m>min` (the number of targets within `m` minutes), `nearest`, `nearest_s` |
+| `isochrones(view, origins, minutes=(5, 10, 15), buffer_m=25.0, weight="time")` | a GeoDataFrame with a polygon for each origin and each time: `origin`, `minutes`, `n_edges`, `area_km2`, `geometry` |
+| `accessibility(view, origins, targets, minutes=15, weight="time")` | a DataFrame with a row for each origin: `n_<m>min` (the number of targets within `m` minutes; `minutes` can be a list, then one column for each value), `nearest`, `nearest_s` |
 | `geocode(view, name)` | the `(lon, lat)` of a place name |
 | `routed_graph(view)` | the SQL relation of the rows of `<mode>.edge_graph` that the mode routes on: the graph of all calls |
 | `directions(view, route)` | the turn-by-turn steps of a route |

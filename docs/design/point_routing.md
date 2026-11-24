@@ -1,7 +1,9 @@
 # Routing between two points: off-road access and exact partial edges
 
-**Status:** approved by Kaveh 2026-10-01; duckOSM part implemented (`src/duckosm/point_routing.py`,
-`tests/test_point_routing.py`); mapstyle's planner page next. Decided with Kaveh: the
+**Status:** approved by Kaveh 2026-10-01; duckOSM part implemented, now in Rust: the algorithm in
+`rust/duckosm-router/src/points.rs` (`route_points`), the database part in `rust/duckosm-route/src/points.rs`
+(`route_points`, `route_multimodal_points`), called by `duckosm.route_points` (`src/duckosm/_api.py`); tests in
+`tests/test_point_routing.py`; mapstyle's planner page next. Decided with Kaveh: the
 radius is a parameter (a control in the planner page); the off-road leg costs walking time; duckOSM
 is the reference and mapstyle's planner page mirrors it, so the two can be compared one to one.
 
