@@ -13,11 +13,11 @@ Each table lists:
 The levels go from the raw OSM data to the most detailed network. Each level is made from the level before it.
 
 <div class="dk-levels">
-<div class="lv"><a class="lv-go" href="#0-osm-file" aria-label="0. OSM file"></a><span class="n">0</span><b>OSM file</b><span class="db-tag">.osm.pbf</span><span class="desc">Exact boundary cut with your fixes</span><span class="tools">pbfcut</span></div>
-<div class="lv"><a class="lv-go" href="#1-osm-data" aria-label="1. OSM data"></a><span class="n">1</span><b>OSM data</b><span class="db-tag">from .osm.pbf</span><span class="desc">Flat tables of all OSM objects</span><span class="tools">QuackOSM · GDAL · Geofabrik · PMTiles</span></div>
-<div class="lv"><a class="lv-go" href="#2-routable-network" aria-label="2. Routable network"></a><span class="n">2</span><b>Routable network</b><a class="db-tag db" href="../reference/database/" title="The tables of this database">DuckDB</a><span class="desc">Drive, walk, bike<br>Edges, edge_id, turns</span><span class="tools">GeoPackage · networkx</span></div>
-<div class="lv"><a class="lv-go" href="#3-gmns-network" aria-label="3. GMNS network"></a><span class="n">3</span><b>GMNS network</b><a class="db-tag db" href="gmns_tables/" title="The tables of this database">GMNS DuckDB</a><span class="desc">Macro, meso, micro<br>links, lanes, turns</span><span class="tools">GMNS · MATSim · SUMO</span></div>
-<div class="lv"><a class="lv-go" href="#4-hd-map" aria-label="4. HD map"></a><span class="n">4</span><b>HD map</b><span class="db-tag db">HD map DuckDB</span><span class="desc">Lane shape in 3D (experimental)</span><span class="tools">Lanelet2 · OpenDRIVE</span></div>
+<a class="lv" href="#0-osm-file"><span class="n">0</span><b>OSM file</b><span class="db-tag">.osm.pbf</span><span class="desc">Exact boundary cut with your fixes</span><span class="tools">pbfcut</span></a>
+<a class="lv" href="#1-osm-data"><span class="n">1</span><b>OSM data</b><span class="db-tag">from .osm.pbf</span><span class="desc">Flat tables of all OSM objects</span><span class="tools">QuackOSM · GDAL · Geofabrik · PMTiles</span></a>
+<a class="lv" href="#2-routable-network"><span class="n">2</span><b>Routable network</b><span class="db-tag db">DuckDB</span><span class="desc">Drive, walk, bike<br>Edges, edge_id, turns</span><span class="tools">GeoPackage · networkx</span></a>
+<a class="lv" href="#3-gmns-network"><span class="n">3</span><b>GMNS network</b><span class="db-tag db">GMNS DuckDB</span><span class="desc">Macro, meso, micro<br>links, lanes, turns</span><span class="tools">GMNS · MATSim · SUMO</span></a>
+<a class="lv" href="#4-hd-map"><span class="n">4</span><b>HD map</b><span class="db-tag db">HD map DuckDB</span><span class="desc">Lane shape in 3D (experimental)</span><span class="tools">Lanelet2 · OpenDRIVE</span></a>
 </div>
 
 Your OSM fixes go into every level.
