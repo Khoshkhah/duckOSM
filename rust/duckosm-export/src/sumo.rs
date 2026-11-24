@@ -319,6 +319,8 @@ pub struct Summary {
     pub n_traffic_lights: usize,
     pub n_stop_signs: usize,
     pub n_bus_stops: usize,
+    /// the via-way restrictions applied as one connection through a joined junction (`junctions.join`)
+    pub n_path_restrictions: usize,
 }
 
 fn e(e: duckdb::Error) -> String {
@@ -327,7 +329,11 @@ fn e(e: duckdb::Error) -> String {
 
 /// netconvert: `SUMO_HOME/bin`, the PATH, or the eclipse-sumo package of the active Python environment (`VIRTUAL_ENV`).
 /// Returns the program and the SUMO_HOME that it needs.
-pub(crate) fn find_netconvert() -> Result<(PathBuf, Option<PathBuf>)> {
+pub fn find_netconvert() -> Result<(PathBuf, Option<PathBuf>)> {
+    // an explicit program (the Python API's `netconvert_bin`)
+    if let Some(p) = std::env::var_os("DUCKOSM_NETCONVERT").map(PathBuf::from).filter(|p| p.is_file()) {
+        return Ok((p, None));
+    }
     if let Some(h) = std::env::var_os("SUMO_HOME").map(PathBuf::from) {
         if h.join("bin/netconvert").is_file() {
             return Ok((h.join("bin/netconvert"), None));
@@ -1149,6 +1155,7 @@ pub fn to_sumo_with(db: &Path, out_dir: &Path, mode: &str, net_name: &str, conne
         n_traffic_lights,
         n_stop_signs,
         n_bus_stops,
+        n_path_restrictions: 0,
     };
     // the built-in netconvert config (.netccfg) with the options `opts`, and the signal programs `tll`
     let write_cfg = |opts: &[(String, String)], tll: Option<&Path>| -> Result<()> {
@@ -1256,6 +1263,7 @@ pub fn to_sumo_with(db: &Path, out_dir: &Path, mode: &str, net_name: &str, conne
                 j.m.n_paths,
                 n_rules.len()
             );
+            s.n_path_restrictions = j.m.n_paths;
             joined = Some(j);
         }
     }
