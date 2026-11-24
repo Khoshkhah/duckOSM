@@ -87,6 +87,7 @@ duckosm way monaco.duckdb 4230100 --json      # one OSM way: raw tags + its edge
 duckosm sumo monaco.duckdb --netconvert       # -> sumo/monaco.net.xml (edge ids = edge_id); without --netconvert: plain XML + .netccfg
 duckosm matsim monaco.duckdb                  # -> monaco_network.xml.gz
 duckosm gmns monaco.duckdb                    # -> monaco_gmns.duckdb (lanes, movements)
+duckosm hdmap monaco.duckdb monaco_gmns.duckdb # -> monaco_hdmap.duckdb; needs SimReady (not public yet), heights and raw.*
 duckosm export-gis monaco.duckdb              # -> monaco.gpkg
 duckosm export-gis monaco.duckdb -f geoparquet # -> monaco_geoparquet/edges_driving.parquet, … (+ visualization.edge_levels columns)
 duckosm viz monaco.duckdb                     # -> reports/monaco_map.html + one page per mode
