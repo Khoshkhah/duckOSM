@@ -1271,59 +1271,74 @@ fn build_zone(c: &Ctx, sch: &str, area: &str) -> Result<()> {
 fn meet_lanes(c: &Ctx, sch: &str) -> Result<usize> {
     const TAPER_M: f64 = 15.0;
     const MAX_M: f64 = 8.0;
-    let sql = format!("SELECT lane_id, link_id, lane_num, allowed_uses, ST_AsText(geom) FROM {sch}.lane WHERE geom IS NOT NULL");
+    // by pair (docs/design/gmns_streaming.md): the small facts of every lane (its row, link, number and use), the pairs in the
+    // order of before, and the lines only of the lanes of one chunk of pairs at a time, and of the lanes already moved
+    const CHUNK: usize = 200_000;
+    let sql = format!("SELECT rowid, lane_id, link_id, lane_num, allowed_uses FROM {sch}.lane WHERE geom IS NOT NULL ORDER BY rowid");
     let mut st = c.con.prepare(&sql).map_err(|e| format!("{e}\n{sql}"))?;
-    let rows: Vec<(String, i64, i64, String, String)> = st
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))
-        .map_err(|e| e.to_string())?
-        .collect::<std::result::Result<_, _>>()
-        .map_err(|e| e.to_string())?;
-    let lanes: HashMap<String, (i64, i64, String, Vec<P>)> = rows.iter().map(|r| (r.0.clone(), (r.1, r.2, r.3.clone(), shp::wkt_points(&r.4)))).collect();
-    let by_num: HashMap<(i64, i64), String> = rows.iter().map(|r| ((r.1, r.2), r.0.clone())).collect();
+    let (mut rid, mut ids, mut link, mut use_of): (Vec<i64>, Vec<String>, Vec<i64>, Vec<u32>) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let mut uses: HashMap<String, u32> = HashMap::new();
+    let mut by_num: HashMap<(i64, i64), usize> = HashMap::new();
     let mut count: HashMap<i64, usize> = HashMap::new();
-    for r in &rows {
-        *count.entry(r.1).or_default() += 1;
+    for r in st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?, r.get::<_, i64>(3)?, r.get::<_, String>(4)?))).map_err(|e| e.to_string())? {
+        let (r0, id, lk, num, u) = r.map_err(|e| e.to_string())?;
+        let n = uses.len() as u32;
+        let ui = *uses.entry(u).or_insert(n);
+        // the last row of a (link, number) wins, as in a dict
+        by_num.insert((lk, num), ids.len());
+        *count.entry(lk).or_default() += 1;
+        rid.push(r0);
+        ids.push(id);
+        link.push(lk);
+        use_of.push(ui);
     }
+    drop(st);
+    drop(uses);
     let sql = format!(
         "SELECT ib_link_id, start_ib_lane, end_ib_lane, ob_link_id, start_ob_lane, end_ob_lane FROM {sch}.movement WHERE type IN ('thru', 'diverge', 'merge')
          ORDER BY ib_link_id, ob_link_id, start_ib_lane, start_ob_lane"
     );
     let mut st = c.con.prepare(&sql).map_err(|e| format!("{e}\n{sql}"))?;
     type M = (i64, Option<i64>, Option<i64>, i64, Option<i64>, Option<i64>);
-    let mv: Vec<M> = st
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)))
-        .map_err(|e| e.to_string())?
-        .collect::<std::result::Result<_, _>>()
-        .map_err(|e| e.to_string())?;
     // a dict of sets of Python, in the order of its keys; `nxt_at`: the place of a key (a search of the list for each lane
     // took hours on Kentucky)
-    let mut nxt: Vec<(String, Vec<String>)> = Vec::new();
-    let mut nxt_at: HashMap<String, usize> = HashMap::new();
-    let mut prv: HashMap<String, HashSet<String>> = HashMap::new();
-    for (ib, s0, s1, ob, o0, o1) in mv {
+    let mut nxt: Vec<(usize, Vec<usize>)> = Vec::new();
+    let mut nxt_at: HashMap<usize, usize> = HashMap::new();
+    let mut prv: HashMap<usize, HashSet<usize>> = HashMap::new();
+    for m in st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?))).map_err(|e| e.to_string())? {
+        let (ib, s0, s1, ob, o0, o1): M = m.map_err(|e| e.to_string())?;
         let (Some(s0), Some(s1), Some(o0), Some(o1)) = (s0, s1, o0, o1) else { continue };
         if s1 - s0 != o1 - o0 {
             continue;
         }
         for k in 0..=(s1 - s0) {
-            if let (Some(a), Some(b)) = (by_num.get(&(ib, s0 + k)), by_num.get(&(ob, o0 + k))) {
-                if lanes[a].2 == lanes[b].2 {
-                    match nxt_at.get(a) {
+            if let (Some(&a), Some(&b)) = (by_num.get(&(ib, s0 + k)), by_num.get(&(ob, o0 + k))) {
+                if use_of[a] == use_of[b] {
+                    match nxt_at.get(&a) {
                         Some(&i) => {
-                            if !nxt[i].1.contains(b) {
-                                nxt[i].1.push(b.clone());
+                            if !nxt[i].1.contains(&b) {
+                                nxt[i].1.push(b);
                             }
                         }
                         None => {
-                            nxt_at.insert(a.clone(), nxt.len());
-                            nxt.push((a.clone(), vec![b.clone()]));
+                            nxt_at.insert(a, nxt.len());
+                            nxt.push((a, vec![b]));
                         }
                     }
-                    prv.entry(b.clone()).or_default().insert(a.clone());
+                    prv.entry(b).or_default().insert(a);
                 }
             }
         }
     }
+    drop(st);
+    drop((nxt_at, by_num, use_of));
+    // the pairs that meet: one lane goes on to exactly one lane, and nothing else of its use feeds that lane
+    let pairs: Vec<(usize, usize)> = nxt
+        .into_iter()
+        .filter(|(a, bs)| bs.len() == 1 && prv.get(&bs[0]).is_some_and(|p| p.len() == 1 && p.contains(a)))
+        .map(|(a, bs)| (a, bs[0]))
+        .collect();
+    drop(prv);
     let metres = |lat: f64| (111320.0 * lat.to_radians().cos(), 111320.0);
     let bend = |ln: &[P], at_start: bool, to: P| -> Vec<P> {
         let pts: Vec<P> = if at_start { ln.to_vec() } else { ln.iter().rev().copied().collect() };
@@ -1350,44 +1365,53 @@ fn meet_lanes(c: &Ctx, sch: &str) -> Result<usize> {
         out
     };
     // a dict of Python: the list in the order of its keys, and the place of each key
-    let mut moved: Vec<(String, Vec<P>)> = Vec::new();
-    let mut moved_at: HashMap<String, usize> = HashMap::new();
-    let get = |moved: &Vec<(String, Vec<P>)>, at: &HashMap<String, usize>, id: &str| -> Vec<P> {
-        at.get(id).map(|&i| moved[i].1.clone()).unwrap_or_else(|| lanes[id].3.clone())
-    };
-    let put = |moved: &mut Vec<(String, Vec<P>)>, at: &mut HashMap<String, usize>, id: &str, g: Vec<P>| match at.get(id) {
-        Some(&i) => moved[i].1 = g,
-        None => {
-            at.insert(id.to_string(), moved.len());
-            moved.push((id.to_string(), g));
+    let mut moved: Vec<(usize, Vec<P>)> = Vec::new();
+    let mut moved_at: HashMap<usize, usize> = HashMap::new();
+    for part in pairs.chunks(CHUNK) {
+        // the lines of the lanes of this chunk that are not moved yet
+        let need: HashSet<usize> = part.iter().flat_map(|&(a, b)| [a, b]).filter(|j| !moved_at.contains_key(j)).collect();
+        c.exec("CREATE OR REPLACE TEMP TABLE _need(r BIGINT)")?;
+        {
+            let mut app = c.con.appender("_need").map_err(|e| e.to_string())?;
+            for &j in &need {
+                app.append_row([rid[j]]).map_err(|e| e.to_string())?;
+            }
+            app.flush().map_err(|e| e.to_string())?;
         }
-    };
-    for (a, bs) in &nxt {
-        if bs.len() != 1 {
-            continue;
+        let at_rid: HashMap<i64, usize> = need.iter().map(|&j| (rid[j], j)).collect();
+        let sql = format!("SELECT rowid, ST_AsText(geom) FROM {sch}.lane WHERE rowid IN (SELECT r FROM _need)");
+        let mut st = c.con.prepare(&sql).map_err(|e| format!("{e}\n{sql}"))?;
+        let mut line: HashMap<usize, Vec<P>> = HashMap::new();
+        for r in st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))).map_err(|e| e.to_string())? {
+            let (r0, w) = r.map_err(|e| e.to_string())?;
+            line.insert(at_rid[&r0], shp::wkt_points(&w));
         }
-        let b = &bs[0];
-        if prv.get(b).is_none_or(|p| p.len() != 1 || !p.contains(a)) {
-            continue;
-        }
-        let (la, lb) = (get(&moved, &moved_at, a), get(&moved, &moved_at, b));
-        let (end, start) = (*la.last().unwrap(), lb[0]);
-        let (kx, ky) = metres(end.1);
-        let gap = ((end.0 - start.0) * kx).hypot((end.1 - start.1) * ky);
-        if !(0.01..=MAX_M).contains(&gap) {
-            continue;
-        }
-        if count[&lanes[a].0] >= count[&lanes[b].0] {
-            put(&mut moved, &mut moved_at, b, bend(&lb, true, end));
-        } else {
-            put(&mut moved, &mut moved_at, a, bend(&la, false, start));
+        drop(st);
+        let get = |moved: &Vec<(usize, Vec<P>)>, at: &HashMap<usize, usize>, j: usize| -> Vec<P> { at.get(&j).map(|&i| moved[i].1.clone()).unwrap_or_else(|| line[&j].clone()) };
+        for &(a, b) in part {
+            let (la, lb) = (get(&moved, &moved_at, a), get(&moved, &moved_at, b));
+            let (end, start) = (*la.last().unwrap(), lb[0]);
+            let (kx, ky) = metres(end.1);
+            let gap = ((end.0 - start.0) * kx).hypot((end.1 - start.1) * ky);
+            if !(0.01..=MAX_M).contains(&gap) {
+                continue;
+            }
+            let (j, g) = if count[&link[a]] >= count[&link[b]] { (b, bend(&lb, true, end)) } else { (a, bend(&la, false, start)) };
+            match moved_at.get(&j) {
+                Some(&i) => moved[i].1 = g,
+                None => {
+                    moved_at.insert(j, moved.len());
+                    moved.push((j, g));
+                }
+            }
         }
     }
+    c.exec("DROP TABLE IF EXISTS _need")?;
     if !moved.is_empty() {
         c.exec("CREATE OR REPLACE TEMP TABLE _moved(lane_id VARCHAR, wkt VARCHAR)")?;
         let mut app = c.con.appender("_moved").map_err(|e| e.to_string())?;
-        for (id, g) in &moved {
-            app.append_row(duckdb::params![id, lanes::wkt(g)]).map_err(|e| e.to_string())?;
+        for (j, g) in &moved {
+            app.append_row(duckdb::params![ids[*j], lanes::wkt(g)]).map_err(|e| e.to_string())?;
         }
         app.flush().map_err(|e| e.to_string())?;
         drop(app);
