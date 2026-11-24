@@ -10,10 +10,10 @@ autonomous driving. It comes in two ways:
 
 ```mermaid
 flowchart LR
-  db[("<area>.duckdb<br/>(raw OSM, heights)")] --> sim["SimReady<br/>(duckosm hdmap)"]
-  gmns[("<area>_gmns.duckdb")] --> sim
-  sim --> hd[("<area>_hdmap.duckdb")]
-  sim --> files["Lanelet2, OpenDRIVE, SUMO,<br/>GMNS, MATSim, glTF files"]
+  db[("#lt;area#gt;.duckdb<br/>(raw OSM, heights)")] --> sim["SimReady<br/>(duckosm hdmap)"]
+  gmns[("#lt;area#gt;_gmns.duckdb")] --> sim
+  sim --> hd[("#lt;area#gt;_hdmap.duckdb")]
+  sim --> files["Lanelet2, OpenDRIVE,<br/>SUMO, GMNS, MATSim,<br/>glTF files"]
   gmns --> ll2["Lanelet2 (.osm)"]
   gmns --> xodr["OpenDRIVE (.xodr)"]
   gmns --> lr["Lane-level routing"]
