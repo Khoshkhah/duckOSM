@@ -7,7 +7,7 @@ each module. The full design is in the
 ```mermaid
 flowchart LR
     core["<b>duckosm</b> (core)<br/>Network · ModeView · Area<br/>network() · open()<br/>edges() · map()"]
-    core --> analysis["<b>duckosm.analysis</b><br/>street network analysts (OSMnx users)"]
+    core --> analysis["<b>duckosm.analysis</b><br/>street network analysts<br/>(OSMnx users)"]
     core --> gis["<b>duckosm.gis</b><br/>GIS and data engineers"]
     core --> routing["<b>duckosm.routing</b><br/>routing and accessibility"]
     core --> sim["<b>duckosm.sim</b><br/>traffic simulation"]
