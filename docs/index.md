@@ -77,7 +77,7 @@ All outputs, by level: [Export](exports/index.md). Speed against other tools: [C
 
     ---
 
-    SUMO, MATSim, and DTALite exports with automated validation. Simplifies continuous roads for
+    SUMO and MATSim exports, and GMNS tables that DTALite reads, with automated validation. Simplifies continuous roads for
     faster simulation while preserving stable `edge_id`s.
     [Exports](exports/index.md)
 
