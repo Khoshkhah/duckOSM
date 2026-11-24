@@ -19,7 +19,7 @@ flowchart LR
 | MATSim | [MATSim](../matsim.md#lanes-and-signals): lanes and signals | GMNS db | `duckosm matsim-lanes` |
 | SUMO | [SUMO](../sumo.md): plain XML and `.netccfg` (netconvert makes the `.net.xml`) | GMNS db (or Level 2 db) | `duckosm sumo` |
 
-Every table and column of the GMNS database: [GMNS tables](../gmns_tables.md).
+Every table and column of the GMNS database: [GMNS network tables](../gmns_tables.md).
 
 ## Multi-resolution model
 

@@ -10,6 +10,6 @@ Every command, function, setting and table, for look-up.
 | [Configuration](configuration.md) | Every setting of the YAML config file of a build. |
 | [The boundary file](boundary.md) | The format of a boundary file, and how to make one. |
 | [Database schema](database.md) | Every table and column that a build writes. |
-| [GMNS tables](../exports/gmns_tables.md) | Every table and column of the GMNS database of `duckosm gmns`. |
+| [GMNS network tables](../exports/gmns_tables.md) | Every table and column of the GMNS database of `duckosm gmns`. |
 | [Base-map layers](features.md) | The layers of the `features` schema and their classes. |
 | [Elevation sources](elevation-sources.md) | Where `duckosm elevation` gets its heights, and how the sources compare. |
