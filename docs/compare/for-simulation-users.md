@@ -29,7 +29,7 @@ In the standard SUMO workflow, `netconvert --osm-files` reads the OSM ways itsel
 |---|---|---|
 | `netconvert --osm-files map.osm` | `duckosm sumo data/monaco.duckdb --out-dir out/sumo`<br/>`net.driving.to_sumo("out/sumo")` | Writes plain XML (`.nod.xml`, `.edg.xml`, `.con.xml`, `.add.xml`) with traffic lights, stop signs and bus stops, plus `network.netccfg`. With `--netconvert`, also `.net.xml` and `.tll.xml` |
 | `osmWebWizard` (download and convert) | `duckosm.network("Monaco").driving.to_sumo("out/sumo", run_netconvert=True)` | Builds Level 2 DuckDB and generates `network.net.xml` in one call |
-| `--geometry.remove` / heuristic contraction | `duckosm sumo ... --merge`<br/>`to_sumo("out/sumo", merge=True)` | Contracts continuous segments using `driving.chains` (`chain_id`), cutting Monaco edges from 2,840 to 1,775 while preserving real junctions |
+| `--geometry.remove` / heuristic contraction | `duckosm sumo ... --merge`<br/>`to_sumo("out/sumo", merge=True)` | Contracts continuous segments using `driving.chains` (`chain_id`), cutting Monaco edges from 2,840 to 1,787 while preserving real junctions |
 | `sumolib.net.readNet("map.net.xml")` | `duckosm.sim.sumo_net(files)` | Loads SUMO network into Python for analysis and route inspection |
 | `edgeData` output, by SUMO edge ID | `ids = duckosm.sim.edge_map(files)` | Provides direct mapping table between SUMO internal IDs and duckOSM `edge_id` |
 | Fix a network by hand in netedit | Persistent rule in `osm_fixes.yaml` | Fixes stay across all subsequent OSM builds and exports |
@@ -39,7 +39,7 @@ In the standard SUMO workflow, `netconvert --osm-files` reads the OSM ways itsel
 | Feature | netconvert from OSM | duckOSM SUMO |
 |---|---|---|
 | **Edge ID stability** | Ids from the OSM way ids (`123#1`); a change of the ways changes them | Persistent 64-bit `edge_id` hash; results join back reliably across builds |
-| **Intermediate crossings** | | duckOSM cuts roads at footpath crossings; `--merge` joins them again (`chain_id`): about 38% fewer edges on Monaco |
+| **Intermediate crossings** | | duckOSM cuts roads at footpath crossings; `--merge` joins them again (`chain_id`): about 37% fewer edges on Monaco |
 | **Turn restrictions** | netconvert reads the OSM relations itself | The legal turns of `edge_graph` go into `.con.xml`, with the OSM turn restrictions and your fixes |
 | **Lane assignments** | netconvert reads the OSM lane tags | Lanes for each direction, with bus and bike lanes, from `driving.lane_profile` |
 | **Traffic signals** | netconvert makes the programs | netconvert makes the programs too (`--netconvert` writes them to `.tll.xml`); duckOSM moves each OSM signal to its junction first |
