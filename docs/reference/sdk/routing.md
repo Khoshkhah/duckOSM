@@ -105,18 +105,18 @@ All calls search the same edge graph as `route`: a node is an edge, an arc is a 
 | `matrix`, `accessibility` | one Dijkstra search from each origin to all edges, the origins in parallel, not one search for each cell. `max_cost` stops each search early. |
 | `isochrones` | one Dijkstra search from each origin, stopped at the largest time. The polygon is the union of the reached edges, each with a buffer of `buffer_m` metres in the UTM zone of the area: not a concave hull, so a park with no road stays out. |
 
-Speed on Monaco (2,818 driving edges, 11,928 walking edges; WSL, 20 threads). The times include the Python calls and
+Speed on Monaco (2,844 driving edges, 11,934 walking edges; WSL, 20 threads). The times include the Python calls and
 the reads of the database file:
 
 | Call | Time |
 |---|---|
-| `route`, one pair | 41 ms |
-| `routes`, 100 pairs | 91 ms |
-| `k_shortest_paths`, `k=3` | 41 ms |
-| `matrix`, 100 × 100 edges | 84 ms |
-| `matrix`, 200 × 2,818 edges (all) | 112 ms |
-| `isochrones`, walking, 1 origin × 3 times | 0.38 s |
-| `accessibility`, walking, 11,928 origins × 3 targets | 0.47 s |
+| `route`, one pair | 58 ms |
+| `routes`, 100 pairs | 110 ms |
+| `k_shortest_paths`, `k=3` | 127 ms |
+| `matrix`, 100 × 100 edges | 117 ms |
+| `matrix`, 200 × 2,844 edges (all) | 158 ms |
+| `isochrones`, walking, 1 origin × 3 times | 0.96 s |
+| `accessibility`, walking, 11,934 origins × 3 targets | 0.45 s |
 
 ```python
 net = duckosm.network("Monaco")

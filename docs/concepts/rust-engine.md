@@ -20,7 +20,7 @@ that needs a [Rust toolchain](https://rustup.rs). [Install](../install.md).
 
 | Area | The network step |
 |---|---|
-| Estonia | 19 s, 1.5 GB of memory |
+| Estonia (three modes) | 35 s, 1.4 GB of memory |
 
 The speed of each output: [Compare](../compare/index.md).
 
