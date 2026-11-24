@@ -27,7 +27,7 @@ duckosm quack data/monaco.pbf --pmtiles -o out --name monaco   # -> out/monaco.p
 duckosm export-gis data/monaco.duckdb -o out/gis/ --format geoparquet
 
 # 6. Cut an area out of a large PBF file
-duckosm cut data/france.pbf --boundary 7.40,43.72,7.44,43.76 -o monaco.osm.pbf
+duckosm cut data/france.pbf --boundary monaco.geojson -o monaco.osm.pbf
 ```
 
 ## OSM Features: OSMnx, QuackOSM, osmium
@@ -78,7 +78,7 @@ Exporting the Level 2 directed network with topology, edge IDs, and turn restric
 | Standard Tool (OSMnx / osmium) | duckOSM Python SDK | What duckOSM does |
 |---|---|---|
 | `ox.geocode_to_gdf("Monaco")` | `duckosm.gis.admin_boundaries(net)` | Returns all administrative boundary levels with parent-child hierarchy |
-| `osmium tags-filter r/boundary=administrative` | `duckosm.gis.admin(net, area)` | Queries `admin_boundaries` table directly from DuckDB |
+| `osmium tags-filter r/boundary=administrative` | `duckosm.gis.admin(net, pbf)` | Adds the table `admin_boundaries` to the database. `duckosm.gis.admin_boundaries(net)` reads it |
 
 ## Base Maps, Tiles, and Database Tables
 

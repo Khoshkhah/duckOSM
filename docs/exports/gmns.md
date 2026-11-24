@@ -55,9 +55,9 @@ To get one road section between two junctions, use Level 2 [`driving.chains`](..
 
 ### Macro schemas (`duckosm gmns`)
 
-* **`gmns_driving` (18 tables, with netconvert):** The vehicular road network for cars, trucks, and buses. Models lanes (`lane`), lane-level turns with restrictions (`movement`), signals (`signal_controller`), on-street parking (`curb_seg`), crosswalks spanning road lanes (`crossing`, `lane_crossing`), smooth intersection curves (`lane_connector`), and the road chains for `--merge` (`chains`).
+* **`gmns_driving` (18 tables):** The vehicular road network for cars, trucks, and buses. Models lanes (`lane`), lane-level turns with restrictions (`movement`), signals (`signal_controller`), on-street parking (`curb_seg`), crosswalks spanning road lanes (`crossing`, `lane_crossing`), smooth intersection curves (`lane_connector`), and the road chains for `--merge` (`chains`).
 * **`gmns_walking` (15 tables):** Sidewalks, footpaths, stairs, plazas, and crosswalks. Tracks parallel roadways via `link_along`, connects footways to road crossings via `lane_connector`, and lists unpaired lanes in `lane_check`.
-* **`gmns_cycling` (13 tables):** Cycleways, protected bike paths, shared lanes, and bikeable roads. Tracks parallel roadways via `link_along`.
+* **`gmns_cycling` (14 tables):** Cycleways, protected bike paths, shared lanes, and bikeable roads. Tracks parallel roadways via `link_along`.
 * **`gmns_all` (5 tables, via `--combined`):** Merges shared physical streets across driving, walking, and cycling into a single link with unioned `allowed_uses = 'auto,bike,walk'` (`link_id` = `edge_id`). Lanes and turns stay in the mode schemas.
 
 ### Meso and micro schemas (`--meso`, `--micro`)
@@ -105,7 +105,7 @@ Most ways have none of these tags, so most lanes are general lanes with a defaul
 
 ## See it
 
-`duckosm gmns-map monaco_gmns.duckdb --source-db monaco.duckdb` draws each lane at its width on a base map. Click a lane:
+`duckosm levels monaco.duckdb`, then `duckosm gmns-map monaco_gmns.duckdb --source-db monaco.duckdb`, draws each lane at its width on a base map. Click a lane:
 it turns red, and the lanes that its turns lead into turn green.
 
 <iframe src="../../maps/monaco_gmns_lanes.html" title="Monaco's lanes, drawn by duckosm gmns-map"

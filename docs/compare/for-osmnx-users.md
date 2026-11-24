@@ -59,8 +59,8 @@ G = an.to_osmnx(drive)
 | `ox.truncate.truncate_graph_bbox(G, bbox)` | `an.clip(net, bbox=(west, south, east, north))` | Spatially clips network to bounding box |
 | `ox.truncate.truncate_graph_polygon(G, poly)` | `an.clip(net, polygon=poly)` | Clips network to arbitrary polygon boundary |
 | `ox.truncate.truncate_graph_dist(G, node, 500)` | `an.clip(net, point=(lon, lat), dist_m=500)` | Radial network clipping |
-| `ox.elevation.add_node_elevations_raster(G, tif)` | `duckosm elevation <db> --dem <tif>`<br/>`an.add_elevation(net, dem="dem.tif")` | Samples raster DEM, adding node elevation (`ele_m`) and edge grades |
-| `ox.elevation.add_edge_grades(G)` | `an.grades(drive)` | Gradient percentages (`grade_pct`) and absolute slopes |
+| `ox.elevation.add_node_elevations_raster(G, tif)` | `duckosm elevation <db> --dem <tif> --product DTM --vertical-datum EGM2008 --license <text>`<br/>`an.add_elevation(net, dem="dem.tif")` | Samples raster DEM, adding node elevation (`ele`) and edge heights (`z_from`, `z_to`, `z_vertices`) |
+| `ox.elevation.add_edge_grades(G)` | `an.grades(drive)` | A Series `grade` for each `edge_id`: the rise over the length (0.05 is 5 %) |
 | `ox.utils_geo.sample_points(Gu, 200)` | `an.sample_points(drive, 200)` | Random spatial point sampling along edges |
 
 ## Routing and Visualization
@@ -69,7 +69,7 @@ G = an.to_osmnx(drive)
 |---|---|---|
 | `ox.routing.shortest_path(G, a, b)` | `drive.route(a, b)` | In-process Rust router, with the OSM turn restrictions |
 | `ox.routing.route_to_gdf(G, route)` | `route.edges` | The edges of the route as a GeoDataFrame, in route order |
-| `ox.plot_graph(G)` | `net.plot("driving")` (static PNG) or `net.map("driving")` (interactive HTML) | Fast MapLibre / Lonboard WebGL maps |
+| `ox.plot_graph(G)` | `net.plot("driving")` (static PNG) or `net.map("driving")` (interactive HTML) | roadstyle MapLibre maps |
 | `ox.plot_graph_route(G, route)` | `net.map("driving", routes=route)` | Overlays route geometry on interactive vector basemap |
 | `ox.save_graph_geopackage(G, path)` | `net.to_gis("out/monaco.gpkg")` | Exports GeoPackage with edge and node layers |
 

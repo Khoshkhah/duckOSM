@@ -95,7 +95,7 @@ _ALONG_NEAR_M = 8.0              # a footpath point counts as along a road when 
 from duckosm.processors.road_filter import NON_MOTOR as _NON_MOTOR   # noqa: E402  one list for the edges' lanes and GMNS
 
 # GMNS tables that carry a non-spec column for the DuckDB output — dropped for --to-csv fidelity
-_CSV_EXCLUDE = {"node": ["geom"], "link": ["geom", "osm_id", "edge_ref", "footway", "crossing", "crossing_markings", "along_link_id", "along_mode", "along_gap_m", "along_kind", "bridge", "tunnel", "layer"], "geometry": ["geom"], "lane": ["geom", "geom_cut", "turn"],
+_CSV_EXCLUDE = {"config": ["duckosm_version"], "node": ["geom"], "link": ["geom", "osm_id", "edge_ref", "footway", "crossing", "crossing_markings", "along_link_id", "along_mode", "along_gap_m", "along_kind", "bridge", "tunnel", "layer", "refs", "z_vertices"], "geometry": ["geom"], "lane": ["geom", "geom_cut", "turn"],
     "location": ["osm_id", "name", "geom"], "zone": ["geom"],
     "signal_controller": ["node_id", "control_type"]}
 
@@ -693,6 +693,11 @@ def to_gmns(source_db, out_path, modes=None, to_csv=None, lane_geometry=True, co
             _dump_csv(con, ["all"], os.path.join(to_csv, "combined"), schema_prefix="gmns_", csv_extensions=csv_extensions)
         result["csv"] = to_csv
 
+    # the ground of the heights (docs/concepts/ground-reference.md): the same table as in the source db
+    if con.execute("SELECT count(*) FROM duckdb_tables() WHERE database_name = 's' AND schema_name = 'main' "
+                   "AND table_name = 'elevation_metadata'").fetchone()[0]:
+        con.execute("CREATE OR REPLACE TABLE main.elevation_metadata AS SELECT * FROM s.main.elevation_metadata")
+
     con.execute("DETACH s")
     con.close()
     return result
@@ -722,9 +727,24 @@ def _chain_id(ids):
     return h >> 1
 
 
+# The cut at the ends of the other chains, from {T}(old, seg, link_id, i): the same rows with seg cut again at each node
+# inside a chain where a chain starts or ends. The same text as CUT_AT_ENDS in rust/duckosm-export/src/gmns_chains.rs.
+_CUT_AT_ENDS = """WITH n AS (SELECT c.*, l.from_node_id AS fn, l.to_node_id AS tn FROM {T} c JOIN gmns_driving.link l USING (link_id)),
+       stops AS (SELECT arg_min(fn, i) AS node FROM n GROUP BY old, seg UNION SELECT arg_max(tn, i) FROM n GROUP BY old, seg),
+       f AS (SELECT n.*, CASE WHEN lag(n.i) OVER w IS NULL OR lag(n.seg) OVER w <> n.seg OR n.fn IN (SELECT node FROM stops)
+                              THEN 1 ELSE 0 END AS brk FROM n WINDOW w AS (PARTITION BY n.old ORDER BY n.i))
+       SELECT old, sum(brk) OVER (PARTITION BY old ORDER BY i) AS seg, link_id, i FROM f"""
+
+
+def _version():
+    from duckosm import __version__
+    return __version__
+
+
 def _build_chains(con):
     """``gmns_driving.chains`` from the source's ``driving.chains``, as the Rust step ``gmns_chains::add_chains``
-    (docs/design/sim_from_gmns.md, "Chains"): a chain is cut where the GMNS lanes change, a link in no Level 2 chain is a
+    (docs/design/sim_from_gmns.md, "Chains"): a chain is cut where the GMNS lanes change and where another chain ends (so the
+    two directions of a two-way road end at the same nodes), a link in no Level 2 chain is a
     chain of one link, and a source with no ``driving.chains`` gives one chain for each link. Returns the number of chains."""
     has = con.execute("SELECT count(*) FROM duckdb_tables() WHERE database_name = 's' AND schema_name = 'driving' "
                       "AND table_name = 'chains'").fetchone()[0] > 0
@@ -744,6 +764,9 @@ def _build_chains(con):
         SELECT old, sum(brk) OVER (PARTITION BY old ORDER BY i) AS seg, link_id, i FROM f
         UNION ALL
         SELECT link_id, 1, link_id, 1 FROM gmns_driving.link WHERE link_id NOT IN (SELECT link_id FROM u)""")
+    # the two directions of a two-way road end at the same nodes: a cut at each node inside a chain where another chain ends
+    con.execute(f"CREATE OR REPLACE TEMP TABLE _chain_cut AS {_CUT_AT_ENDS.replace('{T}', '_chain_links')}")
+    con.execute("DROP TABLE _chain_links; CREATE TEMP TABLE _chain_links AS SELECT * FROM _chain_cut; DROP TABLE _chain_cut")
     groups = con.execute("SELECT old, seg, list(link_id ORDER BY i) FROM _chain_links GROUP BY old, seg").fetchall()
     con.execute("CREATE OR REPLACE TEMP TABLE _chain_ids(old BIGINT, seg BIGINT, chain_id BIGINT)")
     if groups:
@@ -812,9 +835,9 @@ def _build_combined(con, modes, name):
     ``allowed_uses`` unioned across the modes that contain it. Lane/movement stay per-mode."""
     con.execute("CREATE SCHEMA gmns_all")
     con.execute(f"""CREATE TABLE gmns_all.config AS SELECT * FROM (VALUES
-      ('{name}_all', 'meter', 'meter', 'kmh', 'EPSG:4326', 'wkt', NULL::VARCHAR, 0.97::DOUBLE, 'integer')
+      ('{name}_all', 'meter', 'meter', 'kmh', 'EPSG:4326', 'wkt', NULL::VARCHAR, 0.97::DOUBLE, 'integer', 'duckosm {_version()}')
     ) t(dataset_name, short_length, long_length, speed, crs, geometry_field_format,
-        currency, version_number, id_type)""")
+        currency, version_number, id_type, duckosm_version)""")
     con.execute("CREATE TABLE gmns_all.use_definition AS "
                 + " UNION ".join(f"SELECT * FROM gmns_{m}.use_definition" for m in modes))
     con.execute("CREATE TABLE gmns_all.use_group AS "
@@ -851,9 +874,9 @@ def _build_combined(con, modes, name):
 def _build_fixed(con, sch, name, mode, uses):
     """config + use_definition + use_group — the small fixed tables."""
     con.execute(f"""CREATE TABLE {sch}.config AS SELECT * FROM (VALUES
-      ('{name}_{mode}', 'meter', 'meter', 'kmh', 'EPSG:4326', 'wkt', NULL::VARCHAR, 0.97::DOUBLE, 'integer')
+      ('{name}_{mode}', 'meter', 'meter', 'kmh', 'EPSG:4326', 'wkt', NULL::VARCHAR, 0.97::DOUBLE, 'integer', 'duckosm {_version()}')
     ) t(dataset_name, short_length, long_length, speed, crs, geometry_field_format,
-        currency, version_number, id_type)""")
+        currency, version_number, id_type, duckosm_version)""")
     # every use a lane can carry must be defined (spec: lane.allowed_uses): a driving network's lanes
     # are auto, bus or bike
     defined = [uses] + (["bus", "bike"] if mode == "driving" else [])
@@ -894,6 +917,9 @@ def _build_link(con, sch, mode, uses, has_raw):
         "AND table_name = 'edges'", [mode]).fetchall()}
     lvl = ", ".join(f"e.{c}" if c in cols else f"NULL::VARCHAR AS {c}" for c in ("bridge", "tunnel", "layer"))
     edge_ref = "e.edge_ref AS edge_ref" if "edge_ref" in cols else "NULL::VARCHAR AS edge_ref"     # older builds have none
+    # the OSM node ids and the ground heights at each vertex of the line (`duckosm elevation`), as the source edge has them
+    refs = "e.refs AS refs" if "refs" in cols else "NULL::BIGINT[] AS refs"
+    zv = "e.z_vertices::DOUBLE[] AS z_vertices" if "z_vertices" in cols else "NULL::DOUBLE[] AS z_vertices"
     footway = "w.tags['footway'] AS footway" if has_raw else "NULL::VARCHAR AS footway"
     crossing = ("CASE WHEN w.tags['footway'] = 'crossing' THEN w.tags['crossing'] END AS crossing, "
                 "CASE WHEN w.tags['footway'] = 'crossing' THEN w.tags['crossing:markings'] END AS crossing_markings") if has_raw \
@@ -918,7 +944,7 @@ def _build_link(con, sch, mode, uses, has_raw):
       e.maxspeed_kmh AS free_speed, CASE WHEN e._bus THEN 1 WHEN {motor} THEN COALESCE(li.lanes, e.lanes) END AS lanes,   -- a bus-only edge is one lane
       {bike} AS bike_facility, {ped} AS ped_facility, NULL::VARCHAR AS parking,
       CASE WHEN e._bike THEN 'bus,bike' WHEN e._bus THEN 'bus' ELSE '{uses}' END AS allowed_uses,
-      NULL::DOUBLE AS toll, NULL::VARCHAR AS jurisdiction, NULL::DOUBLE AS row_width, abs(e.osm_id) AS osm_id, {edge_ref}, {footway}, {crossing}, {lvl}, e.geometry AS geom
+      NULL::DOUBLE AS toll, NULL::VARCHAR AS jurisdiction, NULL::DOUBLE AS row_width, abs(e.osm_id) AS osm_id, {edge_ref}, {footway}, {crossing}, {lvl}, {refs}, {zv}, e.geometry AS geom
     FROM {{}} e {raw_join} LEFT JOIN _lanes_inf li ON li.edge_id = e.edge_id"""
     con.execute(f"CREATE TABLE {sch}.link AS {sel.format('_edges_car')}")
     con.execute(f"INSERT INTO {sch}.link BY NAME {sel.format('_edges_bus')}")
@@ -2391,7 +2417,7 @@ def _dump_csv(con, modes, to_csv, schema_prefix="gmns_", csv_extensions=False):
                                      "schema_name = ? AND table_name = ?", [sch, t]).fetchall())
             excl = [c for c in _CSV_EXCLUDE.get(t, []) if c in kinds]   # only the table's own: a cycling lane has no geom_cut
             sel = f"* EXCLUDE ({', '.join(excl)})" if excl else "*"
-            if excl and csv_extensions:        # keep the extension columns, as the spec's user-defined `u_` fields
-                sel += "".join(f", {c} AS u_{c}" for c in excl if kinds.get(c) != "GEOMETRY")
+            if excl and csv_extensions:        # keep the extension columns, as the spec's user-defined `u_` fields; not a geometry or a list
+                sel += "".join(f", {c} AS u_{c}" for c in excl if kinds.get(c) != "GEOMETRY" and not kinds.get(c, "").endswith("[]"))
             path = os.path.join(d, f"{t}.csv")
             con.execute(f"COPY (SELECT {sel} FROM {sch}.{t}) TO '{path}' (HEADER, DELIMITER ',')")

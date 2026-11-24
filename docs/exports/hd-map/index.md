@@ -20,3 +20,7 @@ flowchart LR
 | CARLA, esmini, Vissim | [OpenDRIVE](../opendrive.md): `.xodr` | `duckosm opendrive` |
 
 All three are **experimental**. Tests check their structure. They are not loaded in the target tools yet.
+
+## The tables
+
+Every table of the HD map database, with its columns: [HD map tables](../hdmap_tables.md).

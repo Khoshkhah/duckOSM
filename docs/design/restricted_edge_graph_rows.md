@@ -1,6 +1,8 @@
 # Turns of the restricted edges in edge_graph
 
-**Status:** approved by Kaveh and implemented 2026-10-20 (with the changes in "What was built").
+**Status:** approved by Kaveh and implemented 2026-10-20 (with the changes in "What was built"). The Python files of
+"Where the code changes" are now Rust: `routed_graph(con, mode, uses)` is in `rust/duckosm-route/src/route.rs`, and
+the route map and the point routes call it. The SUMO export reads the column `uses` in the same way.
 
 ## Problem
 
