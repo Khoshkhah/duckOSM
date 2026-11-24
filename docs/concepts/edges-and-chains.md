@@ -34,7 +34,7 @@ chains keeps the list of their edges, so that results join on `edge_id`.
 
 - A level never loses its edges: the lower level is the source, and the chain lists its edges.
 - Chains are driving only: walking and cycling keep their edges.
-- A chain is cut at each node inside it where another chain ends. So the two directions of a two-way road have the same
+- A chain is cut at each node inside it where another chain starts or ends. So the two directions of a two-way road have the same
   chains, in `driving.chains` and in `gmns_driving.chains`.
 - The chain table of GMNS comes from the Level 2 chains, cut where the GMNS lanes change: a merged SUMO edge has the lanes of
   its last link, so each link of a chain must have the same lanes.
