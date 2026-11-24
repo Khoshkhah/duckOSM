@@ -48,36 +48,78 @@ def _paths(d, keys):
 
 # ---- exports -----------------------------------------------------------------------------------------------------
 
+class _file:
+    """``with _file(con) as path``: the database file of ``con`` for the Rust code. An in-memory database is copied to a
+    temporary ``.duckdb`` file (DuckDB's ``COPY FROM DATABASE``), which goes after the call."""
+
+    def __init__(self, con):
+        self.con, self.tmp = con, None
+
+    def __enter__(self):
+        db = _db(self.con)
+        if db is not None:
+            return db
+        import tempfile
+        self.tmp = tempfile.mkdtemp(prefix="duckosm-")
+        path = os.path.join(self.tmp, "db.duckdb")
+        name = self.con.execute("SELECT current_database()").fetchone()[0]
+        self.con.execute(f"ATTACH '{path}' AS _duckosm_file")
+        try:
+            self.con.execute(f'COPY FROM DATABASE "{name}" TO _duckosm_file')
+        finally:
+            self.con.execute("DETACH _duckosm_file")
+        return path
+
+    def __exit__(self, *exc):
+        if self.tmp:
+            import shutil
+            shutil.rmtree(self.tmp, ignore_errors=True)
+
+
+def _netconvert_env(netconvert_bin):
+    """The environment for the Rust code's netconvert: an explicit program (``netconvert_bin``), and the SUMO_HOME of the
+    eclipse-sumo wheel when it is installed (netconvert reads its type maps there)."""
+    if netconvert_bin:
+        os.environ["DUCKOSM_NETCONVERT"] = str(netconvert_bin)
+    else:
+        os.environ.pop("DUCKOSM_NETCONVERT", None)
+    try:
+        import sumo as _sumo_wheel
+        os.environ.setdefault("SUMO_HOME", os.path.dirname(_sumo_wheel.__file__))
+    except ImportError:
+        pass
+
+
 def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network", run_netconvert: bool = False,
             netconvert_bin: str = None, connections: bool = True, config=None, bus_edges: bool = False,
             edge_attrs: dict = None, lanes: dict = None, merge: bool = False):
-    """See :func:`duckosm.sumo.to_sumo`. ``merge=True``: one SUMO edge for each chain of ``driving.chains`` (Rust export only)."""
-    from duckosm import sumo
-    if bus_edges or edge_attrs or lanes or isinstance(config, dict) or netconvert_bin or _db(con) is None:
-        if merge:
-            from duckosm.errors import DuckOSMError
-            raise DuckOSMError("merge=True works only with a database path and without bus_edges, edge_attrs, lanes, "
-                               "netconvert_bin or a config dict")
-        def run(c):   # the paths as Path objects, as the Rust code gives them
-            return _paths(sumo.to_sumo(c, out_dir, mode=mode, net_name=net_name, run_netconvert=run_netconvert,
-                                netconvert_bin=netconvert_bin, connections=connections, config=config,
-                                bus_edges=bus_edges, edge_attrs=edge_attrs, lanes=lanes), ("nod", "edg", "con", "add", "netccfg", "net", "tll"))
-        if not isinstance(con, (str, os.PathLike)):
-            return run(con)
-        import duckdb
-        c = duckdb.connect(os.fspath(con), read_only=True)   # the Python code reads a connection, not a path or a Network
-        try:
-            return run(c)
-        finally:
-            c.close()
-    if run_netconvert:
-        try:
-            sumo._find_netconvert()   # the eclipse-sumo wheel: it sets SUMO_HOME, where the Rust code looks first
-        except RuntimeError:
-            pass                      # not found: the Rust code gives the error
-    r = json.loads(_rust().to_sumo(_db(con), str(out_dir), mode, net_name, connections,
-                                   None if config is None else str(config), run_netconvert, merge))
+    """See :func:`duckosm.sumo.to_sumo`. ``config``: a ``.netccfg`` path, or a dict of netconvert options over the built-in
+    ones. ``merge=True``: one SUMO edge for each chain of ``driving.chains``."""
+    _netconvert_env(netconvert_bin)
+    path = None if config is None or isinstance(config, dict) else str(config)
+    opts = [(str(k), str(v)) for k, v in config.items()] if isinstance(config, dict) else None
+    lanes = None if lanes is None else {int(e): [(str(u), float(w), t) for u, w, *rest in ls for t in [rest[0] if rest else None]]
+                                        for e, ls in lanes.items()}
+    edge_attrs = None if edge_attrs is None else {int(e): [(str(k), str(v)) for k, v in a.items()] for e, a in edge_attrs.items()}
+    with _file(con) as db:
+        r = json.loads(_rust().to_sumo(db, str(out_dir), mode, net_name, connections, path, run_netconvert, merge,
+                                       bus_edges, lanes, edge_attrs, opts))
     return _paths(r, ("nod", "edg", "con", "add", "netccfg", "net", "tll"))
+
+
+def find_netconvert(netconvert_bin=None):
+    """The netconvert program (SUMO), or None when it is not found."""
+    _netconvert_env(netconvert_bin)
+    return _rust().find_netconvert()
+
+
+def sumo_lane_diff(db, osm_file, work_dir, netconvert_bin=None):
+    """See :func:`duckosm.sumo_compare.lane_diff`."""
+    _netconvert_env(netconvert_bin)
+    with _file(db) as path:
+        r = json.loads(_rust().sumo_lane_diff(path, str(osm_file), str(work_dir)))
+    rows = [dict(x, duckosm=tuple(x["duckosm"]), sumo_osm=tuple(x["sumo_osm"])) for x in r["rows"]]
+    return rows, r["compared"]
 
 
 def to_gis(con, out, modes=None, fmt: str = "gpkg", boundary: bool = True, name: str = None,

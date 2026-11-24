@@ -13,6 +13,7 @@ from pathlib import Path
 SRC = Path(__file__).parents[1] / "src" / "duckosm"
 
 THIN = {
+    "sumo.py", "sumo_compare.py",
     "gmns.py", "gmns_check.py", "gmns_viewer.py",
     "__init__.py", "__main__.py", "_api.py", "_main.py", "_progress.py",
     "admin.py", "area.py", "config.py", "dem_sources.py", "errors.py",
@@ -32,7 +33,7 @@ LEFT = {
     "processors/functional_type.py", "processors/global_junctions.py", "processors/graph_builder.py", "processors/graph_simplifier.py", "processors/h3_indexer.py",
     "processors/lane_profile.py", "processors/osm_overrides.py", "processors/path_connector.py", "processors/restrictions.py", "processors/road_filter.py",
     "processors/separate_sidewalks.py", "processors/speed.py", "query.py", "railml.py", "report.py",
-    "route_map.py", "rust_engine.py", "sumo.py", "sumo_compare.py", "utils/__init__.py",
+    "route_map.py", "rust_engine.py", "utils/__init__.py",
     "utils/h3_calc.py", "validate.py", "viz.py",
 }
 

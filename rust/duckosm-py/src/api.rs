@@ -32,15 +32,31 @@ fn chains(py: Python<'_>, db: PathBuf, mode: String) -> PyResult<usize> {
 }
 
 #[pyfunction]
-#[pyo3(signature = (db, out_dir, mode, net_name, connections, config, netconvert, merge = false))]
-#[allow(clippy::too_many_arguments)]
-fn to_sumo(py: Python<'_>, db: PathBuf, out_dir: PathBuf, mode: String, net_name: String, connections: bool, config: Option<PathBuf>, netconvert: bool, merge: bool) -> PyResult<String> {
-    let o = duckosm_export::sumo::SumoOptions { merge, ..Default::default() };
+#[pyo3(signature = (db, out_dir, mode, net_name, connections, config, netconvert, merge=false, bus_edges=false, lanes=None, edge_attrs=None, config_opts=None))]
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn to_sumo(
+    py: Python<'_>,
+    db: PathBuf,
+    out_dir: PathBuf,
+    mode: String,
+    net_name: String,
+    connections: bool,
+    config: Option<PathBuf>,
+    netconvert: bool,
+    merge: bool,
+    bus_edges: bool,
+    lanes: Option<std::collections::HashMap<i64, Vec<(String, f64, Option<String>)>>>,
+    edge_attrs: Option<std::collections::HashMap<i64, Vec<(String, String)>>>,
+    config_opts: Option<Vec<(String, String)>>,
+) -> PyResult<String> {
+    // the options of the Python API (the bus-only edges, each edge's lanes and attributes, netconvert options over the built-in ones)
+    let o = duckosm_export::sumo::SumoOptions { merge, bus_edges, lanes, edge_attrs: edge_attrs.unwrap_or_default(), config: config_opts.unwrap_or_default() };
     let s = py
         .detach(|| duckosm_export::sumo::to_sumo_with(&db, &out_dir, &mode, &net_name, connections, config.as_deref(), netconvert, &o))
         .map_err(err)?;
     let mut v = json!({"nod": s.nod, "edg": s.edg, "n_nodes": s.n_nodes, "n_edges": s.n_edges, "n_connections": s.n_connections,
-                       "n_traffic_lights": s.n_traffic_lights, "n_stop_signs": s.n_stop_signs, "n_bus_stops": s.n_bus_stops});
+                       "n_traffic_lights": s.n_traffic_lights, "n_stop_signs": s.n_stop_signs, "n_bus_stops": s.n_bus_stops,
+                       "n_path_restrictions": s.n_path_restrictions});
     for (k, p) in [("con", s.con), ("add", s.add), ("netccfg", s.netccfg), ("net", s.net), ("tll", s.tll)] {
         if let Some(p) = p {
             v[k] = json!(p);
@@ -429,8 +445,28 @@ fn gmns_viewer(py: Python<'_>, gmns_db: PathBuf, out: PathBuf, mode: String) -> 
     Ok(text(&json!({"path": v.path, "lanes": v.lanes, "conns": v.conns})))
 }
 
+/// netconvert (SUMO): the program, or None when it is not found.
+#[pyfunction]
+fn find_netconvert() -> Option<String> {
+    duckosm_export::sumo::find_netconvert().ok().map(|(p, _)| p.display().to_string())
+}
+
+/// `lane_diff` (docs/design/gmns_lane_profile.md, decision 2): SUMO from duckOSM's lane profile against SUMO's own OSM import.
+#[pyfunction]
+fn sumo_lane_diff(py: Python<'_>, db: PathBuf, osm_file: PathBuf, work_dir: PathBuf) -> PyResult<String> {
+    let (rows, compared) = py.detach(|| duckosm_export::sumo_compare::lane_diff(&db, &osm_file, &work_dir)).map_err(err)?;
+    let lanes = |l: &duckosm_export::sumo_compare::Lanes| json!(l);
+    let rows: Vec<J> = rows
+        .iter()
+        .map(|r| json!({"way": r.way, "dir": r.dir.to_string(), "duckosm": lanes(&r.duckosm), "sumo_osm": lanes(&r.sumo_osm), "sources": r.sources, "cause": r.cause}))
+        .collect();
+    Ok(text(&json!({"rows": rows, "compared": compared})))
+}
+
 pub fn add(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(cli, m)?)?;
+    m.add_function(wrap_pyfunction!(find_netconvert, m)?)?;
+    m.add_function(wrap_pyfunction!(sumo_lane_diff, m)?)?;
     m.add_function(wrap_pyfunction!(to_gmns, m)?)?;
     m.add_function(wrap_pyfunction!(to_meso, m)?)?;
     m.add_function(wrap_pyfunction!(to_micro, m)?)?;

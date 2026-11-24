@@ -265,6 +265,7 @@ pub fn to_sumo_gmns(db: &Path, out_dir: &Path, mode: &str, net_name: &str, conne
         n_traffic_lights: n_lights,
         n_stop_signs: n_stops,
         n_bus_stops: 0,
+        n_path_restrictions: 0,
     };
     if !netconvert {
         return Ok(s);
