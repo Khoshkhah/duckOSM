@@ -17,9 +17,14 @@ Made from SimReady's `schema.sql` (commit `df192a3`) by `tools/hdmap_tables_page
 
 ## The schema
 
-Two trees meet at the lane: along the road, and at the junction. The project holds both.
+A box is a table. A line joins two tables, and its label says how they are related. The fork at the end of a line is
+the "many" side: one carriageway has many lane sections. A circle means "zero or more", two bars mean "exactly one".
+The road and the junction meet at the lane.
 
 ### Schema: along the road
+
+A carriageway is cut into lane sections, and each lane section holds its lanes. The other tables describe the
+carriageway along its length: its values, its width, its height and its bridges.
 
 ```mermaid
 erDiagram
@@ -38,6 +43,9 @@ erDiagram
 ```
 
 ### Schema: at the junction
+
+A junction holds its movements (from a lane to a lane), its stop lines, its islands and its signal plan. A movement
+joins a lane that ends at the junction to a lane that starts there.
 
 ```mermaid
 erDiagram
@@ -59,6 +67,10 @@ erDiagram
 ```
 
 ### Schema: the project
+
+One `project` row for each database. It lists the data sources (`source`), holds the carriageways, and uses one design
+profile: the design values of the build, for example the lane widths (`design_criterion`). A profile can take the values
+that it does not have from a parent profile.
 
 ```mermaid
 erDiagram
