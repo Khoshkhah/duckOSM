@@ -253,9 +253,6 @@ enum Cmd {
         #[arg(long, default_value = "rules", value_parser = ["auto", "rules", "netconvert"])]
         lane_source: String,
     },
-    /// Export a Lanelet2 map (.osm) from a GMNS db: each lane is a lanelet, with left and right boundaries (the centerline
-    /// offset by half the lane width) and the tags subtype, one_way and speed_limit. A lane map in the format of Autoware and
-    /// the lanelet2 library, not a survey-grade HD map.
     /// The HD map of an area, made by SimReady (docs/design/hdmap_simready.md): write SimReady's input folder from the
     /// routing database and the GMNS database (made with `duckosm gmns --lane-source rules`), then run `duckosm-sim build`.
     /// SimReady is a separate program: without it the command stops.
@@ -277,6 +274,9 @@ enum Cmd {
         #[arg(long)]
         keep_input: bool,
     },
+    /// Export a Lanelet2 map (.osm) from a GMNS db: each lane is a lanelet, with left and right boundaries (the centerline
+    /// offset by half the lane width) and the tags subtype, one_way and speed_limit. A lane map in the format of Autoware and
+    /// the lanelet2 library, not a survey-grade HD map.
     Lanelet2 {
         /// The GMNS database.
         gmns_db: PathBuf,
