@@ -5,7 +5,7 @@ Each table of the GMNS database of [`duckosm gmns`](gmns.md), and each of its co
 
 | Rule | |
 |---|---|
-| Schemas | Every table belongs to a schema: `gmns_driving`, `gmns_walking`, `gmns_cycling`, or `gmns_all` (with `--combined`). There are no tables outside schemas. With `--meso`, `--micro` also `meso_<mode>`, `micro_<mode>`. See [network schemas](gmns.md#network-schemas). |
+| Schemas | Every table belongs to a schema: `gmns_driving`, `gmns_walking`, `gmns_cycling`, or `gmns_all` (with `--combined`). Outside them is only `main.elevation_metadata` (when the source db has heights). With `--meso`, `--micro` also `meso_<mode>`, `micro_<mode>`. See [network schemas](gmns.md#network-schemas). |
 | Ids | `link_id` is the duckOSM `edge_id` (BIGINT), the same after each build and in each mode. `node_id` is the OSM node id |
 | Units | metres, km/h, longitude and latitude (EPSG:4326) |
 | Geometry | `geometry` is WKT text (in the CSV files). `geom` is the same shape as a DuckDB `GEOMETRY` (not in the CSV files) |

@@ -43,7 +43,7 @@ duckosm gmns-viz monaco_gmns.duckdb                        # draws the meso and 
 
 ## Network schemas
 
-In `<area>_gmns.duckdb`, **every table belongs to a network schema** (the default `main` schema is empty). GMNS is dedicated purely to transport networks, unlike Level 2 (`<area>.duckdb`) which also stores GIS layers (`features`) and raw OSM tags (`raw`).
+In `<area>_gmns.duckdb`, **every network table belongs to a network schema**. The default `main` schema has only [`elevation_metadata`](gmns_tables.md#elevation_metadata), when the source db has heights. GMNS is dedicated purely to transport networks, unlike Level 2 (`<area>.duckdb`) which also stores GIS layers (`features`) and raw OSM tags (`raw`).
 
 ### One link for each edge
 
@@ -51,7 +51,7 @@ duckOSM cuts roads where a footpath or a cycleway crosses them. Thus the walking
 
 Each `gmns_<mode>.link` is one Level 2 edge: `link_id` = `edge_id`. GMNS does not merge links. Thus each crossing node stays in each mode, and `gmns_all` can join the modes on `link_id`.
 
-To get one road section between two junctions, use Level 2 [`driving.chains`](../reference/database.md#chains). SUMO `--merge` reads that table.
+One road section between two junctions is one row of [`gmns_driving.chains`](gmns_tables.md#chains) (Level 2: [`driving.chains`](../reference/database.md#chains)). SUMO and MATSim `--merge` read it.
 
 ### Macro schemas (`duckosm gmns`)
 
