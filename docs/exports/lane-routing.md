@@ -43,8 +43,8 @@ Both are networks of lanes, from the same GMNS lanes and turns. They differ in t
 
 | Area (input GMNS DuckDB) | Time | Memory |
 |---|---|---|
-| Monaco (8.4 MB `.duckdb`) | 0.04 s | 25 MB |
-| Kentucky (5.8 GB `.duckdb`) | not run | |
+| Monaco (9.5 MB `.duckdb`) | 0.05 s | 0.02 GB |
+| Kentucky (7.5 GB `.duckdb`) | 1.8 s | 2.9 GB |
 | France (~150 GB `.duckdb`) | not run | |
 
 ## Limits

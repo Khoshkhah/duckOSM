@@ -113,13 +113,14 @@ it turns red, and the lanes that its turns lead into turn green.
 
 ## Speed and memory
 
-Driving network, with the lane rules (the default). Input is the Level 2 routable database (`<area>.duckdb`):
+Driving network, with the lane rules (the default). Input is the Level 2 routable database (`<area>.duckdb`). Memory is the
+peak of the whole process, Rust and DuckDB (DuckDB has a limit of 2 GB):
 
 | Area (input DuckDB) | Machine | Time | Memory | Output GMNS DuckDB |
 |---|---|---|---|---|
-| Monaco (38 MB `.duckdb`) | Mac mini (M6, 16 GB) | 0.8 s | 145 MB | 8.4 MB |
-| Kentucky (2.2 GB `.duckdb`) | Mac mini (M6, 16 GB) | 70 s | 1.75 GB (Rust) + 2 GB (DuckDB) | 6.7 GB |
-| Île-de-France (2.0 GB `.duckdb`) | Mac mini (M6, 16 GB) | 65 s | | 3.0 GB |
+| Monaco (38 MB `.duckdb`) | Mac mini (M6, 16 GB) | 0.34 s | 0.15 GB | 9.5 MB |
+| Kentucky (2.2 GB `.duckdb`) | Mac mini (M6, 16 GB) | 71 s | 5.2 GB | 7.5 GB |
+| Île-de-France (2.0 GB `.duckdb`) | Mac mini (M6, 16 GB) | 61 s | 5.0 GB | 3.0 GB |
 | France (~35 GB `.duckdb`) | | not run | (estimated ~150 GB) | |
 
 Each step works in chunks (a chunk of junctions, of road runs or of lanes), so the memory stays about the same on a large
