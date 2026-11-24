@@ -1,12 +1,15 @@
 # HD map tables
 
 Each table of the HD map database, and each of its columns. [SimReady](https://github.com/Khoshkhah/simready) builds
-this database from two duckOSM databases:
+this database from two duckOSM databases of the same build:
 
-- the routable network (`<area>.duckdb`, [Database schema](../reference/database.md)), with the raw OSM data of the
-  area ([`raw.*`](../reference/database.md#raw-schema): the node tags, the kerbs and the limits of the street space);
-- the GMNS network (`<area>_gmns.duckdb` of [`duckosm gmns`](gmns.md), [GMNS tables](gmns_tables.md)): its chains
-  are the carriageways.
+- the GMNS network (`<area>_gmns.duckdb` of [`duckosm gmns`](gmns.md), [GMNS tables](gmns_tables.md)): the road
+  network. Its chains are the carriageways;
+- the routable network (`<area>.duckdb`, [Database schema](../reference/database.md)): only the raw OSM data
+  ([`raw.*`](../reference/database.md#raw-schema), with the fixes) for the kerbs, the building walls and the bridges,
+  and the DEM grid ([`main.elevation_grid`](../reference/database.md#elevation_grid)) for the ground.
+
+SimReady is a separate program, private and optional. A duckOSM command that runs it is planned.
 
 | Rule | |
 |---|---|
