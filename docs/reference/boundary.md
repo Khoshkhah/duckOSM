@@ -35,8 +35,7 @@ The build writes the boundary to the table `main.boundary`, with its properties 
 
 | Build | Rows of `main.boundary` |
 |---|---|
-| `duckosm FILE --boundary ...` and duckOSM Studio | one row: the first feature, with all its properties |
-| `duckosm build --boundary ...` | one row for each feature, with all its properties |
+| `duckosm FILE --boundary ...`, `duckosm build --boundary ...` and duckOSM Studio | one row: the first feature, with all its properties |
 
 | GeoJSON value | Column type |
 |---|---|
@@ -67,6 +66,6 @@ For a place, `duckosm boundary` and `duckosm get` write the properties `name`, `
 | `boundary: the crs is ...` | The file has a `crs` member that names another CRS. | Export the file again in EPSG:4326. A file in EPSG:4326 needs no `crs` member. |
 | `boundary: a ring is not closed` | The last position of a ring is not the first one. | Add the first position again at the end of the ring. |
 | `warning: the cut has no nodes`, `no Geofabrik extract covers the boundary`, or `get` names a wrong extract | The positions are `[latitude, longitude]`. Monaco as `[43.73, 7.42]` is a place in Ethiopia. | Change each position to `[longitude, latitude]`. |
-| `boundary: Point is not a Polygon or a MultiPolygon` | The geometry is not an area. | Draw a polygon around the area. |
+| `boundary: the geometry is not a Polygon or a MultiPolygon` | The geometry is not an area. | Draw a polygon around the area. |
 
 `duckosm get` and `duckosm cut` find the first three errors before they cut. The build does not check them.

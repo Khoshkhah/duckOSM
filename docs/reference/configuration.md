@@ -4,26 +4,26 @@ A build can read its settings from a YAML file. `duckosm init-config` writes a t
 
 ```bash
 duckosm init-config my_area.yaml
-duckosm --config my_area.yaml
+duckosm build --config my_area.yaml
 ```
 
 | Rule | |
 |---|---|
 | A key that you leave out | takes the default of the tables below |
-| An unknown key | is ignored, with a warning |
+| An unknown key | stops the build with an error. A known key that has no effect (for example `options.engine`) gives a warning |
 | A relative path | is read from the folder where you run `duckosm` |
-| An option on the command line | wins over the file, for example `--config my_area.yaml -m walking` |
+| An option of `duckosm build` | wins over the file, for example `duckosm build --config my_area.yaml -m walking` |
 | A value outside its choices | stops the build before it starts |
 
 ## Area and output
 
 | Key | Default | Option | Does |
 |---|---|---|---|
-| `name` | `default` | `--name` | the name of the area: the output file is `<name>.duckdb` |
+| `name` | `default` | | the name of the area: the output file is `<name>.duckdb` |
 | `output_path` | `output.duckdb` | `-o` | a `.duckdb` file, or a folder for `<name>.duckdb` |
 | `modes` | `[driving]` | `-m` | `driving`, `walking`, `cycling` |
 | `osm_overrides` | none | `--fixes` | your [OSM fixes file](../guides/edit-osm-data.md#the-fixes-file) |
-| `source.pbf_path` (or `pbf_path`) | none | `PBF` | the `.osm.pbf` file |
+| `source.pbf_path` (or `pbf_path`) | none | `-p` | the `.osm.pbf` file |
 | `source.type` | `pbf` | | `pbf`, or `duckdb` to cut an area out of the built database `source.source_db`, with its edge ids |
 
 ## `boundary`
@@ -61,9 +61,9 @@ Each step is on by default, except where the table says off.
 | `options.bus_routes` | on | the [bus routes](../concepts/networks.md#bus-routes) on the driving edges |
 | `options.boundary_cells`, `options.boundary_cell_resolutions` | off | the H3 cells that cover the boundary |
 | `options.chains` | on | [`driving.chains`](database.md#chains): the driving edges joined where the road only continues. The SUMO export with `merge` needs it. Command line: `--no-chains` |
-| `options.clip_strategy` | `smart` with the base-map layers, else `complete_ways` | how the file is cut to the boundary: `complete_ways`, `smart` or `simple` |
+| `options.clip_strategy` | | no effect: the build cuts the network as osmium's `complete_ways` and `raw.*` as `smart`. To cut a file with another strategy, use `duckosm clip-pbf --strategy` |
 | `options.engine` | | no effect: the network step is always the Rust engine. An old config with this key still works |
-| `options.memory_limit`, `options.threads` | DuckDB's own | the memory and the threads of DuckDB |
+| `options.memory_limit`, `options.threads` | DuckDB's own | the memory and the threads of DuckDB when it loads `raw.*` |
 
 ## `clip`
 
@@ -98,4 +98,4 @@ elevation:
 
 More keys: `validation.assert_*` (each check, [Check a build](../guides/check-build.md)), `multimodal.transfer_costs`
 (a cost for each direction, for example `{"walking->driving": 60}`), `multimodal.node_costs` (a CSV or Parquet file with the cost of a change at some junctions) and `multimodal.only_listed_nodes` (allow changes only there), `viz.basemap` (a web background under the maps) and
-`options.simplify_batches` (a memory limit for one step). The template of `duckosm init-config` explains each one.
+`options.simplify_batches` (no effect, an old config with this key still works). The template of `duckosm init-config` explains each one.

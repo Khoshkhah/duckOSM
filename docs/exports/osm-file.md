@@ -52,7 +52,7 @@ duckosm get "Tartu" --fixes osm_fixes.yaml   # the file has your fixes in it
 | `-o`, `--out DIR` | the output folder | `.` |
 | `--name NAME` | the name of the two files | from the place, the file or the cell; `area` for a box |
 | `--fixes FILE` | your OSM fixes file | |
-| `--cache DIR` | the folder of the downloads | `$DUCKOSM_CACHE`, else `~/.cache/duckosm` |
+| `--cache DIR` | the folder of the downloads | `$DUCKOSM_CACHE`, else `$XDG_CACHE_HOME/duckosm`, else `~/.cache/duckosm` |
 | `--refresh` | download the extract and the list of extracts again | the files in the cache are used |
 | `--dry-run` | find the boundary and the extract, print them as JSON and stop: no download, no files | |
 
@@ -66,8 +66,8 @@ Cut an OSM file that you already have to a boundary.
 duckosm cut estonia-latest.osm.pbf --boundary tartu.geojson -o tartu.osm.pbf --fixes osm_fixes.yaml
 ```
 
-The input must be sorted by type, then id, as the Geofabrik files are. `--boundary` reads GeoJSON, an osmosis `.poly`
-file, WKT or a box `W,S,E,N`.
+The input must be sorted by type, then id, as the Geofabrik files are. `--boundary` reads a file with GeoJSON, an osmosis
+`.poly` polygon, WKT or a box `W,S,E,N`.
 
 ## The fixes in the file
 

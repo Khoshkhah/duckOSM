@@ -23,12 +23,12 @@ duckosm quack monaco.osm.pbf --gdal -o out --name monaco
 ```python
 import duckosm
 
-area = duckosm.get("Monaco")  # as duckosm get (in the next release)
+area = duckosm.get("Monaco")  # as duckosm get
 net = duckosm.build(pbf=area.pbf, boundary=area.boundary)  # as duckosm build: a duckosm.Network
 
 r = net.route_points((7.4155, 43.7285), (7.4335, 43.7468))  # Fontvieille to Larvotto (lon, lat)
 r["time_s"], r["length_m"], r["edges"]  # time, length, the edge_ids in order
-net.edges()  # the driving edges as a GeoDataFrame
+net.edges()  # the driving edges as a GeoDataFrame (the extra gis)
 net.to_gis("monaco.gpkg")  # a GeoPackage for QGIS
 ```
 
@@ -59,13 +59,14 @@ Optional. Add them in brackets, for example `pip install "duckosm[sumo]"`.
 
 | Extra | Adds | For |
 |---|---|---|
+| `gis` | geopandas | `net.edges()` and the other GeoDataFrames |
 | `sumo` | SUMO (`eclipse-sumo`, with `netconvert`) | `duckosm sumo --netconvert` and `netconvert -c` build the `.net.xml` |
 | `networkx` | networkx | `to_networkx()`, `to_networkx_nodes()`, `write_graph()`. `routing` is its old name, for one more release |
 | `rustworkx` | rustworkx | `to_rustworkx()` |
 | `levels` | roadstyle | the old Python level functions; not needed by `duckosm levels` (Rust) |
 | `viz` | roadstyle, mapstyle, lanestyle, matplotlib | map functions in Python |
 
-`route()`, the exports, `export-graph` to GraphML and `duckosm elevation` need no extra. No duckOSM command needs osmium or GDAL.
+All the extras: [Python SDK](reference/python.md#install). `route()`, the exports, `export-graph` to GraphML and `duckosm elevation` need no extra. No duckOSM command needs osmium or GDAL.
 
 ## Where files go
 
