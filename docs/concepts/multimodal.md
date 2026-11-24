@@ -6,7 +6,7 @@ car, drive, and walk from the car. *Experimental.*
 ```python
 from duckosm import route_multimodal_points
 
-r = route_multimodal_points(con, (7.4155, 43.7285), (7.4400, 43.7480))   # (lon, lat)
+r = route_multimodal_points(con, (7.4155, 43.7285), (7.4335, 43.7468))   # (lon, lat)
 [(leg["mode"], round(leg["time_s"])) for leg in r["legs"]]                # walking, driving, walking
 ```
 

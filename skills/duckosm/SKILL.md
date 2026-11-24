@@ -13,13 +13,13 @@ file: `/llms-full.txt`; every table and column: `/reference/database/`; every co
 ## Install
 
 ```bash
-pip install "duckosm @ git+https://github.com/Khoshkhah/duckOSM"   # not on PyPI yet
-pip install "duckosm[routing,viz] @ git+https://github.com/Khoshkhah/duckOSM"   # + route(), maps
+pip install duckosm
+pip install "duckosm[gis,viz]"   # + net.edges() as a GeoDataFrame, net.map()
 ```
 
-Extras: `routing` (networkx: `route()`, `Router`, `export-graph`), `viz` (roadstyle maps), `levels` (`duckosm levels`: the drawing order of the roads, stored in the `visualization` schema), `sumo`
-(netconvert), `elevation` (rasterio). Optional system tools: `osmium` (cuts a PBF to a boundary;
-without it the whole PBF is read) and GDAL `ogr2ogr`. `duckdb` must stay `<2`.
+The commands, `route()`, `Router`, the exports and `duckosm levels` need no extra. Extras: `gis` (geopandas:
+`net.edges()`), `viz` (roadstyle, mapstyle: `net.map()`, `net.plot()`), `sim` (netconvert, sumolib), `graph`
+(networkx, rustworkx). `duckdb` must stay `<2`.
 
 ## Build an area
 
@@ -68,14 +68,14 @@ con.execute("LOAD spatial")
 near = """SELECT edge_id FROM driving.edges
           ORDER BY ST_Distance_Sphere(ST_FlipCoordinates(ST_Centroid(geometry)), ST_Point(?, ?)) LIMIT 1"""
 a = con.execute(near, [43.7285, 7.4155]).fetchone()[0]          # lat, lon
-b = con.execute(near, [43.7480, 7.4400]).fetchone()[0]
+b = con.execute(near, [43.7468, 7.4335]).fetchone()[0]
 
-from duckosm import route                                       # needs the routing extra
+from duckosm import route                                       # Rust: no extra
 r = route(con, a, b)                                            # over legal turns; mode="walking" too
 r["time_s"], r["length_m"], r["edges"]
 
 from duckosm import route_points                                # between two points, exact:
-r = route_points(con, (7.4155, 43.7285), (7.4400, 43.7480), radius_m=50)   # (lon, lat)
+r = route_points(con, (7.4155, 43.7285), (7.4335, 43.7468), radius_m=50)   # (lon, lat)
 r["time_s"], r["start"]["access_m"]                             # walk to the road + partial edges
 
 # where you can go next from an edge
@@ -93,7 +93,7 @@ duckosm viz monaco.duckdb                     # -> reports/monaco_map.html + one
 duckosm route-map monaco.duckdb               # -> reports/monaco_route_map.html (Drive/Walk/Cycle/Walk + drive)
 ```
 
-The maps are drawn by mapstyle (the `viz` extra) from the database's own layers; the routing is
+The maps are drawn from the database's own layers (`duckosm viz`, or `net.map()` with the `viz` extra); the routing is
 duckOSM's (`route_points`, `route_multimodal_points`, `directions`).
 
 Join your own data the stable way: carry `(osm_id, source, target)` and join on them, or keep the

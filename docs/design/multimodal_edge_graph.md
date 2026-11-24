@@ -1,6 +1,8 @@
 # Design: Walk + drive on the edge graph
 
-Status: built (2026-10-22). Kaveh approved the note.
+Status: built (2026-10-22). Kaveh approved the note. The Python code that the section "Files" names is now Rust:
+`route_multimodal` and `route_multimodal_points` are in `rust/duckosm-route/src/points.rs`, on the router of
+`rust/duckosm-router/src/multimodal.rs`.
 
 ## Problem
 

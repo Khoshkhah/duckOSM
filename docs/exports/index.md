@@ -15,9 +15,9 @@ The levels go from the raw OSM data to the most detailed network. Each level is 
 <div class="dk-levels">
 <a class="lv" href="#0-osm-file"><span class="n">0</span><b>OSM file</b><span class="db-tag">.osm.pbf</span><span class="desc">Exact boundary cut with your fixes</span><span class="tools">pbfcut</span></a>
 <a class="lv" href="#1-osm-data"><span class="n">1</span><b>OSM data</b><span class="db-tag">from .osm.pbf</span><span class="desc">Flat tables of all OSM objects</span><span class="tools">QuackOSM · GDAL · Geofabrik · PMTiles</span></a>
-<a class="lv" href="#2-routable-network"><span class="n">2</span><b>Routable network</b><span class="db-tag">DuckDB</span><span class="desc">Drive, walk, bike<br>Edges, edge_id, turns</span><span class="tools">GeoPackage · networkx</span></a>
-<a class="lv" href="#3-gmns-network"><span class="n">3</span><b>GMNS network</b><span class="db-tag">GMNS DuckDB</span><span class="desc">Macro, meso, micro<br>links, lanes, turns</span><span class="tools">GMNS · MATSim · SUMO</span></a>
-<a class="lv" href="#4-hd-map"><span class="n">4</span><b>HD map</b><span class="db-tag">3D geometry</span><span class="desc">Lane shape in 3D (experimental)</span><span class="tools">Lanelet2 · OpenDRIVE</span></a>
+<a class="lv" href="#2-routable-network"><span class="n">2</span><b>Routable network</b><span class="db-tag db">DuckDB</span><span class="desc">Drive, walk, bike<br>Edges, edge_id, turns</span><span class="tools">GeoPackage · networkx</span></a>
+<a class="lv" href="#3-gmns-network"><span class="n">3</span><b>GMNS network</b><span class="db-tag db">GMNS DuckDB</span><span class="desc">Macro, meso, micro<br>links, lanes, turns</span><span class="tools">GMNS · MATSim · SUMO</span></a>
+<a class="lv" href="#4-hd-map"><span class="n">4</span><b>HD map</b><span class="db-tag db">HD map DuckDB</span><span class="desc">Lane shape in 3D (experimental)</span><span class="tools">Lanelet2 · OpenDRIVE</span></a>
 </div>
 
 Your OSM fixes go into every level.
@@ -51,7 +51,7 @@ The routable network of each mode: edges with their `edge_id`, nodes, and the le
 | Custom routers | [the turn graph](turn-graph.md) `edge_graph` in the database | `route()`, `Router` ([Route](../guides/route.md)) |
 | QGIS, map styles | the [base-map layers](base-map.md) `features.*`: water, land use, buildings, POIs | `duckosm build` |
 | QGIS, ArcGIS, FME | the network as [GeoPackage or shapefile](gis.md) | `duckosm export-gis` |
-| networkx | [a networkx graph](networkx.md), GraphML; gpickle only from Python (`write_graph()`) | `to_networkx()`, `duckosm export-graph` |
+| networkx | [a networkx graph](networkx.md), GraphML or gpickle (`duckosm export-graph -f gpickle`) | `to_networkx()`, `duckosm export-graph` |
 | rustworkx | [a rustworkx graph](networkx.md): an API like networkx with a Rust engine, faster for large areas | `to_rustworkx()` |
 | petgraph (Rust) | [a petgraph graph](../reference/rust.md) | `duckosm_route::graphs::to_petgraph()` |
 | Rail planning: OpenTrack, RailSys | [railML 2.4](railml.md): the rail tracks, switches and stations, from `raw.*` | `duckosm railml` |

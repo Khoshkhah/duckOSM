@@ -2,11 +2,20 @@
 //! (docs/design/sim_from_gmns.md, "Chains"). `duckosm sumo --merge` and `duckosm matsim --merge` read it from a GMNS db.
 //!
 //! A chain is cut where the GMNS lanes change (a merged SUMO edge has the lanes of its last link), and each GMNS driving link
-//! is in one chain (a bus-only link is a chain of one link).
+//! is in one chain (a bus-only link is a chain of one link). Then each chain is cut at each node inside it where another chain
+//! ends, so the two directions of a two-way road end at the same nodes (as `duckosm_core::chains::cut_at_ends`).
 
 use crate::Result;
 use duckdb::Connection;
 use std::path::Path;
+
+/// The cut at the ends of the other chains, from `{T}(old, seg, link_id, i)`: the same rows with `seg` cut again at each node
+/// inside a chain where a chain starts or ends. `gmns.py` `_CUT_AT_ENDS` is the same text.
+const CUT_AT_ENDS: &str = "WITH n AS (SELECT c.*, l.from_node_id AS fn, l.to_node_id AS tn FROM {T} c JOIN gmns_driving.link l USING (link_id)),
+       stops AS (SELECT arg_min(fn, i) AS node FROM n GROUP BY old, seg UNION SELECT arg_max(tn, i) FROM n GROUP BY old, seg),
+       f AS (SELECT n.*, CASE WHEN lag(n.i) OVER w IS NULL OR lag(n.seg) OVER w <> n.seg OR n.fn IN (SELECT node FROM stops)
+                              THEN 1 ELSE 0 END AS brk FROM n WINDOW w AS (PARTITION BY n.old ORDER BY n.i))
+       SELECT old, sum(brk) OVER (PARTITION BY old ORDER BY i) AS seg, link_id, i FROM f";
 
 /// Write `gmns_driving.chains` into the GMNS db `gmns` from the duckOSM db `source`. Gives the number of chains; None when
 /// there is no `gmns_driving.link`. A source with no `driving.chains` (an old build, or `--no-chains`): each link is a chain
@@ -49,6 +58,9 @@ pub fn add_chains(source: &Path, gmns: &Path) -> Result<Option<usize>> {
        SELECT old, sum(brk) OVER (PARTITION BY old ORDER BY i) AS seg, link_id, i FROM f
        UNION ALL
        SELECT link_id, 1, link_id, 1 FROM gmns_driving.link WHERE link_id NOT IN (SELECT link_id FROM u)"))?;
+    // the two directions of a two-way road end at the same nodes: a cut at each node inside a chain where another chain ends
+    x(&format!("CREATE OR REPLACE TABLE main._chain_cut AS {};
+       DROP TABLE main._chain_links; ALTER TABLE main._chain_cut RENAME TO _chain_links", CUT_AT_ENDS.replace("{T}", "main._chain_links")))?;
     // the id of each chain: duckosm_core's chain_id of its links (the Level 2 chain_id when the chain is not cut)
     x("CREATE OR REPLACE TABLE main._chain_ids(old BIGINT, seg BIGINT, chain_id BIGINT)")?;
     {

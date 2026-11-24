@@ -98,7 +98,7 @@ The open standard (General Modeling Network Specification) in DuckDB: links, lan
 <td valign="top">
 
 **Traffic simulation**<br>
-SUMO, MATSim and DTALite exports; SUMO can join the edges of a road into one (`--merge`)
+SUMO and MATSim exports, and GMNS tables that DTALite reads; SUMO and MATSim can join the edges of a road into one (`--merge`)
 ([Exports](https://khoshkhah.github.io/duckOSM/exports/)).
 
 </td>
@@ -112,7 +112,7 @@ All outputs come from one `.osm.pbf` file, in five levels, and all take your OSM
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/images/levels-dark.svg">
-    <img src="https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/images/levels-light.svg" alt="The five levels of duckOSM's outputs: 0 OSM file (pbfcut), 1 OSM data from .osm.pbf (QuackOSM, GDAL, Geofabrik, PMTiles), 2 routable network in DuckDB (GeoPackage, networkx), 3 GMNS network in GMNS DuckDB (GMNS, MATSim, SUMO), 4 HD map with 3D lane geometry, experimental (Lanelet2, OpenDRIVE)" width="900">
+    <img src="https://raw.githubusercontent.com/Khoshkhah/duckOSM/main/images/levels-light.svg" alt="The five levels of duckOSM's outputs: 0 OSM file (pbfcut), 1 OSM data from .osm.pbf (QuackOSM, GDAL, Geofabrik, PMTiles), 2 routable network in DuckDB (GeoPackage, networkx), 3 GMNS network in GMNS DuckDB (GMNS, MATSim, SUMO), 4 HD map in HD map DuckDB, lane shape in 3D, experimental (Lanelet2, OpenDRIVE)" width="900">
   </picture>
 </p>
 
@@ -122,7 +122,7 @@ All outputs come from one `.osm.pbf` file, in five levels, and all take your OSM
 | [1. OSM data](https://khoshkhah.github.io/duckOSM/exports/osm-data/) | `from .osm.pbf` | QuackOSM · GDAL · Geofabrik · osm2pgsql · PMTiles | `duckosm quack` |
 | [2. Routable network](https://khoshkhah.github.io/duckOSM/exports/routable-network/) | `DuckDB` | Drive, walk, bike · GeoPackage · networkx | `duckosm build`, `export-gis`, `export-graph` |
 | [3. GMNS network](https://khoshkhah.github.io/duckOSM/exports/gmns-network/) | `GMNS DuckDB` | Multi-scale (macro, meso, micro) · GMNS · MATSim · SUMO | `duckosm gmns`, `sumo`, `matsim` |
-| [4. HD map](https://khoshkhah.github.io/duckOSM/exports/hd-map/) *(experimental)* | `3D geometry` | Lane shape in 3D · Lanelet2 · OpenDRIVE | `duckosm lanelet2`, `opendrive` |
+| [4. HD map](https://khoshkhah.github.io/duckOSM/exports/hd-map/) *(experimental)* | `HD map DuckDB` | Lane shape in 3D · Lanelet2 · OpenDRIVE | `duckosm lanelet2`, `opendrive` |
 
 ## Quick start
 
@@ -142,7 +142,7 @@ area = duckosm.get("Monaco")
 db = duckosm.build(pbf=area.pbf, boundary=area.boundary)  # Level 2 routable database
 
 # Route on the turn graph
-r = duckosm.route_points(db, (7.4155, 43.7285), (7.4400, 43.7480))   # Fontvieille to Larvotto
+r = duckosm.route_points(db, (7.4155, 43.7285), (7.4335, 43.7468))   # Fontvieille to Larvotto
 r["time_s"], r["length_m"], r["edges"]
 
 # Export to Level 3 GMNS or GIS

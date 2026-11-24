@@ -45,7 +45,7 @@ The exported lanelet dictionary includes `ids`: mapping each `lanelet_id` to its
 | Autonomous driving tool | duckOSM Python SDK / CLI | What duckOSM does |
 |---|---|---|
 | Manual Lanelet2 drawing in JOSM | `duckosm.hdmap.to_lanelet2("out/gmns.duckdb", "monaco.osm")` | Generates Lanelet2 OSM XML with `<relation type="lanelet">`, left/right boundaries, and regulatory elements |
-| `lanelet2.routing` graph | `duckosm.hdmap.build_lane_graph(gmns_db)`<br/>`duckosm.hdmap.route_lanes(gmns_db, a, b)` | Computes lane-level shortest paths and legal lane-change sequences directly in Python |
+| `lanelet2.routing` graph | `duckosm.hdmap.build_lane_graph(gmns_db)`<br/>`duckosm.hdmap.route_lanes(gmns_db, a, b)` | `build_lane_graph` writes the lane graph and gives its counts; `route_lanes` finds the shortest lane route with the legal lane changes. Both run in Rust |
 | scenariogeneration / CARLA OSM import | `duckosm opendrive data/monaco.duckdb -o monaco.xodr`<br/>`net.driving.to_opendrive("monaco.xodr", junctions=True)` | Exports OpenDRIVE 1.7 XML (`.xodr`) with reference lines, lane sections, and junction connection records |
 
 ### Comparison: Standard HD Map Pipelines vs duckOSM
