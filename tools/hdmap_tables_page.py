@@ -110,7 +110,7 @@ this database from two duckOSM databases of the same build:
 
 - the GMNS network (`<area>_gmns.duckdb` of [`duckosm gmns`](gmns.md), [GMNS tables](gmns_tables.md)): the road
   network. Its chains are the carriageways;
-- the routable network (`<area>.duckdb`, [Database schema](../reference/database.md)): only the raw OSM data
+- the routable network (`<area>.duckdb`, [Routable network tables](../reference/database.md)): only the raw OSM data
   ([`raw.*`](../reference/database.md#raw-schema), with the fixes) for the kerbs, the building walls and the bridges,
   and the DEM grid ([`main.elevation_grid`](../reference/database.md#elevation_grid)) for the ground.
 
