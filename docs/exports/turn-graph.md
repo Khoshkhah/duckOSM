@@ -35,7 +35,7 @@ The columns of `edge_graph`:
 | `cost` | FLOAT | the `cost_s` of `from_edge`, in seconds |
 | `uses` | VARCHAR | who can make the turn ([below](#the-uses-column)) |
 
-The columns of the turn tables: [Database schema](../reference/database.md#turn_restrictions).
+The columns of the turn tables: [Routable network tables](../reference/database.md#turn_restrictions).
 
 The build removes the turns that a restriction forbids for all vehicles at all times. A U-turn onto the reverse twin
 stays in the table.

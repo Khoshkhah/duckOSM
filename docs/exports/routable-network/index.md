@@ -18,4 +18,4 @@ flowchart LR
 | networkx | [networkx](../networkx.md): a networkx graph, GraphML or gpickle | `to_networkx()`, `duckosm export-graph` |
 | Rail planning: OpenTrack, RailSys | [railML 2.4](../railml.md) (experimental): the rail tracks, switches and stations, from `raw.*` | `duckosm railml` |
 
-Every table and column of the database: [Database schema](../../reference/database.md).
+Every table and column of the database: [Routable network tables](../../reference/database.md).

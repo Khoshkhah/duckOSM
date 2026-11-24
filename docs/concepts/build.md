@@ -41,4 +41,4 @@ How to cut: [Prepare an area](../guides/prepare-area.md).
 | `main.boundary`, `main.global_junctions` | the area and its junctions |
 | `features.*`, `raw.*` | the base-map layers, and the raw OSM tables they are made from |
 
-Every table and column: [Database schema](../reference/database.md).
+Every table and column: [Routable network tables](../reference/database.md).

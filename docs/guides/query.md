@@ -20,7 +20,7 @@ con.sql("SELECT count(*) FROM driving.edges").show()
 Always give the schema, or use `USE driving;`. Private roads and, in driving, bus lanes are in `private_edges`, not in
 `edges`: the maps show them, but routing does not use them
 ([why](../concepts/networks.md#access-private-and-forbidden-roads)). All tables and columns:
-[Database schema](../reference/database.md). A summary of the database: `duckosm info monaco.duckdb`.
+[Routable network tables](../reference/database.md). A summary of the database: `duckosm info monaco.duckdb`.
 
 ## Ask in words
 
