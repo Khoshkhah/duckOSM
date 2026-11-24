@@ -1,12 +1,13 @@
 # HD map tables
 
 Each table of the HD map database, and each of its columns. [SimReady](https://github.com/Khoshkhah/simready) builds
-this database from a duckOSM database.
+this database from the GMNS database of [`duckosm gmns`](gmns.md), and from the raw OSM data of the area
+([`raw.*`](../reference/database.md#raw-schema): the node tags, the kerbs and the limits of the street space).
 
 | Rule | |
 |---|---|
 | Schema | all tables are in the schema `sim` |
-| Carriageway | one carriageway for each chain of `driving.chains`, with the same `chain_id` ([Edges and chains](../concepts/edges-and-chains.md)) |
+| Carriageway | one carriageway for each chain of `gmns_driving.chains`, with the same `chain_id` ([GMNS tables](gmns_tables.md#chains), [Edges and chains](../concepts/edges-and-chains.md)) |
 | Ids | a 64-bit hash of the content keys, with the hash of duckOSM's [`edge_id`](../concepts/edge-ids.md). `node_id` is the OSM node id |
 | Units | in the column name: `_m` metres, `_s` seconds, `_deg` degrees, `_kmh` km/h |
 | Geometry | DuckDB `GEOMETRY` in the CRS of `project.crs`: metres, in the UTM zone of the area |
@@ -74,7 +75,7 @@ erDiagram
 
 | Table | One row is |
 |---|---|
-| [`carriageway`](#carriageway) | one directed roadway from junction to junction: one chain of duckOSM |
+| [`carriageway`](#carriageway) | one directed roadway from junction to junction: one GMNS chain |
 | [`attribute`](#attribute) | one value of a carriageway (lanes, speed, width), and how it was found |
 | [`event`](#event) | a station where the cross-section changes |
 | [`lane_section`](#lane_section) | the part of a carriageway between two events |
@@ -136,7 +137,7 @@ Most tables have five evidence columns: where each value of the row came from.
 
 ### carriageway
 
-One row is one directed roadway from junction to junction: one chain of duckOSM.
+One row is one directed roadway from junction to junction: one GMNS chain.
 
 | Column | Type | Holds |
 |---|---|---|
