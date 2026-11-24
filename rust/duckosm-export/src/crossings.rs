@@ -70,7 +70,6 @@ struct Lanes {
     level: Vec<i64>,
     conn: Vec<bool>,
     geom: Vec<Vec<P>>,
-    poly: Vec<MultiPolygon<f64>>,
     gpoly: Vec<Vec<crate::geos::Polygon>>,
     env: Vec<(f64, f64, f64, f64)>,
     tree: Vec<usize>,
@@ -135,9 +134,9 @@ fn pieces(l: &Lanes, line: &[P], only: Option<&HashSet<usize>>, lv: Option<i64>)
     if near.is_empty() {
         return (vec![], vec![]);
     }
-    let mut u = l.poly[near[0]].clone();
+    let mut u = mp(&l.gpoly[near[0]]);
     for &j in &near[1..] {
-        u = u.union(&l.poly[j]);
+        u = u.union(&mp(&l.gpoly[j]));
     }
     let area = u.buffer_with_style(geo::algorithm::buffer::BufferStyle::new(0.1).line_join(geo::algorithm::buffer::LineJoin::Round(std::f64::consts::PI / 32.0)));
     let on: MultiLineString<f64> = area.clip(&MultiLineString(vec![ls(line)]), false);
@@ -438,17 +437,17 @@ pub(crate) fn build_crossings(c: &Ctx, sch: &str, has_raw: bool) -> Result<()> {
     }
     let rows = lane_rows("SELECT rowid, lane_id, link_id, width, wkt, osm_id, layer, bridge, tunnel, conn FROM _xl WHERE rowid IN (SELECT k FROM _xh) ORDER BY rowid")?;
     c.exec("DROP TABLE _xh; DROP TABLE _xl")?;
-    let made: Vec<(Vec<P>, (f64, f64, f64, f64), MultiPolygon<f64>, Vec<crate::geos::Polygon>)> = rows
+    let made: Vec<(Vec<P>, (f64, f64, f64, f64), Vec<crate::geos::Polygon>)> = rows
         .par_iter()
         .map(|(_, (_, _, w, wkt, ..))| {
             let g: Vec<P> = crate::gmns_lane_rules::from_wkb(wkt).into_iter().map(|(x, y)| to_m(x, y)).collect();
             let gp = surface(&g, w / 2.0, &mut 0).unwrap_or_default();
-            let poly = mp(&gp);
-            (g, env_of(&poly), poly, gp)
+            let env = env_of(&mp(&gp));
+            (g, env, gp)
         })
         .collect();
-    let mut l = Lanes { id: vec![], link: vec![], way: vec![], width: vec![], level: vec![], conn: vec![], geom: vec![], poly: vec![], gpoly: vec![], env: vec![], tree: vec![], rank: vec![], grid: HashMap::new() };
-    for ((_, (lid, lk, w, _, osm, ly, br, tu, is_conn)), (g, env, poly, gp)) in rows.into_iter().zip(made) {
+    let mut l = Lanes { id: vec![], link: vec![], way: vec![], width: vec![], level: vec![], conn: vec![], geom: vec![], gpoly: vec![], env: vec![], tree: vec![], rank: vec![], grid: HashMap::new() };
+    for ((_, (lid, lk, w, _, osm, ly, br, tu, is_conn)), (g, env, gp)) in rows.into_iter().zip(made) {
         l.gpoly.push(gp);
         l.env.push(env);
         l.id.push(lid);
@@ -458,7 +457,6 @@ pub(crate) fn build_crossings(c: &Ctx, sch: &str, has_raw: bool) -> Result<()> {
         l.conn.push(is_conn);
         l.width.push(w);
         l.geom.push(g);
-        l.poly.push(poly);
     }
     if unbuffered > 0 {
         eprintln!("GMNS[crossings]: {unbuffered} lane(s) without a surface (the buffer failed also with less precision): no crossing on them");
@@ -631,7 +629,7 @@ pub(crate) fn build_crossings(c: &Ctx, sch: &str, has_raw: bool) -> Result<()> {
             let part_lines: Vec<LineString<f64>> = parts.iter().map(|q| ls(q)).collect();
             for &j2 in crossed.iter().filter_map(|k| lanes_of_link.get(k)).flatten() {
                 if !l.conn[j2] && cd.level.is_none_or(|v| l.level[j2] == v) {
-                    let dmin = part_lines.iter().map(|q| Euclidean.distance(&l.poly[j2], q)).fold(f64::INFINITY, f64::min);
+                    let dmin = part_lines.iter().map(|q| Euclidean.distance(&mp(&l.gpoly[j2]), q)).fold(f64::INFINITY, f64::min);
                     if dmin < ROAD_REACH_M {
                         let pt = shp::interpolate(&l.geom[j2], shp::project(&l.geom[j2], mid));
                         let vc = pt.0 * vx + pt.1 * vy;
@@ -667,7 +665,7 @@ pub(crate) fn build_crossings(c: &Ctx, sch: &str, has_raw: bool) -> Result<()> {
                 if others.contains(&l.link[j]) {
                     continue;
                 }
-                let ip = rect.intersection(&l.poly[j]);
+                let ip = rect.intersection(&mp(&l.gpoly[j]));
                 if ip.0.is_empty() || ip.unsigned_area() < 0.2 {
                     continue;
                 }
@@ -747,7 +745,7 @@ mod tests {
 
     #[test]
     fn grid_query_is_the_scan() {
-        let mut l = Lanes { id: vec![], link: vec![], way: vec![], width: vec![], level: vec![], conn: vec![], geom: vec![], poly: vec![], gpoly: vec![], env: vec![], tree: vec![], rank: vec![], grid: HashMap::new() };
+        let mut l = Lanes { id: vec![], link: vec![], way: vec![], width: vec![], level: vec![], conn: vec![], geom: vec![], gpoly: vec![], env: vec![], tree: vec![], rank: vec![], grid: HashMap::new() };
         let mut s = 7u64;
         let mut r = || { s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407); (s >> 33) as f64 / (1u64 << 31) as f64 };
         for _ in 0..500 {
