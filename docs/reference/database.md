@@ -305,7 +305,7 @@ Always empty: the virtual nodes are in `nodes`, with `node_id < 0`.
 | [`elevation_grid`](#elevation_grid) | the build with `--dem`, and duckOSM Studio |
 | [`admin_boundaries`](#admin_boundaries) | after `duckosm admin`; in a `duckosm extract` result, only the sub-areas inside the area |
 | [`building_faces`](#building_faces) | a build from a PBF, with `options.building_faces` (off) and a boundary |
-| [`building_entrances`](#building_entrances) | `duckosm build` from a PBF, with `options.building_faces` (off) and a boundary |
+| [`building_entrances`](#building_entrances) | a build from a PBF, with `options.building_faces` (off) and a boundary |
 | [`fixes`](#fixes) | a build with a fixes file (`--fixes`, `osm_overrides`) |
 | [`osm_source`](#osm_source) | a build from a PBF |
 
@@ -544,10 +544,10 @@ One row for every `edge_id` of the roads of all modes (`edges` and `private_edge
 | Column | Type | Description |
 |---|---|---|
 | `edge_id` | BIGINT | the edge; the same as in the mode tables |
-| `casing_start` | INTEGER | the casing number of the head at the start of the edge |
-| `casing_level` | INTEGER | the casing number of the main part |
-| `casing_end` | INTEGER | the casing number of the head at the end of the edge |
-| `fill_level` | INTEGER | the fill number |
+| `casing_start` | BIGINT | the casing number of the head at the start of the edge |
+| `casing_level` | BIGINT | the casing number of the main part |
+| `casing_end` | BIGINT | the casing number of the head at the end of the edge |
+| `fill_level` | BIGINT | the fill number |
 | `head_start_m`, `head_end_m` | DOUBLE | the length of each head as drawn, in meters |
 | `cap_start`, `cap_end` | VARCHAR | the end shape as drawn: `round`, `square` or `flat` |
 
