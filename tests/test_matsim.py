@@ -6,7 +6,7 @@ from pathlib import Path
 import duckdb
 import pytest
 
-from duckosm.matsim import to_matsim
+from duckosm._api import to_matsim
 
 _DTD = Path(__file__).parent / "fixtures" / "network_v2.dtd"   # vendored official MATSim network_v2 DTD
 
@@ -127,7 +127,7 @@ def test_crs_override(tmp_path):
 
 
 def test_bad_mode(tmp_path):
-    with pytest.raises(ValueError, match="cycling"):
+    with pytest.raises(RuntimeError, match="cycling"):
         to_matsim(str(_src(tmp_path / "s.duckdb")), tmp_path / "net.xml", mode="cycling")
 
 

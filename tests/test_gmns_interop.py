@@ -184,13 +184,8 @@ def test_csv_extensions_are_kept_as_u_columns_only_when_asked(tmp_path):
     assert "u_geom" not in head("ext", "link")                    # native geometry does not go to a CSV
 
 
-def test_default_lane_width_by_class():
-    from duckosm.gmns import _default_lane_w
-    assert (_default_lane_w("service"), _default_lane_w("residential_link"), _default_lane_w("primary")) == (2.5, 3.0, 3.25)
-
-
 def test_an_untagged_one_way_road_takes_the_lanes_of_the_road_it_continues():
-    from duckosm.gmns import _inherit_lanes
+    from duckosm.processors.lane_profile import _inherit_lanes
 
     def e(i, a, b, lanes, tagged, cls="secondary", oneway=True):
         return dict(edge_id=i, source=a, target=b, cls=cls, lanes=lanes, tagged=tagged, oneway=oneway)

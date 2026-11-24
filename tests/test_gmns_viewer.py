@@ -1,12 +1,22 @@
 """Tests for duckosm.gmns_viewer — the interactive HTML viewer for a GMNS DuckDB.
 
 Builds a tiny GMNS db (+ meso), then checks the viewer payload (lane/section/connector features,
-meso presence) and the HTML rendering (standalone vs body-only). No browser needed.
+meso presence) read back from the page that the Rust viewer writes. No browser needed.
 """
+import json
+
 import duckdb
 
 from duckosm.gmns import to_gmns, to_meso
-from duckosm.gmns_viewer import build_viewer_payload, render_viewer_html, write_viewer
+from duckosm.gmns_viewer import write_viewer
+
+
+def build_viewer_payload(db, tmp_path):
+    """The payload of the page (``const D=<json>``) that write_viewer makes."""
+    out = tmp_path / "payload.html"
+    write_viewer(str(db), str(out), mode="driving")
+    html = out.read_text()
+    return json.JSONDecoder().raw_decode(html, html.index("const D=") + len("const D="))[0]
 
 A, B, AR = 6141068311830699705, 3843102655846694531, 1234567890123456789
 
@@ -48,9 +58,9 @@ def _gmns_db(tmp_path, meso=True):
 
 
 def test_payload_has_lanes_and_meso(tmp_path):
-    con = duckdb.connect(str(_gmns_db(tmp_path)), read_only=True)
-    con.execute("LOAD spatial;")
-    p = build_viewer_payload(con, mode="driving")
+    db = _gmns_db(tmp_path)
+    p = build_viewer_payload(db, tmp_path)
+    con = duckdb.connect(str(db), read_only=True)
     assert p["has_meso"] is True
     assert len(p["lanes"]) == 5                                # lane rows: A(2) + B(1) + AR(2)
     assert p["stats"]["lanes"] == con.execute("SELECT count(*) FROM gmns_driving.lane").fetchone()[0]
@@ -67,29 +77,22 @@ def test_payload_includes_micro(tmp_path):
     from duckosm.gmns import to_micro
     db = _gmns_db(tmp_path)                                     # gmns + meso
     to_micro(str(db), modes=["driving"])
-    con = duckdb.connect(str(db), read_only=True)
-    con.execute("LOAD spatial;")
-    p = build_viewer_payload(con, mode="driving")
+    p = build_viewer_payload(db, tmp_path)
     assert p["has_micro"] is True
     assert len(p["micro_cells"]) > 0 and len(p["micro_conns"]) > 0   # cells + turn connectors present
 
 
 def test_payload_without_meso(tmp_path):
-    con = duckdb.connect(str(_gmns_db(tmp_path, meso=False)), read_only=True)
-    con.execute("LOAD spatial;")
-    p = build_viewer_payload(con, mode="driving")
+    p = build_viewer_payload(_gmns_db(tmp_path, meso=False), tmp_path)
     assert p["has_meso"] is False and p["sections"] == [] and p["conns"] == []
     assert len(p["lanes"]) > 0                                 # lanes still render
 
 
-def test_render_standalone_vs_body(tmp_path):
-    con = duckdb.connect(str(_gmns_db(tmp_path)), read_only=True)
-    con.execute("LOAD spatial;")
-    p = build_viewer_payload(con, mode="driving")
-    doc = render_viewer_html(p, standalone=True, file_label="x.duckdb")
+def test_the_page_is_standalone_with_its_payload(tmp_path):
+    out = tmp_path / "viewer.html"
+    write_viewer(str(_gmns_db(tmp_path)), str(out), mode="driving")
+    doc = out.read_text()
     assert doc.lstrip().startswith("<!doctype html>") and "const D=" in doc and "/*__P__*/" not in doc
-    body = render_viewer_html(p, standalone=False, file_label="x.duckdb")
-    assert "<!doctype" not in body and body.startswith("<title>")
 
 
 def test_write_viewer_writes_file(tmp_path):

@@ -10,8 +10,8 @@ TODO (step 6, before the Python engine code goes):
   other tables with a fixes file of the page (tests/test_page_fixes.py), and ``main.visualization_metadata`` gives
   ``duckosm 0.7.0`` as the version. tests/test_engine_rust.py, test_levels_in_build.py, test_ask_schema.py,
   test_editor_changes.py and test_page_fixes.py fail with it.
-- GMNS (group C): the command ``duckosm gmns`` is Rust; the functions ``to_gmns``, ``to_meso``, ``to_micro``,
-  ``check_gmns`` and ``to_sumo`` with ``bus_edges``, ``edge_attrs`` or ``lanes`` still call the Python code.
+- ``to_sumo`` with ``bus_edges``, ``edge_attrs`` or ``lanes`` still calls the Python code (tests/test_no_python_engine.py
+  lists every module still to port).
 - The commands with no Rust port yet: ``levels``, ``clip-pbf`` (see ``duckosm/_main.py``).
 - ``to_networkx``, ``to_networkx_nodes`` and ``write_graph`` give networkx graphs: they stay Python.
 - ``to_sumo`` with a ``dict`` config or ``netconvert_bin``, ``to_railml`` with other ``rail_types``,
@@ -92,8 +92,43 @@ def to_gis(con, out, modes=None, fmt: str = "gpkg", boundary: bool = True, name:
     return _paths(r, ("path", "dir"))
 
 
+def to_gmns(source_db, out_path, modes=None, to_csv=None, lane_geometry=True, combined=False, drive_side="right",
+            pair_carriageways=True, csv_extensions=False, gtfs=None, gtfs_max_m=30.0, walk_frame=False, walk_clearance_m=0.0,
+            tile_zoom=9, lane_source="auto"):
+    """See :func:`duckosm.gmns.to_gmns` (the Rust build of ``duckosm gmns``)."""
+    modes = [modes] if isinstance(modes, str) else list(modes or [])
+    gtfs = [gtfs] if isinstance(gtfs, (str, os.PathLike)) else list(gtfs or [])
+    r = json.loads(_rust().to_gmns(_db(source_db), str(out_path), modes, None if to_csv is None else str(to_csv), lane_geometry,
+                                   combined, drive_side, pair_carriageways, csv_extensions, [str(g) for g in gtfs], float(gtfs_max_m),
+                                   walk_frame, float(walk_clearance_m), tile_zoom if tile_zoom else None, lane_source))
+    return _paths(r, ("path", "csv"))
+
+
+def to_meso(gmns_db, modes=None, trim_m=6.0):
+    """See :func:`duckosm.gmns.to_meso`."""
+    modes = [modes] if isinstance(modes, str) else list(modes or [])
+    return json.loads(_rust().to_meso(str(gmns_db), modes, float(trim_m)))
+
+
+def to_micro(gmns_db, modes=None, cell_length_m=7.0):
+    """See :func:`duckosm.gmns.to_micro`."""
+    modes = [modes] if isinstance(modes, str) else list(modes or [])
+    return json.loads(_rust().to_micro(str(gmns_db), modes, float(cell_length_m)))
+
+
+def check_gmns(path, modes=None):
+    """See :func:`duckosm.gmns_check.check_gmns`: ``[(schema, check, bad, total), ...]``."""
+    modes = [modes] if isinstance(modes, str) else list(modes or [])
+    return [tuple(r) for r in json.loads(_rust().check_gmns(str(path), modes))]
+
+
+def gmns_viewer(gmns_db, out, mode="driving"):
+    """See :func:`duckosm.gmns_viewer.write_viewer`."""
+    return _paths(json.loads(_rust().gmns_viewer(str(gmns_db), str(out), mode)), ("path",))
+
+
 def to_matsim(source, out_path, mode="driving", crs=None, gzip=True, merge=False):
-    """See :func:`duckosm.matsim.to_matsim`. ``merge=True``: driving only, one link for each chain (``driving.chains``;
+    """See :func:`duckosm.sim.to_matsim`. ``merge=True``: driving only, one link for each chain (``driving.chains``;
     a GMNS db: ``gmns_driving.chains``), its edges in the link attribute ``edge_ids``."""
     if not isinstance(mode, str):
         mode = ",".join(mode)
@@ -101,12 +136,12 @@ def to_matsim(source, out_path, mode="driving", crs=None, gzip=True, merge=False
 
 
 def to_matsim_lanes(gmns_db, out_dir=".", mode="driving", signals=True, cycle_s=90, merge=False):
-    """See :func:`duckosm.matsim_lanes.to_matsim_lanes`. ``merge=True``: the links of ``to_matsim(merge=True)``."""
+    """See :func:`duckosm.sim.to_matsim_lanes`. ``merge=True``: the links of ``to_matsim(merge=True)``."""
     return json.loads(_rust().to_matsim_lanes(_db(gmns_db), str(out_dir), mode, signals, int(cycle_s), merge))
 
 
 def to_opendrive(source, out_path, mode="driving", crs=None, junctions=False):
-    """See :func:`duckosm.opendrive.to_opendrive`."""
+    """See :func:`duckosm.hdmap.to_opendrive`."""
     return json.loads(_rust().to_opendrive(_db(source), str(out_path), mode, crs, junctions))
 
 
@@ -122,7 +157,7 @@ def to_railml(source, out_path, rail_types=_RAIL):
 
 
 def to_lanelet2(gmns_db, out_path, mode="driving", snap_m=0.01):
-    """See :func:`duckosm.lanelet2.to_lanelet2`."""
+    """See :func:`duckosm.hdmap.to_lanelet2`."""
     return json.loads(_rust().to_lanelet2(_db(gmns_db), str(out_path), mode, snap_m))
 
 
@@ -209,13 +244,13 @@ def directions(con, route, mode="driving"):
 
 
 def build_lane_graph(gmns_db, mode="driving"):
-    """See :func:`duckosm.lane_routing.build_lane_graph`."""
+    """See :func:`duckosm.hdmap.build_lane_graph`."""
     lanes, lc, turn = _rust().build_lane_graph(_db(gmns_db), mode)
     return {"lanes": lanes, "lane_change": lc, "turn": turn, "edges": lc + turn}
 
 
 def route_lanes(gmns_db, from_lane, to_lane, mode="driving"):
-    """See :func:`duckosm.lane_routing.route_lanes`."""
+    """See :func:`duckosm.hdmap.route_lanes`."""
     return json.loads(_rust().route_lanes(_db(gmns_db), str(from_lane), str(to_lane), mode))
 
 

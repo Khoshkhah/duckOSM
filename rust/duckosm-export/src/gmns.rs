@@ -2170,6 +2170,11 @@ mod tests {
 
     /// A tagged 2-lane one-way road, then two untagged pieces: both take 2 lanes, piece by piece.
     #[test]
+    fn default_lane_width_by_class() {
+        assert_eq!((default_lane_w(Some("service")), default_lane_w(Some("residential_link")), default_lane_w(Some("primary"))), (2.5, 3.0, 3.25));
+    }
+
+    #[test]
     fn lanes_inherit_piece_by_piece() {
         let got = inherit_lanes(vec![e(3, 3, 4, 1, false), e(2, 2, 3, 1, false), e(1, 1, 2, 2, true)], 6);
         assert_eq!(got, vec![(2, 2), (3, 2)]);

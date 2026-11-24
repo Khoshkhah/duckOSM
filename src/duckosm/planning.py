@@ -77,7 +77,6 @@ def to_aequilibrae(net, project_dir, mode=None):
     from pathlib import Path
 
     from duckosm.errors import require
-    from duckosm.gmns import _capacity_case
     from duckosm.network import Network, resolve
     require("aequilibrae", "duckosm.planning.to_aequilibrae")
     from aequilibrae import Project
@@ -112,3 +111,13 @@ def to_aequilibrae(net, project_dir, mode=None):
     finally:
         project.close()
     return {"path": path, "links": links, "nodes": nodes}
+
+
+_CAPACITY = {"motorway": 2000, "trunk": 1800, "primary": 1600, "secondary": 1400, "tertiary": 1200,
+             "unclassified": 1000, "residential": 800, "living_street": 300, "service": 300,
+             "road": 800}
+
+
+def _capacity_case(hw_expr):
+    whens = " ".join(f"WHEN '{k}' THEN {v}" for k, v in _CAPACITY.items())
+    return f"CASE {hw_expr} {whens} ELSE 800 END"

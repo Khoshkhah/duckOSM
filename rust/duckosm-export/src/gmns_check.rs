@@ -205,4 +205,20 @@ mod tests {
         s.sort();
         assert_eq!(s, vec![1, 2, 2]);
     }
+
+    #[test]
+    fn a_long_chain_needs_no_recursion() {
+        // ported from tests/test_gmns_values.py: 200,000 links in a row are 200,001 parts of one node each
+        let chain: Vec<(i64, i64)> = (0..200_000).map(|i| (i, i + 1)).collect();
+        let s = strong_components(&chain);
+        assert!(s.len() == 200_001 && s.iter().all(|&n| n == 1));
+    }
+
+    #[test]
+    fn a_ring_and_its_tails() {
+        // ported from tests/test_gmns_values.py: a ring of three, a tail into it, a loop on its own, a pair one way
+        let mut s = strong_components(&[(1, 2), (2, 3), (3, 1), (4, 1), (5, 5), (6, 7)]);
+        s.sort();
+        assert_eq!(s, vec![1, 1, 1, 1, 3]);
+    }
 }
