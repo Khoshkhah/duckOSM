@@ -9,6 +9,14 @@ use std::path::{Path, PathBuf};
 /// The number of the input folder's layout. SimReady stops when it does not know it.
 pub const CONTRACT: i64 = 1;
 
+/// The values of input.json that SimReady's project row needs and the databases do not hold: the ISO 3166 code of the
+/// area (`jurisdiction`) and the side of the road that traffic drives on (`driving_side`, `right` or `left`). None: null.
+#[derive(Default, Clone)]
+pub struct HdmapArea {
+    pub jurisdiction: Option<String>,
+    pub driving_side: Option<String>,
+}
+
 /// What one run did.
 pub struct HdmapSummary {
     pub input: PathBuf,
@@ -87,7 +95,10 @@ fn check(con: &Connection) -> Result<()> {
 }
 
 /// The input folder `dir` of SimReady (the design, "Step 1"). Returns the files with their SHA-256.
-pub fn write_input(db: &Path, gmns_db: &Path, dir: &Path) -> Result<Vec<(String, String)>> {
+pub fn write_input(db: &Path, gmns_db: &Path, dir: &Path, area_opts: &HdmapArea) -> Result<Vec<(String, String)>> {
+    if let Some(s) = area_opts.driving_side.as_deref().filter(|s| *s != "right" && *s != "left") {
+        return Err(format!("driving side {s:?}: give right or left"));
+    }
     if dir.exists() {
         std::fs::remove_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     }
@@ -124,6 +135,11 @@ pub fn write_input(db: &Path, gmns_db: &Path, dir: &Path) -> Result<Vec<(String,
             |r| r.get(0),
         )
         .unwrap_or_default();
+    // the time of the OSM data (the replication time of the PBF header), when the build recorded it
+    let osm_time: Option<String> = con
+        .query_row("SELECT strftime(first(osm_timestamp), '%Y-%m-%d %H:%M:%S') FROM s.main.osm_source", [], |r| r.get(0))
+        .ok()
+        .flatten();
     let version: String = con
         .query_row("SELECT first(duckosm_version) FROM g.gmns_driving.config", [], |r| r.get(0))
         .map_err(|e| e.to_string())?;
@@ -145,12 +161,17 @@ pub fn write_input(db: &Path, gmns_db: &Path, dir: &Path) -> Result<Vec<(String,
     }
     let area = db.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
     let esc = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
+    let opt = |v: &Option<String>| v.as_deref().map(|s| format!("\"{}\"", esc(s))).unwrap_or_else(|| "null".into());
     let list: Vec<String> = files.iter().map(|(n, h)| format!("    \"{}\": \"{h}\"", esc(n))).collect();
     let json = format!(
-        "{{\n  \"contract\": {CONTRACT},\n  \"area\": \"{}\",\n  \"duckosm_version\": \"{}\",\n  \"ground_id\": \"{}\",\n  \"files\": {{\n{}\n  }}\n}}\n",
+        "{{\n  \"contract\": {CONTRACT},\n  \"area\": \"{}\",\n  \"duckosm_version\": \"{}\",\n  \"ground_id\": \"{}\",\n  \
+         \"osm_timestamp\": {},\n  \"jurisdiction\": {},\n  \"driving_side\": {},\n  \"files\": {{\n{}\n  }}\n}}\n",
         esc(&area),
         esc(&version),
         esc(&ground),
+        opt(&osm_time),
+        opt(&area_opts.jurisdiction),
+        opt(&area_opts.driving_side),
         list.join(",\n")
     );
     std::fs::write(dir.join("input.json"), json).map_err(|e| e.to_string())?;
@@ -166,6 +187,7 @@ pub fn run_hdmap(
     formats: &[String],
     simready: Option<&Path>,
     keep_input: bool,
+    area_opts: &HdmapArea,
 ) -> Result<HdmapSummary> {
     for p in [db, gmns_db] {
         if !p.is_file() {
@@ -175,7 +197,7 @@ pub fn run_hdmap(
     let sim = find_simready(simready)?; // before the input is written: stop early when SimReady is not there
     let stem = out.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "hdmap".into());
     let input = out.with_file_name(format!("{stem}_input"));
-    let files = write_input(db, gmns_db, &input)?;
+    let files = write_input(db, gmns_db, &input, area_opts)?;
     let mut cmd = std::process::Command::new(&sim);
     cmd.arg("build").arg("--input").arg(&input).arg("--out").arg(out);
     if !formats.is_empty() {

@@ -678,10 +678,13 @@ required, and `DB` must have the raw OSM tables (a build from a PBF).
 | `--formats LIST` | the format files that SimReady writes too, comma-separated: `lanelet2`, `opendrive`, `sumo`, `gmns`, `matsim`, `gltf` | none |
 | `--simready PATH` | SimReady's program | `$DUCKOSM_SIM`, else `duckosm-sim` on the `PATH` |
 | `--keep-input` | keep the input folder `<out name>_input/` after the run | |
+| `--jurisdiction CODE` | the ISO 3166 code of the area, for SimReady's traffic rules | none: SimReady's default |
+| `--driving-side [right\|left]` | the side of the road that traffic drives on | from the jurisdiction |
 
 The input folder: `gmns.duckdb`, `raw_nodes.parquet`, `raw_ways.parquet`, `raw_relations.parquet`,
 `elevation_grid.parquet` (when the build has a DEM grid), `fixes.yaml` (when the build had a fixes file), and
-`input.json` (contract 1, the area, the duckOSM version, the ground id and the SHA-256 of each file). SimReady also writes
+`input.json` (contract 1, the area, the duckOSM version, the ground id, the time of the OSM data, the jurisdiction, the
+driving side and the SHA-256 of each file). SimReady also writes
 `<name>_hdmap_fixes.yaml`: the OSM fixes that it suggests, for you to review.
 
 ### `railml`

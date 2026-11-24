@@ -36,6 +36,8 @@ SimReady's program, and gives the user the HD map database and the format files.
 | `--formats LIST` | none | the format files that SimReady writes too: `lanelet2`, `opendrive`, `sumo`, `gmns`, `matsim`, `gltf` |
 | `--simready PATH` | `$DUCKOSM_SIM`, else `duckosm-sim` on the `PATH` | SimReady's program |
 | `--keep-input` | off | keep the input folder after the run |
+| `--jurisdiction CODE` | none | the ISO 3166 code of the area, for SimReady's traffic rules and design profile |
+| `--driving-side SIDE` | none | `right` or `left`; without it, SimReady takes it from the jurisdiction |
 
 When SimReady's program is not found, the command stops with: "SimReady is not installed: give `--simready` or set
 `DUCKOSM_SIM`". SimReady is a separate program, and it is private today.
@@ -59,7 +61,10 @@ The command writes one folder, `<area>_hdmap_input/`. It is the contract between
 | `contract` | `1`. SimReady stops when it does not know the number |
 | `area` | the area name |
 | `duckosm_version` | the version that wrote the input |
-| `ground_id` | the `sha256` of `main.elevation_metadata`, or empty |
+| `ground_id` | the `sha256` of `main.elevation_metadata`, or empty. Its `license` column gives the licence of the DEM |
+| `osm_timestamp` | the time of the OSM data (`main.osm_source.osm_timestamp` of the routing database, UTC, `YYYY-MM-DD HH:MM:SS`), or null |
+| `jurisdiction` | the ISO 3166 code of the area (option `--jurisdiction`), or null: SimReady's project default |
+| `driving_side` | `right` or `left` (option `--driving-side`), or null: from the jurisdiction |
 | `files` | each file with its `sha256` (DuckDB `sha256(content)` of `read_blob`) |
 
 Checks before SimReady runs. Each failed check stops the command with a message:

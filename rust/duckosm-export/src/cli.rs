@@ -273,6 +273,12 @@ enum Cmd {
         /// Keep the input folder after the run.
         #[arg(long)]
         keep_input: bool,
+        /// The ISO 3166 code of the area, for SimReady's traffic rules (default: none, SimReady's project default).
+        #[arg(long)]
+        jurisdiction: Option<String>,
+        /// The side of the road that traffic drives on: right or left (default: from the jurisdiction).
+        #[arg(long, value_parser = ["right", "left"])]
+        driving_side: Option<String>,
     },
     /// Export a Lanelet2 map (.osm) from a GMNS db: each lane is a lanelet, with left and right boundaries (the centerline
     /// offset by half the lane width) and the tags subtype, one_way and speed_limit. A lane map in the format of Autoware and
@@ -525,9 +531,10 @@ pub fn run(args: &[String]) -> Result<()> {
                 }
             }
         }
-        Cmd::Hdmap { db, gmns_db, out, formats, simready, keep_input } => {
+        Cmd::Hdmap { db, gmns_db, out, formats, simready, keep_input, jurisdiction, driving_side } => {
             let out = out.unwrap_or_else(|| db.with_file_name(format!("{}_hdmap.duckdb", stem(&db))));
-            let s = crate::hdmap_run::run_hdmap(&db, &gmns_db, &out, &formats, simready.as_deref(), keep_input)?;
+            let s = crate::hdmap_run::run_hdmap(&db, &gmns_db, &out, &formats, simready.as_deref(), keep_input,
+                &crate::hdmap_run::HdmapArea { jurisdiction, driving_side })?;
             println!("wrote {} (SimReady, from {} input files{})", s.out.display(), s.files.len(),
                      if keep_input { format!(", input kept in {}", s.input.display()) } else { String::new() });
         }

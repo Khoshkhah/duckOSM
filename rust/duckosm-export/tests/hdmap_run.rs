@@ -3,7 +3,7 @@
 #![cfg(unix)]
 
 use duckdb::Connection;
-use duckosm_export::hdmap_run::{run_hdmap, write_input};
+use duckosm_export::hdmap_run::{run_hdmap, write_input, HdmapArea};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
@@ -26,7 +26,8 @@ fn dbs(d: &Path, extra_link: bool, chains: &str) -> (PathBuf, PathBuf) {
          CREATE TABLE raw.ways(osm_id BIGINT, tags MAP(VARCHAR, VARCHAR), refs BIGINT[]);
          CREATE TABLE raw.relations(osm_id BIGINT, tags MAP(VARCHAR, VARCHAR));
          CREATE TABLE main.elevation_grid(x DOUBLE, y DOUBLE, z DOUBLE); INSERT INTO main.elevation_grid VALUES (7.4, 43.7, 12.5);
-         CREATE TABLE main.fixes(yaml VARCHAR, path VARCHAR, sha256 VARCHAR); INSERT INTO main.fixes VALUES ('ways: []', 'f.yaml', 'x');",
+         CREATE TABLE main.fixes(yaml VARCHAR, path VARCHAR, sha256 VARCHAR); INSERT INTO main.fixes VALUES ('ways: []', 'f.yaml', 'x');
+         CREATE TABLE main.osm_source(osm_timestamp TIMESTAMP); INSERT INTO main.osm_source VALUES ('2026-10-14 10:05:32');",
     )
     .unwrap();
     let g = Connection::open(&gmns).unwrap();
@@ -62,7 +63,7 @@ fn writes_the_input_and_runs_simready() {
     let d = dir("ok");
     let (db, gmns) = dbs(&d, false, "[1], [2]");
     let (sim, out) = (fake_sim(&d), d.join("area_hdmap.duckdb"));
-    let s = run_hdmap(&db, &gmns, &out, &["lanelet2".into(), "opendrive".into()], Some(&sim), true).unwrap();
+    let s = run_hdmap(&db, &gmns, &out, &["lanelet2".into(), "opendrive".into()], Some(&sim), true, &HdmapArea { jurisdiction: Some("MC".into()), driving_side: None }).unwrap();
     assert_eq!(std::fs::read_to_string(&out).unwrap(), "hdmap\n");
     let names: Vec<&str> = s.files.iter().map(|(n, _)| n.as_str()).collect();
     assert_eq!(
@@ -70,7 +71,8 @@ fn writes_the_input_and_runs_simready() {
         ["elevation_grid.parquet", "fixes.yaml", "gmns.duckdb", "raw_nodes.parquet", "raw_relations.parquet", "raw_ways.parquet"]
     );
     let json = std::fs::read_to_string(s.input.join("input.json")).unwrap();
-    for want in ["\"contract\": 1", "\"area\": \"area\"", "\"duckosm_version\": \"duckosm 0.8.0\"", "\"ground_id\": \"ground1\"", "\"gmns.duckdb\": \""] {
+    for want in ["\"contract\": 1", "\"area\": \"area\"", "\"duckosm_version\": \"duckosm 0.8.0\"", "\"ground_id\": \"ground1\"", "\"osm_timestamp\": \"2026-10-14 10:05:32\"",
+                 "\"jurisdiction\": \"MC\"", "\"driving_side\": null", "\"gmns.duckdb\": \""] {
         assert!(json.contains(want), "{want} not in {json}");
     }
     assert_eq!(std::fs::read_to_string(s.input.join("fixes.yaml")).unwrap(), "ways: []");
@@ -82,7 +84,7 @@ fn writes_the_input_and_runs_simready() {
 fn the_input_folder_goes_away_after_the_run() {
     let d = dir("clean");
     let (db, gmns) = dbs(&d, false, "[1, 2]");
-    let s = run_hdmap(&db, &gmns, &d.join("area_hdmap.duckdb"), &[], Some(&fake_sim(&d)), false).unwrap();
+    let s = run_hdmap(&db, &gmns, &d.join("area_hdmap.duckdb"), &[], Some(&fake_sim(&d)), false, &HdmapArea::default()).unwrap();
     assert!(!s.input.exists());
 }
 
@@ -90,7 +92,7 @@ fn the_input_folder_goes_away_after_the_run() {
 fn stops_without_simready() {
     let d = dir("nosim");
     let (db, gmns) = dbs(&d, false, "[1], [2]");
-    let e = run_hdmap(&db, &gmns, &d.join("o.duckdb"), &[], Some(&d.join("missing")), false).err().unwrap();
+    let e = run_hdmap(&db, &gmns, &d.join("o.duckdb"), &[], Some(&d.join("missing")), false, &HdmapArea::default()).err().unwrap();
     assert!(e.starts_with("SimReady is not installed"), "{e}");
     assert!(!d.join("o_input").exists(), "no input is written when SimReady is not there");
 }
@@ -99,7 +101,7 @@ fn stops_without_simready() {
 fn stops_on_a_gmns_database_of_another_area() {
     let d = dir("other");
     let (db, gmns) = dbs(&d, true, "[1], [2], [3]");
-    let e = write_input(&db, &gmns, &d.join("in")).err().unwrap();
+    let e = write_input(&db, &gmns, &d.join("in"), &HdmapArea::default()).err().unwrap();
     assert!(e.contains("not of this routing database"), "{e}");
 }
 
@@ -107,8 +109,8 @@ fn stops_on_a_gmns_database_of_another_area() {
 fn stops_when_a_link_is_in_no_chain_or_in_two() {
     let d = dir("chains");
     let (db, gmns) = dbs(&d, false, "[1]");
-    assert!(write_input(&db, &gmns, &d.join("in")).err().unwrap().contains("in no chain or in more than one"));
+    assert!(write_input(&db, &gmns, &d.join("in"), &HdmapArea::default()).err().unwrap().contains("in no chain or in more than one"));
     let d = dir("chains2");
     let (db, gmns) = dbs(&d, false, "[1, 2], [2]");
-    assert!(write_input(&db, &gmns, &d.join("in")).err().unwrap().contains("in no chain or in more than one"));
+    assert!(write_input(&db, &gmns, &d.join("in"), &HdmapArea::default()).err().unwrap().contains("in no chain or in more than one"));
 }
