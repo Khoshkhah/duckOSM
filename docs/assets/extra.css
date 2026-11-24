@@ -136,6 +136,10 @@
   border: 0; border-radius: 4px; background: var(--dk-yellow); color: var(--dk-ink);
   display: inline-flex; align-items: center; gap: 0.45em; box-shadow: 0 1px 3px rgba(0,0,0,.2); }
 .dk-fullscreen:hover { filter: brightness(0.9); }
+/* a diagram in full screen: a window over the page; the wheel zooms and a drag moves it (fullscreen.js) */
+.dk-diagram-pop { position: fixed; inset: 0; z-index: 1000; background: var(--md-default-bg-color); }
+.dk-diagram-pop .dk-diagram-svg { position: absolute; inset: 3rem 0 0; cursor: grab; }
+.dk-diagram-pop .dk-diagram-close { position: absolute; top: 0.6rem; right: 0.8rem; z-index: 1; }
 
 /* The home page: the row of buttons under the title, and the figures with captions (as rustgis.app). */
 .hero-actions p { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; }
