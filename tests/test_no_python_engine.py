@@ -22,17 +22,17 @@ THIN = {
 }
 
 LEFT = {
-    "_gis_py.py", "_levels.py", "_routing_py.py", "analysis.py", "cli.py",
-    "directions.py", "edge_id.py", "edit.py", "elevation.py",
+    "_levels.py", "analysis.py", "cli.py",
+    "edge_id.py", "edit.py", "elevation.py",
     "features/builder.py", "features/check.py", "features/geometry.py", "features/layers.py", "features/ocean.py",
     "fixes.py", "gis_debug.py", "gmns_map.py",
     "importer.py", "importer_snippet.py",
     "levels_edit.py",
-    "planning.py", "point_routing.py", "processors/__init__.py", "processors/base.py",
+    "planning.py", "processors/__init__.py", "processors/base.py",
     "processors/boundary_cells.py", "processors/cost.py", "processors/dismount.py", "processors/duckdb_clipper.py", "processors/edge_graph.py",
     "processors/functional_type.py", "processors/global_junctions.py", "processors/graph_builder.py", "processors/graph_simplifier.py", "processors/h3_indexer.py",
     "processors/lane_profile.py", "processors/osm_overrides.py", "processors/path_connector.py", "processors/restrictions.py", "processors/road_filter.py",
-    "processors/separate_sidewalks.py", "processors/speed.py", "query.py", "railml.py", "report.py",
+    "processors/separate_sidewalks.py", "processors/speed.py", "query.py", "report.py",
     "route_map.py", "rust_engine.py", "utils/__init__.py",
     "utils/h3_calc.py", "validate.py", "viz.py",
 }

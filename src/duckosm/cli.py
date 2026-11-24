@@ -601,7 +601,7 @@ def export_graph(db, mode, out, graph_kind, fmt, weight, geometry, uses):
     """
     import duckdb
 
-    from duckosm._routing_py import write_graph
+    from duckosm._api import write_graph
 
     logging.basicConfig(level=logging.INFO, format='%(message)s', force=True)
     con = duckdb.connect(db, read_only=True)
@@ -641,7 +641,7 @@ def export_gis(db, modes, fmt, out, boundary, name):
     """
     import duckdb
 
-    from duckosm._gis_py import to_gis
+    from duckosm._api import to_gis
 
     logging.basicConfig(level=logging.INFO, format='%(message)s', force=True)
     con = duckdb.connect(db, read_only=True)
@@ -940,7 +940,7 @@ def railml(db, out):
     """
     logging.basicConfig(level=logging.INFO, format='%(message)s', force=True)
 
-    from duckosm.railml import to_railml
+    from duckosm._api import to_railml
 
     if out is None:
         out = f"{Path(db).stem}.railml.xml"

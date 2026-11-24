@@ -17,9 +17,8 @@ import urllib.parse
 import urllib.request
 
 from duckosm._api import route_multimodal  # noqa: F401 -- the names of this module
-# the old names of duckosm.routing (the Python code): they stay. Router is the Python Router (it has .graph); the Rust
-# one is duckosm.Router.
-from duckosm._routing_py import Router, node_branches, node_out_degree, to_networkx, to_networkx_nodes, write_graph  # noqa: F401
+# the old names of duckosm.routing: they stay, on the Rust code
+from duckosm._api import Router, to_networkx, to_networkx_nodes, write_graph  # noqa: F401
 from duckosm.errors import DuckOSMError, require
 from duckosm.network import Network, resolve
 
@@ -272,12 +271,11 @@ def _own_weight(db, mode, weight, ids, missing="time") -> dict:
 
 # ---- routes ----------------------------------------------------------------------------------------------------------
 
-def route(net, a, b, mode=None, weight="time", graph=None, missing="time"):
+def route(net, a, b, mode=None, weight="time", missing="time"):
     """The fastest route (``weight="length"``: the shortest; a column or a Series: the cheapest in your cost, see the
     module text) from ``a`` to ``b``, as a :class:`Route`, or None when no route connects them. ``a`` and ``b``: two edge ids, two ``(lon, lat)`` points (then :func:`route_points`: each point
     joins its nearest road; ``length_m`` and ``time_s`` then include the distance and the walking time from each point
-    to its road, ``access_m`` and ``access_s`` of ``start`` and ``end``) or place names (:func:`geocode`). ``graph``: a
-    networkx graph of :func:`duckosm.ml.to_networkx` (the Python code).
+    to its road, ``access_m`` and ``access_s`` of ``start`` and ``end``) or place names (:func:`geocode`).
 
     >>> duckosm.routing.route(net.driving, (7.4155, 43.7285), (7.4335, 43.7468))
     >>> duckosm.routing.route(net.walking, "Boulevard Albert 1er", "Avenue de la Costa")
@@ -290,10 +288,8 @@ def route(net, a, b, mode=None, weight="time", graph=None, missing="time"):
     if _is_point(a) or _is_point(b):
         a, b = _edge_ids(db, mode, [a, b])
     if _is_own(weight):
-        if graph is not None:
-            raise DuckOSMError("graph= routes on time or length only; your own weight routes in Rust (leave out graph=)")
         return _routes_of(db, mode, _router(db, mode, weight, missing).paths([(int(a), int(b))]), weight, missing)[0]
-    return _route(_api.route(db, a, b, mode=mode, weight=weight, graph=graph), db, mode, weight)
+    return _route(_api.route(db, a, b, mode=mode, weight=weight), db, mode, weight)
 
 
 def route_points(net, a, b, mode=None, weight="time", radius_m=50.0, access_kmh=4.5, missing="time"):

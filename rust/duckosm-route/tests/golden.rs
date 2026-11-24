@@ -54,7 +54,7 @@ fn routes_and_graphml_equal_duckosm() {
     let mut streamed = Vec::new();
     duckosm_route::graphml::write_node_graph(&con, "driving", true, &mut streamed).unwrap();
     assert_eq!(md5(std::str::from_utf8(&streamed).unwrap()), "77fefab017a85c5cbc85320f422920a8", "the node graph, streamed");
-    let edge = duckosm_route::graphml::edge_graph(&con, "driving", "time", &[]).unwrap().write();
+    let edge = duckosm_route::graphml::edge_graph(&con, "driving", "time", &[], true).unwrap().write();
     assert_eq!(md5(&edge), "19781276d6fde55c062f42306b6912dd", "the edge graph");
     let _ = std::fs::remove_dir_all(&out);
 }

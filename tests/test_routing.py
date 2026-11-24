@@ -232,8 +232,6 @@ def test_route_unknown_edge_raises():
 
 
 def test_router_builds_once_and_reuses_graph():
-    r = Router(_route_db())
-    g = r.graph
+    r = Router(_route_db())                          # the graph is built once, in Rust
     assert r.route(1, 3)["edges"] == [1, 2, 3]
     assert r.route(2, 3)["edges"] == [2, 3]
-    assert r.graph is g                              # graph built once, not rebuilt per query

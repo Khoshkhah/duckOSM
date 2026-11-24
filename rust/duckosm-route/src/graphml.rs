@@ -660,8 +660,9 @@ pub fn node_graph(con: &Connection, mode: &str, geometry: &str) -> Result<Doc> {
 }
 
 /// duckOSM `to_networkx` (with the node data): each node an `edge_id` with `name`, `highway`, `length_m`, `maxspeed_kmh`,
-/// `cost_s`, `geometry` (WKT) and with `uses` its `access`; each arc a legal turn with its `weight`.
-pub fn edge_graph(con: &Connection, mode: &str, weight: &str, uses: &[String]) -> Result<Doc> {
+/// `cost_s`, `geometry` (WKT) and with `uses` its `access`; each arc a legal turn with its `weight`. Without `node_attrs` the
+/// nodes have no data (`to_networkx(node_attrs=False)`) and the edges table needs only `edge_id`.
+pub fn edge_graph(con: &Connection, mode: &str, weight: &str, uses: &[String], node_attrs: bool) -> Result<Doc> {
     let g = crate::route::routing_graph(con, mode, weight, uses)?;
     let roads = crate::route::roads_relation(mode, uses);
     let with_access = !uses.is_empty();
@@ -671,7 +672,7 @@ pub fn edge_graph(con: &Connection, mode: &str, weight: &str, uses: &[String]) -
         "SELECT edge_id, name, highway, length_m, maxspeed_kmh, cost_s, ST_AsText(geometry) AS geometry{} FROM {roads}",
         if with_access { ", access" } else { "" }
     );
-    for r in rows(con, &sql)? {
+    for r in if node_attrs { rows(con, &sql)? } else { Vec::new() } {
         let Some(i) = int(&r[0].1).and_then(|e| g.index_of(e)) else { continue };
         let d = &mut data[i];
         let mut set = |k: &str, v: &Py| match d.iter_mut().find(|x| x.0 == k) {

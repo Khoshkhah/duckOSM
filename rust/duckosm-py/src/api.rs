@@ -109,8 +109,11 @@ fn to_opendrive(py: Python<'_>, db: PathBuf, out: PathBuf, mode: String, crs: Op
 }
 
 #[pyfunction]
-fn to_railml(py: Python<'_>, db: PathBuf, out: PathBuf) -> PyResult<String> {
-    let s = py.detach(|| duckosm_export::railml::to_railml(&db, &out)).map_err(err)?;
+#[pyo3(signature = (db, out, rail_types=None))]
+fn to_railml(py: Python<'_>, db: PathBuf, out: PathBuf, rail_types: Option<Vec<String>>) -> PyResult<String> {
+    let types: Vec<String> = rail_types.unwrap_or_else(|| duckosm_export::railml::RAIL.iter().map(|t| t.to_string()).collect());
+    let types: Vec<&str> = types.iter().map(String::as_str).collect();
+    let s = py.detach(|| duckosm_export::railml::to_railml_types(&db, &out, &types)).map_err(err)?;
     Ok(text(&json!({"tracks": s.tracks, "switches": s.switches, "signals": s.signals, "ocps": s.ocps})))
 }
 
@@ -360,6 +363,27 @@ fn graph_rows(py: Python<'_>, db: PathBuf, mode: String, weight: String)
         turns))
 }
 
+/// The networkx graph of `mode` as a file (duckosm_route::graphml, as `duckosm export-graph`): `kind` `node` (the junction
+/// MultiDiGraph) or `edge` (the turn DiGraph), `fmt` `graphml` or `gpickle`. Without `node_attrs` the turn graph has no node
+/// attributes. Gives the bytes and the numbers of nodes and edges.
+#[pyfunction]
+#[pyo3(signature = (db, mode, kind, fmt, weight, geometry, uses=None, node_attrs=true))]
+#[allow(clippy::too_many_arguments)]
+fn graph_bytes(py: Python<'_>, db: PathBuf, mode: String, kind: String, fmt: String, weight: String, geometry: String,
+               uses: Option<String>, node_attrs: bool) -> PyResult<(Vec<u8>, usize, usize)> {
+    py.detach(|| -> Result<_, String> {
+        let uses = duckosm_route::route::check_uses(uses.as_deref())?;
+        let con = duckosm_route::route::open(&db)?;
+        let doc = if kind == "node" {
+            duckosm_route::graphml::node_graph(&con, &mode, &geometry)?
+        } else {
+            duckosm_route::graphml::edge_graph(&con, &mode, &weight, &uses, node_attrs)?
+        };
+        let bytes = if fmt == "gpickle" { doc.pickle(kind == "node") } else { doc.write().into_bytes() };
+        Ok((bytes, doc.nodes.len(), doc.edges.len()))
+    }).map_err(err)
+}
+
 /// `to_gmns`: the GMNS db `out` from the duckOSM db `source` (duckosm_export::gmns::to_gmns_with, as `duckosm gmns`).
 #[pyfunction]
 #[pyo3(signature = (source, out, modes, to_csv, lane_geometry, combined, drive_side, pair_carriageways, csv_extensions, gtfs, gtfs_max_m, walk_frame, walk_clearance_m, tile_zoom, lane_source))]
@@ -484,6 +508,7 @@ pub fn add(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(route_multimodal, m)?)?;
     m.add_function(wrap_pyfunction!(route_points, m)?)?;
     m.add_function(wrap_pyfunction!(graph_rows, m)?)?;
+    m.add_function(wrap_pyfunction!(graph_bytes, m)?)?;
     m.add_function(wrap_pyfunction!(route_multimodal_points, m)?)?;
     m.add_function(wrap_pyfunction!(directions, m)?)?;
     m.add_function(wrap_pyfunction!(build_lane_graph, m)?)?;

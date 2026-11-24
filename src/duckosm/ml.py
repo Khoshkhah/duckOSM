@@ -27,7 +27,7 @@ def to_networkx(net, mode=None, weight="time", **kwargs):
 
     >>> g = duckosm.ml.to_networkx(net.driving)"""
     require("networkx", "duckosm.ml.to_networkx")
-    from duckosm._routing_py import to_networkx as python
+    from duckosm._api import to_networkx as python
     db, mode = resolve(net, mode)
     return _with_connection(db, lambda con: python(con, mode=mode, weight=weight, **kwargs))
 
@@ -37,7 +37,7 @@ def to_networkx_nodes(net, mode=None, **kwargs):
 
     >>> g = duckosm.ml.to_networkx_nodes(net.driving)"""
     require("networkx", "duckosm.ml.to_networkx_nodes")
-    from duckosm._routing_py import to_networkx_nodes as python
+    from duckosm._api import to_networkx_nodes as python
     db, mode = resolve(net, mode)
     return _with_connection(db, lambda con: python(con, mode=mode, **kwargs))
 

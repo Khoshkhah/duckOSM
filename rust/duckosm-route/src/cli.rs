@@ -405,7 +405,7 @@ pub fn run(args: &[String]) -> Result<()> {
                 );
                 d
             } else {
-                let d = crate::graphml::edge_graph(&con, &mode, &weight, &uses)?;
+                let d = crate::graphml::edge_graph(&con, &mode, &weight, &uses, true)?;
                 eprintln!(
                     "routing graph[{mode}]: {} edges, {} arcs, weight={weight}, +node attrs",
                     duckosm_tools::info::thousands(d.nodes.len() as i64),
