@@ -39,7 +39,8 @@ use GDAL ([File formats](../reference/elevation-sources.md#file-formats)). The f
 `--product`, `--vertical-datum` and `--license` are necessary. For a test file or a surface model, give `--not-reference`.
 
 `main.elevation_metadata.sha256` is the ground id: the SHA-256 of the file, the same value as `sha256sum my_dtm.tif`.
-It is NULL when the command reads the file in parts (Copernicus, or a `--dem` address).
+It is NULL when the command reads the file in parts (Copernicus, or a `--dem` address). For `--source eudtm`, it is
+the SHA-256 of the EU-DTM file after the conversion from EPSG:3035 to EPSG:4326.
 
 | Where | How |
 |---|---|

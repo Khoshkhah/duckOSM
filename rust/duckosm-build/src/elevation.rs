@@ -95,13 +95,11 @@ impl Dem {
         let (w, h) = d.dimensions().map_err(err)?;
         let scale = d.get_tag_f64_vec(Tag::ModelPixelScaleTag).map_err(err)?;
         let tie = d.get_tag_f64_vec(Tag::ModelTiepointTag).map_err(err)?;
-        let keys = d
-            .find_tag_unsigned_vec::<u16>(Tag::GeoKeyDirectoryTag)
-            .map_err(err)?
-            .unwrap_or_default();
-        let key = |k: u16| keys[4..].chunks(4).find(|e| e[0] == k).map(|e| e[3]);
-        if keys.len() < 4 || key(2048) != Some(4326) {
-            return Err(format!("{name}: the DEM must be in EPSG:4326"));
+        let keys = geo_keys(&mut d, name)?;
+        let key = |k: u16| keys.get(4..).unwrap_or_default().chunks(4).find(|e| e[0] == k).map(|e| e[3]);
+        if key(2048) != Some(4326) {
+            let got = epsg_of(&keys).map_or("a CRS with no EPSG code".to_string(), |c| format!("EPSG:{c}"));
+            return Err(format!("{name}: the DEM must be in EPSG:4326, not {got} (gdalwarp -t_srs EPSG:4326 -ot Float32 converts it)"));
         }
         let nodata = match d.find_tag(Tag::GdalNodata).map_err(err)? {
             Some(_) => d
@@ -197,6 +195,23 @@ impl Dem {
         let (c, r) = (col.checked_sub(self.win.0)?, row.checked_sub(self.win.1)?);
         (c < self.win.2 && r < self.win.3).then(|| self.data[r * self.win.2 + c])
     }
+}
+
+/// The GeoKeyDirectory of a GeoTIFF: the header (4 numbers), then 4 numbers for each key.
+fn geo_keys<R: Read + Seek>(d: &mut Decoder<R>, name: &str) -> Result<Vec<u16>, String> {
+    Ok(d.find_tag_unsigned_vec::<u16>(Tag::GeoKeyDirectoryTag).map_err(|e| format!("{name}: {e}"))?.unwrap_or_default())
+}
+
+/// The EPSG code of the CRS in a GeoKeyDirectory: the geographic CRS (key 2048) or the projected CRS (key 3072).
+fn epsg_of(keys: &[u16]) -> Option<u32> {
+    let key = |k: u16| keys.get(4..)?.chunks(4).find(|e| e[0] == k).map(|e| u32::from(e[3]));
+    key(3072).or(key(2048)).filter(|&c| c != 0 && c != 32767)
+}
+
+/// The EPSG code of the CRS of a GeoTIFF (None: no code), for example EPSG:3035 for the EU-DTM of OpenTopography.
+pub fn geotiff_epsg<R: Read + Seek>(r: R, name: &str) -> Result<Option<u32>, String> {
+    let mut d = Decoder::new(r).map_err(|e| format!("{name}: {e}"))?;
+    Ok(epsg_of(&geo_keys(&mut d, name)?))
 }
 
 /// One pixel of the DEM: its column and row in the grid (0 at the west and the north edge), the lon and the lat of
@@ -326,6 +341,17 @@ mod tests {
         }
     }
 
+    /// EPSG:3035 against PROJ's `cs2cs` from EPSG:4258 (ETRS89, so no datum shift): the example of IOGP guidance note 7-2 (50° N 5° E),
+    /// Stockholm, Lisbon and Lapland.
+    #[test]
+    fn lambert_azimuthal_equal_area() {
+        let l = super::Laea::epsg3035();
+        for (lon, lat, ex, ey) in [(5.0, 50.0, 3_962_799.451, 2_999_718.853), (18.06, 59.33, 4_779_659.546, 4_051_511.928), (-9.0, 38.7, 2_676_732.113, 1_941_329.084), (25.0, 65.0, 5_026_876.835, 4_731_029.964)] {
+            let (x, y) = l.forward(lon, lat);
+            assert!((x - ex).abs() < 0.01 && (y - ey).abs() < 0.01, "{lon} {lat}: {x} {y}");
+        }
+    }
+
     #[test]
     fn area_dem_keeps_the_heights() {
         let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/monaco-copernicus-glo30.tif");
@@ -447,12 +473,66 @@ impl Lcc {
     }
 }
 
-/// Cut the box `bbox` (degrees) out of a large GeoTIFF in a Lambert projection (`crs`, `Lcc::epsg`), for example a cloud-optimized file that
-/// `r` reads by parts (HTTP range requests). It reads only the tiles of the box, of the first overview whose pixels give at most `max_px` pixels
+/// The Lambert azimuthal equal-area projection on an ellipsoid (EPSG method 9820, IOGP guidance note 7-2): lon/lat in degrees to x/y in metres.
+/// EPSG:3035 (ETRS89 / LAEA Europe) uses it: the EU-DTM of OpenTopography (`--source eudtm`) comes in it.
+pub struct Laea {
+    e: f64,
+    qp: f64,
+    rq: f64,
+    d: f64,
+    sin_b0: f64,
+    cos_b0: f64,
+    lon0: f64,
+    x0: f64,
+    y0: f64,
+}
+
+impl Laea {
+    /// EPSG:3035: GRS80 (within a metre of WGS 84), the origin at 52° N 10° E, false easting 4,321,000 m and false northing 3,210,000 m.
+    pub fn epsg3035() -> Laea {
+        let (a, fl) = (6_378_137.0_f64, 1.0 / 298.257_222_101_f64);
+        let e = (2.0 * fl - fl * fl).sqrt();
+        let p0 = 52f64.to_radians();
+        let qp = Laea::q(e, std::f64::consts::FRAC_PI_2);
+        let b0 = (Laea::q(e, p0) / qp).asin();
+        let rq = a * (qp / 2.0).sqrt();
+        let d = a * p0.cos() / (1.0 - e * e * p0.sin().powi(2)).sqrt() / (rq * b0.cos());
+        Laea { e, qp, rq, d, sin_b0: b0.sin(), cos_b0: b0.cos(), lon0: 10f64.to_radians(), x0: 4_321_000.0, y0: 3_210_000.0 }
+    }
+
+    fn q(e: f64, p: f64) -> f64 {
+        let s = p.sin();
+        (1.0 - e * e) * (s / (1.0 - e * e * s * s) - (1.0 / (2.0 * e)) * ((1.0 - e * s) / (1.0 + e * s)).ln())
+    }
+
+    pub fn forward(&self, lon: f64, lat: f64) -> (f64, f64) {
+        let b = (Laea::q(self.e, lat.to_radians()) / self.qp).clamp(-1.0, 1.0).asin();
+        let dl = lon.to_radians() - self.lon0;
+        let bb = self.rq * (2.0 / (1.0 + self.sin_b0 * b.sin() + self.cos_b0 * b.cos() * dl.cos())).sqrt();
+        (self.x0 + bb * self.d * b.cos() * dl.sin(), self.y0 + bb / self.d * (self.cos_b0 * b.sin() - self.sin_b0 * b.cos() * dl.cos()))
+    }
+}
+
+/// The projection of an EPSG code that the reader can reproject, lon/lat in degrees to x/y in metres: the Lambert conformal conics of
+/// [`Lcc::epsg`] and EPSG:3035 ([`Laea`]). None for another code.
+pub fn projection(code: u32) -> Option<Box<dyn Fn(f64, f64) -> (f64, f64)>> {
+    if code == 3035 {
+        let l = Laea::epsg3035();
+        return Some(Box::new(move |lon, lat| l.forward(lon, lat)));
+    }
+    let l = Lcc::epsg(code)?;
+    Some(Box::new(move |lon, lat| l.forward(lon, lat)))
+}
+
+/// Cut the box `bbox` (degrees) out of a large GeoTIFF in a projection of [`projection`] (`crs`), for example a cloud-optimized file that
+/// `r` reads by parts (HTTP range requests), or the EU-DTM of OpenTopography (EPSG:3035). It reads only the tiles of the box, of the first overview whose pixels give at most `max_px` pixels
 /// on the long side of the box, and writes `out`: EPSG:4326, 32-bit floats, the nearest pixel at each point. Gives the width, the height and
 /// the pixel size in metres.
 pub fn cut_projected<R: Read + Seek>(r: R, name: &str, crs: u32, bbox: [f64; 4], max_px: usize, out: &Path) -> Result<(usize, usize, f64), String> {
-    let lcc = Lcc::epsg(crs).ok_or_else(|| format!("{name}: EPSG:{crs} is not a projection of the catalog"))?;
+    let fwd = projection(crs).ok_or_else(|| {
+        format!("{name}: the DEM is in EPSG:{crs}, which duckOSM cannot reproject (EPSG:3035, 3979, 3301 and 2154 only); \
+                 convert it with gdalwarp -t_srs EPSG:4326 -ot Float32 and give the file to --dem")
+    })?;
     let err = |e: tiff::TiffError| format!("{name}: {e}");
     let mut d = Decoder::new(r).map_err(err)?;
     let (w0, _) = d.dimensions().map_err(err)?;
@@ -466,7 +546,7 @@ pub fn cut_projected<R: Read + Seek>(r: R, name: &str, crs: u32, bbox: [f64; 4],
     for i in 0..=32 {
         let f = i as f64 / 32.0;
         for (lon, lat) in [(bbox[0] + f * (bbox[2] - bbox[0]), bbox[1]), (bbox[0] + f * (bbox[2] - bbox[0]), bbox[3]), (bbox[0], bbox[1] + f * (bbox[3] - bbox[1])), (bbox[2], bbox[1] + f * (bbox[3] - bbox[1]))] {
-            let (x, y) = lcc.forward(lon, lat);
+            let (x, y) = fwd(lon, lat);
             (xmin, ymin, xmax, ymax) = (xmin.min(x), ymin.min(y), xmax.max(x), ymax.max(y));
         }
     }
@@ -525,11 +605,11 @@ pub fn cut_projected<R: Read + Seek>(r: R, name: &str, crs: u32, bbox: [f64; 4],
         let lat = bbox[3] - (row as f64 + 0.5) * sy + sy / 2.0;
         for col in 0..width {
             let lon = bbox[0] + (col as f64 + 0.5) * sx - sx / 2.0;
-            let (x, y) = lcc.forward(lon, lat);
+            let (x, y) = fwd(lon, lat);
             let (c, r) = (((x - ox) / res).floor() as isize - c0 as isize, ((oy - y) / res).floor() as isize - r0 as isize);
             if c >= 0 && r >= 0 && (c as usize) < ww && (r as usize) < wh {
                 let z = win[r as usize * ww + c as usize];
-                if z.is_finite() && Some(z as f64) != nodata {
+                if z.is_finite() && Some(z) != nodata.map(|n| n as f32) {
                     data[row * width + col] = z;
                 }
             }
