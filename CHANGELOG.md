@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **`duckosm elevation --source eudtm` works again.** OpenTopography sends EU-DTM in EPSG:3035, and the command stopped
+  with "the DEM must be in EPSG:4326". Now it converts the raster to EPSG:4326 with 32-bit floats (the nearest pixel at
+  each point; the Lambert azimuthal equal-area projection of EPSG:3035 is new in `duckosm_build::elevation`), then
+  samples it. `main.elevation_metadata.sha256` is the hash of the converted file. A DEM in a CRS that duckOSM cannot
+  read or convert gives an error with that CRS (for example "not EPSG:3006"), for `--source eudtm` and for `--dem`.
+
 ## 0.9.0 (2026-11-24)
 
 - **`duckosm gmns`: the lane rules by default, the whole area at once, no tiles.** Each GMNS step works in chunks (junctions,

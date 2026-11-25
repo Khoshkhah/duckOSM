@@ -29,6 +29,11 @@ Both use the EGM2008 vertical datum. The license goes in `main.elevation_metadat
 "EU-DTM via OpenTopography (see provider terms)". A **DSM** is the top surface (roofs, trees); a **DTM** is the
 bare ground ([below](#dtm-or-dsm)).
 
+OpenTopography sends EU-DTM in EPSG:3035 (ETRS89 / LAEA Europe). `eudtm` converts it to EPSG:4326 with 32-bit
+floats (the nearest pixel at each point), then samples it. `main.elevation_metadata` gives `dem_crs` EPSG:4326, and
+`sha256` is the SHA-256 of the converted file. If OpenTopography sends a CRS that duckOSM cannot convert, the error
+gives that CRS: convert the file with `gdalwarp` ([File formats](#file-formats)) and give it with `--dem`.
+
 ## Other global models
 
 To use one of these, download it, convert it ([File formats](#file-formats)), and give it with `--dem`.

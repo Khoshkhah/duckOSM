@@ -1,7 +1,7 @@
 //! The DEM reader of the elevation step against rasterio's `sample` (the reader of Python duckOSM) on a crop of
 //! the Copernicus GLO-30 tile N43 E007 over Monaco. The values are rasterio's, rounded to the cm.
 
-use duckosm_build::elevation::{round_cm, Dem};
+use duckosm_build::elevation::{cut_projected, geotiff_epsg, round_cm, Dem, Laea};
 use std::path::Path;
 
 #[test]
@@ -129,4 +129,42 @@ fn a_window_equals_the_whole_raster() {
         let cells = |d: &Dem| d.grid(b[0], b[1], b[2], b[3], 3).iter().map(|c| (c.col, c.row, c.lon, c.lat, c.z)).collect::<Vec<_>>();
         assert_eq!(cells(&part), cells(&whole));
     }
+}
+
+/// A DEM in EPSG:3035, as OpenTopography sends EU-DTM (LZW, tiles, nodata -9999.9): a 24 × 24 grid of 30 m pixels over Norrmalm, with the
+/// height `10 + 0.01 (x - 4,779,000) + 0.02 (y - 4,051,360)` (x, y in metres) and nodata in the 2 × 2 pixels of the north-west corner.
+const NORRMALM_3035: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/norrmalm-epsg3035.tif");
+
+/// The reader names the CRS that it cannot read; `cut_projected` converts the raster to EPSG:4326, and the heights stay on the plane to
+/// within one pixel of slope (the nearest pixel twice: about 30 m in x and in y, so at most 0.3 + 0.6 m).
+#[test]
+fn epsg3035_dem_is_cut_to_4326() {
+    let err = Dem::open(Path::new(NORRMALM_3035)).err().unwrap();
+    assert!(err.contains("EPSG:3035"), "{err}");
+    let f = || std::fs::File::open(NORRMALM_3035).unwrap();
+    assert_eq!(geotiff_epsg(f(), "x").unwrap(), Some(3035));
+
+    let out = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("norrmalm-4326.tif");
+    let bbox = [18.0495, 59.3285, 18.0615, 59.3360];
+    cut_projected(f(), "x", 3035, bbox, usize::MAX, &out).unwrap();
+    let dem = Dem::open(&out).unwrap();
+    let laea = Laea::epsg3035();
+    let mut n = 0;
+    for i in 0..=10 {
+        for j in 0..=10 {
+            let (lon, lat) = (18.052 + 0.0007 * i as f64, 59.3295 + 0.0005 * j as f64);
+            let (x, y) = laea.forward(lon, lat);
+            let want = 10.0 + 0.01 * (x - 4_779_000.0) + 0.02 * (y - 4_051_360.0);
+            let got = dem.sample(lon, lat).unwrap();
+            assert!((got - want).abs() < 0.9, "{lon} {lat}: {got} against {want}");
+            n += 1;
+        }
+    }
+    assert_eq!(n, 121);
+    // the nodata corner (the centre of the north-west pixel, from cs2cs) and a point outside the raster have no height
+    assert_eq!(dem.sample(18.0499206, 59.3355939), None);
+    assert_eq!(dem.sample(18.0612, 59.3290), None);
+
+    let err = cut_projected(f(), "x", 3006, bbox, usize::MAX, &out).err().unwrap();
+    assert!(err.contains("EPSG:3006") && err.contains("gdalwarp"), "{err}");
 }

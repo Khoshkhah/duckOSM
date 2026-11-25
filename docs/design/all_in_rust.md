@@ -98,7 +98,8 @@ Python output on Monaco. Checked: Monaco with a DEM file, a DEM crop with nodata
   EPSG:4326 with 32-bit float values, a file or an HTTP address. Python reads all the formats and CRSs of GDAL. A projected
   national DTM (for example EPSG:3006) needs a Rust projection first.
 - `--source copernicus` downloads each 1° tile with DuckDB's httpfs (Python reads parts of the tile over HTTP). `--source eudtm`
-  downloads the GeoTIFF of the box from OpenTopography. The AWS Terrain Tiles are not a source of the command: the ground rule
+  downloads the GeoTIFF of the box from OpenTopography. It comes in EPSG:3035, so the command converts it to EPSG:4326
+  first (`cut_projected`, with the projection `Laea`). The AWS Terrain Tiles are not a source of the command: the ground rule
   (`docs/concepts/ground-reference.md`) does not allow them as the ground.
 - The pixel of a point is found as rasterio finds it: the inverse affine transform, then floor. Before, the reader of the build
   divided by the pixel size, and one point of Tartu on a pixel edge took the next pixel.
