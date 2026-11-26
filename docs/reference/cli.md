@@ -11,10 +11,10 @@ Every `duckosm` command and its options. `duckosm <command> --help` prints the s
 | [Maps, pages and routing](#maps-and-routing) | `viz`, `levels`, `levels-edit`, `edit`, `studio`, `ask`, `bus`, `route-map`, `route`, `route-points`, `directions`, `route-multimodal`, `route-multimodal-points`, `features-check` |
 | [Exports](#exports) | `sumo`, `sumo-map`, `matsim`, `matsim-lanes`, `gmns`, `gmns-map`, `gmns-viz`, `export-gis`, `gis-debug`, `export-graph` |
 | [Experimental and lane-level](#experimental-and-lane-level) | `opendrive`, `lanelet2`, `hdmap`, `railml`, `lane-graph`, `route-lanes` |
-| [Enrich a built database](#enrich-a-built-database) | `elevation`, `admin`, `multimodal` |
+| [Enrich a built database](#enrich-a-built-database) | `elevation`, `admin`, `multimodal`, `overture-buildings` |
 
 `DB` is a built duckOSM database; `GMNS_DB` is a database written by [`gmns`](#gmns). Commands that
-enrich a database (`elevation`, `admin`, `multimodal`) change it in place.
+enrich a database (`elevation`, `admin`, `multimodal`, `overture-buildings`) change it in place.
 
 ## Build and areas
 
@@ -772,6 +772,39 @@ duckosm admin --pbf PBF --db DB [--gpkg GPKG]
 | `--pbf PBF` | the OSM PBF | required |
 | `--db DB` | the database to add the table to | required |
 | `--gpkg GPKG` | GeoPackage of the boundaries: reused if it exists, else written here (the next run does not read the PBF again) | none: the boundaries are read from the PBF, and no file is written |
+
+### `overture-buildings`
+
+Adds the building attributes of [Overture Maps](https://overturemaps.org) to `features.buildings`. Overture keeps the
+OSM id of each building that comes from OSM, and adds attributes from other datasets to it, mostly the heights of
+Microsoft ML Buildings. The command joins on that id. It adds a tag only where the OSM building does not have it, so
+OSM always wins. It does not add the buildings that are only in Overture. It changes the database in place. Run it
+again to get a new release: a tag that is already there stays.
+
+```text
+duckosm overture-buildings [OPTIONS] DB
+```
+
+| Option | Does | Default |
+|---|---|---|
+| `--release TEXT` | the Overture release, for example `2026-11-18.0` | the newest |
+
+`DB` must have `features.buildings` (a build with `--features`). The command reads Overture from its public S3
+bucket, so it needs the internet.
+
+| Overture column | OSM tag |
+|---|---|
+| `height`, `min_height` | `height`, `min_height` |
+| `num_floors`, `num_floors_underground`, `min_floor` | `building:levels`, `building:levels:underground`, `building:min_level` |
+| `roof_shape`, `roof_height`, `roof_direction`, `roof_orientation` | `roof:shape`, `roof:height`, `roof:direction`, `roof:orientation` |
+| `roof_material`, `roof_color` | `roof:material`, `roof:colour` |
+| `facade_color`, `facade_material` | `building:colour`, `building:material` |
+| `names.primary` | the `name` column, where it is empty |
+| `id` | `overture:id` |
+| the dataset of a height that is not from OSM | `source:height`, for example `Microsoft ML Buildings` |
+
+The command prints the number of new tags for each key. The values are rounded to 1 cm. Python:
+`duckosm.overture_buildings(db, release=None)`.
 
 ### `multimodal`
 
