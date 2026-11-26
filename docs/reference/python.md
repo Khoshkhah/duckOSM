@@ -254,4 +254,5 @@ The other top-level functions are on the pages of their modules: [routing](sdk/r
 `to_railml(source, out_path)` (experimental), `to_elevation(db, dem=None, ...)` ([Add elevation](../guides/elevation.md))
 and `overture_buildings(db, release=None, overwrite=False)` ([`duckosm overture-buildings`](cli.md#overture-buildings))
 stay in the core. `overture_buildings` gives a dict: `release`, `buildings`, `matched`, `updated`, `tags` (the number
-of new tags of each key), `changed` and `changed_tags` (the replaced values, with `overwrite=True`).
+of new tags of each key), `changed` and `changed_tags` (the replaced values, with `overwrite=True`), and `parts`:
+the same counts for `features.building_parts`, with `rows` (None when the table is not there).

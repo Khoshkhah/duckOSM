@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **The building parts in 3D: links, heights in metres and walls.** `features.buildings` and `features.building_parts`
+  get `height_m`, `min_height_m` and `height_source` (the `height` tag, else `building:levels` × 3.2 m, else 6 m).
+  A part gets `building_id` (from a `type=building` relation, else the building that holds it) and `support` (`ground`,
+  `stacked` or `floating`), and a building gets `has_parts`. With `--building-faces`, the new table
+  `main.building_part_faces` has each wall of each part with the height range that is open to the air, and `position`
+  `outline` or `step`. `duckosm overture-buildings` also reads the Overture type `building_part`. Norrmalm: 74 parts,
+  11 stacked, 3 floating, 569 walls. `docs/design/building_parts.md`.
+
 - **`features.building_parts`: the parts of the buildings.** A new base-map layer with each OSM `building:part`, and its
   own `height`, `min_height` or `building:levels` (OSM Simple 3D Buildings). A 3D map draws the parts in place of the
   building that they cover, as OpenFreeMap does. Before, the build left the parts out, and a building with parts of 8 to

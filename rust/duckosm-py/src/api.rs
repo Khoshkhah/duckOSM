@@ -130,8 +130,11 @@ fn to_elevation(
 fn overture_buildings(py: Python<'_>, db: PathBuf, release: Option<String>, overwrite: bool) -> PyResult<String> {
     let s = py.detach(|| duckosm_tools::buildings::overture_buildings(&db, release.as_deref(), overwrite)).map_err(err)?;
     let map = |v: Vec<(String, i64)>| -> serde_json::Map<String, J> { v.into_iter().map(|(k, n)| (k, json!(n))).collect() };
+    let parts = s.parts.map(|p| {
+        json!({"rows": p.rows, "matched": p.matched, "updated": p.updated, "tags": map(p.tags), "changed": p.changed, "changed_tags": map(p.changed_tags)})
+    });
     Ok(text(&json!({"release": s.release, "buildings": s.buildings, "matched": s.matched, "updated": s.updated, "tags": map(s.tags),
-                    "changed": s.changed, "changed_tags": map(s.changed_tags)})))
+                    "changed": s.changed, "changed_tags": map(s.changed_tags), "parts": parts})))
 }
 
 impl Router {

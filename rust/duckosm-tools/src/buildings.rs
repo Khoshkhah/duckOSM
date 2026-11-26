@@ -26,9 +26,12 @@ pub struct Summary {
     pub changed: i64,
     /// The number of changed values of each key, the most frequent first (only with `overwrite`).
     pub changed_tags: Vec<(String, i64)>,
+    /// The same counts for `features.building_parts` (the Overture type `building_part`), when the table is there.
+    pub parts: Option<Counts>,
 }
 
-/// Add the attributes of Overture Maps (release `release`, or the newest one) to `features.buildings` of `db`, in place.
+/// Add the attributes of Overture Maps (release `release`, or the newest one) to `features.buildings` and
+/// `features.building_parts` of `db`, in place, then make the heights in metres and the walls of the parts again.
 /// `overwrite`: an Overture value also replaces a different OSM value; the OSM value stays in `osm:<key>`.
 pub fn overture_buildings(db: &Path, release: Option<&str>, overwrite: bool) -> Result<Summary> {
     // an in-memory connection with the file attached: the S3 settings stay out of the file
@@ -51,7 +54,7 @@ pub fn overture_buildings(db: &Path, release: Option<&str>, overwrite: bool) -> 
         )
         .map_err(e)?;
     let (Some(x0), Some(y0), Some(x1), Some(y1)) = (x0, y0, x1, y1) else {
-        return Ok(Summary { release: release.unwrap_or_default().into(), buildings, matched: 0, updated: 0, tags: vec![], changed: 0, changed_tags: vec![] });
+        return Ok(Summary { release: release.unwrap_or_default().into(), buildings, matched: 0, updated: 0, tags: vec![], changed: 0, changed_tags: vec![], parts: None });
     };
     let release = match release {
         Some(r) => r.to_string(),
@@ -63,10 +66,36 @@ pub fn overture_buildings(db: &Path, release: Option<&str>, overwrite: bool) -> 
             )
             .map_err(|e| format!("Overture Maps not reachable: {e}"))?,
     };
+    let b = apply(&con, &release, (x0, y0, x1, y1), "building", "buildings", overwrite)?;
+    let has_parts: i64 = con
+        .query_row("SELECT count(*) FROM duckdb_tables() WHERE database_name = 'd' AND schema_name = 'features' AND table_name = 'building_parts'", [], |r| r.get(0))
+        .map_err(e)?;
+    let parts = if has_parts > 0 { Some(apply(&con, &release, (x0, y0, x1, y1), "building_part", "building_parts", overwrite)?) } else { None };
+    con.execute_batch("CHECKPOINT d; DETACH d").map_err(e)?;
+    drop(con);
+    // the heights in metres and the walls of the parts read the tags: make them again
+    duckosm_duckdb::building_parts::refresh(db)?;
+    Ok(Summary { release, buildings, matched: b.matched, updated: b.updated, tags: b.tags, changed: b.changed, changed_tags: b.changed_tags, parts })
+}
+
+/// The counts of one Overture type (`building` or `building_part`) in its table.
+pub struct Counts {
+    /// The rows of the table.
+    pub rows: i64,
+    pub matched: i64,
+    pub updated: i64,
+    pub tags: Vec<(String, i64)>,
+    pub changed: i64,
+    pub changed_tags: Vec<(String, i64)>,
+}
+
+/// Add the Overture type `otype` to the table `features.<table>` of the attached database `d`.
+fn apply(con: &duckdb::Connection, release: &str, (x0, y0, x1, y1): (f64, f64, f64, f64), otype: &str, table: &str, overwrite: bool) -> Result<Counts> {
+    let e = |e: duckdb::Error| e.to_string();
     // the new tags of each OSM building, in the OSM keys; numbers rounded to cm, with no ".0"
     let num = |c: &str| format!("regexp_replace(round({c}, 2)::VARCHAR, '\\.0$', '')");
     con.execute_batch(&format!(
-        "CREATE TEMP TABLE ov AS
+        "CREATE OR REPLACE TEMP TABLE ov AS
          SELECT CASE left(rid, 1) WHEN 'w' THEN 'way' WHEN 'r' THEN 'relation' ELSE 'node' END AS osm_type,
                 regexp_extract(rid, '^[nwr](\\d+)', 1)::BIGINT AS osm_id, name,
                 map_from_entries(list_filter([
@@ -80,31 +109,31 @@ pub fn overture_buildings(db: &Path, release: Option<&str>, overwrite: bool) -> 
          FROM (SELECT *, names.primary AS name,
                       list_filter(sources, s -> s.dataset = 'OpenStreetMap')[1].record_id AS rid,
                       list_filter(sources, s -> s.property = '/properties/height')[1].dataset AS height_source
-               FROM read_parquet('{OVERTURE}/{release}/theme=buildings/type=building/*')
+               FROM read_parquet('{OVERTURE}/{release}/theme=buildings/type={otype}/*')
                WHERE bbox.xmin < {x1} AND bbox.xmax > {x0} AND bbox.ymin < {y1} AND bbox.ymax > {y0})
          WHERE rid IS NOT NULL;
-         CREATE TEMP TABLE added AS
+         CREATE OR REPLACE TEMP TABLE added AS
          SELECT b.osm_type, b.osm_id,
                 list_filter(map_keys(ov.tags), k -> NOT list_contains(map_keys(b.tags), k)) AS keys,
                 list_filter(map_keys(ov.tags), k -> k != 'overture:id' AND b.tags[k] != ov.tags[k]) AS diff
-         FROM d.features.buildings b JOIN ov USING (osm_type, osm_id);
+         FROM d.features.{table} b JOIN ov USING (osm_type, osm_id);
          {update}",
         update = if overwrite {
             // Overture wins; a replaced OSM value stays in osm:<key>
-            "UPDATE d.features.buildings b
+            format!("UPDATE d.features.{table} b
              SET tags = map_concat(b.tags, map_from_entries(list_transform(a.diff, k -> ('osm:' || k, b.tags[k]))), ov.tags),
                  name = coalesce(ov.name, b.name)
-             FROM ov JOIN added a USING (osm_type, osm_id) WHERE b.osm_type = ov.osm_type AND b.osm_id = ov.osm_id;"
+             FROM ov JOIN added a USING (osm_type, osm_id) WHERE b.osm_type = ov.osm_type AND b.osm_id = ov.osm_id;")
         } else {
-            "UPDATE d.features.buildings b SET tags = map_concat(ov.tags, b.tags), name = coalesce(b.name, ov.name)
-             FROM ov WHERE b.osm_type = ov.osm_type AND b.osm_id = ov.osm_id;"
+            format!("UPDATE d.features.{table} b SET tags = map_concat(ov.tags, b.tags), name = coalesce(b.name, ov.name)
+             FROM ov WHERE b.osm_type = ov.osm_type AND b.osm_id = ov.osm_id;")
         },
         h = num("height"),
         mh = num("min_height"),
         rh = num("roof_height"),
         rd = num("roof_direction"),
     ))
-    .map_err(|e| format!("Overture Maps {release}: {e}"))?;
+    .map_err(|e| format!("Overture Maps {release} ({otype}): {e}"))?;
     let (matched, updated): (i64, i64) = con
         .query_row("SELECT count(*), count(*) FILTER (WHERE len(list_filter(keys, k -> k != 'overture:id')) > 0) FROM added", [], |r| Ok((r.get(0)?, r.get(1)?)))
         .map_err(e)?;
@@ -118,6 +147,6 @@ pub fn overture_buildings(db: &Path, release: Option<&str>, overwrite: bool) -> 
         let mut st = con.prepare("SELECT k, count(*) AS n FROM (SELECT unnest(diff) AS k FROM added) GROUP BY k ORDER BY n DESC, k").map_err(e)?;
         changed_tags = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).map_err(e)?.collect::<std::result::Result<_, _>>().map_err(e)?;
     }
-    con.execute_batch("CHECKPOINT d").map_err(e)?;
-    Ok(Summary { release, buildings, matched, updated, tags, changed, changed_tags })
+    let rows: i64 = con.query_row(&format!("SELECT count(*) FROM d.features.{table}"), [], |r| r.get(0)).map_err(e)?;
+    Ok(Counts { rows, matched, updated, tags, changed, changed_tags })
 }

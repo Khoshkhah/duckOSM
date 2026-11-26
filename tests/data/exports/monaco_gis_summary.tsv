@@ -6,8 +6,8 @@ geoparquet	nodes_driving	node_id:BIGINT,geom:GEOMETRY('OGC:CRS84')	1769	d1c1dcd1
 geoparquet	edges_walking	edge_id:BIGINT,edge_ref:VARCHAR,source:BIGINT,target:BIGINT,osm_id:BIGINT,highway:VARCHAR,name:VARCHAR,oneway:BOOLEAN,lanes:INTEGER,surface:VARCHAR,access:VARCHAR,junction:VARCHAR,layer:VARCHAR,bridge:VARCHAR,tunnel:VARCHAR,service:VARCHAR,geometry:GEOMETRY('OGC:CRS84'),is_reverse:BOOLEAN,length_m:DOUBLE,maxspeed_kmh:FLOAT,cost_s:DOUBLE,walk_type:VARCHAR,casing_start:BIGINT,casing_level:BIGINT,casing_end:BIGINT,fill_level:BIGINT,head_start_m:DOUBLE,head_end_m:DOUBLE,cap_start:VARCHAR,cap_end:VARCHAR	11934	b4b6d7d00da5949e0d034b4f388e22dc
 geoparquet	nodes_walking	node_id:BIGINT,geom:GEOMETRY('OGC:CRS84')	4579	246fd16ead10238ca9555ac2c2d6f0b8
 geoparquet	boundary	name:VARCHAR,osm_id:INTEGER,admin_level:INTEGER,area_km2:DOUBLE,source:VARCHAR,geom:GEOMETRY('OGC:CRS84')	1	eb23f5619af0b1446c84b86a338ca2de
-geoparquet	features_building_parts	osm_id:BIGINT,osm_type:VARCHAR,kind:VARCHAR,name:VARCHAR,geom:GEOMETRY('OGC:CRS84')	61	c39c0f29d84a47fc247e1fcb0e415ada
-geoparquet	features_buildings	osm_id:BIGINT,osm_type:VARCHAR,kind:VARCHAR,name:VARCHAR,geom:GEOMETRY('OGC:CRS84')	1262	b7a0585031acbac19e65ca190c933317
+geoparquet	features_building_parts	osm_id:BIGINT,osm_type:VARCHAR,kind:VARCHAR,name:VARCHAR,geom:GEOMETRY('OGC:CRS84'),height_m:DOUBLE,min_height_m:DOUBLE,height_source:VARCHAR,building_id:BIGINT,building_type:VARCHAR,support:VARCHAR	61	35073a7476d65eccbb20510150d948ae
+geoparquet	features_buildings	osm_id:BIGINT,osm_type:VARCHAR,kind:VARCHAR,name:VARCHAR,geom:GEOMETRY('OGC:CRS84'),height_m:DOUBLE,min_height_m:DOUBLE,height_source:VARCHAR,has_parts:BOOLEAN	1262	791038871d3e88ee28e25c44ca4700ab
 geoparquet	features_land	osm_id:BIGINT,osm_type:VARCHAR,kind:VARCHAR,name:VARCHAR,geom:GEOMETRY('OGC:CRS84')	241	6a31863b1a026958d649c6a408034aaa
 geoparquet	features_paved	osm_id:BIGINT,osm_type:VARCHAR,kind:VARCHAR,name:VARCHAR,geom:GEOMETRY('OGC:CRS84')	83	adbd7380c82de20ba88b6f3203437dd1
 geoparquet	features_place_labels	osm_id:BIGINT,osm_type:VARCHAR,kind:VARCHAR,name:VARCHAR,geom:GEOMETRY('OGC:CRS84')	10	53cec93d067417a468e108f6f4c8100a

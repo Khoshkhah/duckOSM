@@ -36,6 +36,7 @@ export const TABLE_NOTES = {
   level_caps: "The line ends that were set in the level editor, for each road.",
   building_faces: "One row is one wall of a building, with its type (front, back, side, party, court) and the type that the build found (computed_type).",
   building_entrances: "The entrances and doors of the buildings.",
+  building_part_faces: "One row is one wall of a building part, with its heights in metres (z_bottom_m, z_top_m) and the range that is open to the air (open_from_m, open_to_m; NULL: inside the building). position is outline or step.",
   building_info: "One row for each building: floors, height, roof shape, colors and materials, read from its OSM tags.",
   buildings: "The buildings of the base map, with their OSM tags.",
   building_parts: "The parts of the buildings (building:part), each with its own height or levels. A 3D map draws the parts in place of the building that they cover.",
