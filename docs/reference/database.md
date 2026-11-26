@@ -338,6 +338,7 @@ Always empty: the virtual nodes are in `nodes`, with `node_id < 0`.
 | [`admin_boundaries`](#admin_boundaries) | after `duckosm admin`; in a `duckosm extract` result, only the sub-areas inside the area |
 | [`building_faces`](#building_faces) | a build from a PBF, with `options.building_faces` (off) and a boundary |
 | [`building_entrances`](#building_entrances) | a build from a PBF, with `options.building_faces` (off) and a boundary |
+| [`building_part_faces`](#building_part_faces) | a build with `features.building_parts` and `options.building_faces` (off) |
 | [`fixes`](#fixes) | a build with a fixes file (`--fixes`, `osm_overrides`) |
 | [`osm_source`](#osm_source) | a build from a PBF |
 
@@ -560,10 +561,46 @@ change goes through walking.
 | `cost_s` | DOUBLE | seconds the change costs: the flat cost (`--transfer-cost`, `multimodal.transfer_s`), unless `multimodal.transfer_costs` sets that pair |
 | `kind` | VARCHAR | `park`, `retrieve` (driving), `bike_park`, `bike_unpark` (cycling) |
 
+### `building_part_faces`
+
+One row for each wall of a [building part](#building-heights): a segment of the outer ring of a part. With the heights
+of the part, it gives the height range of the wall that is open to the air. Another part of the same building on the
+same segment (the same two points) closes the wall up to its top, and the parts on top of that part close it more.
+Design: `docs/design/building_parts.md`.
+
+| Column | Type | Description |
+|---|---|---|
+| `part_id`, `part_type` | BIGINT, VARCHAR | the OSM id and type of the part |
+| `building_id`, `building_type` | BIGINT, VARCHAR | its building (`features.building_parts.building_id`) |
+| `polygon`, `face_index` | INTEGER | the polygon of the part (1, or the number in a multipolygon), and the place of the wall in its ring |
+| `from_node`, `to_node` | BIGINT | the OSM nodes at the ends of the wall, for a part that is a way; NULL for a relation |
+| `z_bottom_m`, `z_top_m` | DOUBLE | the base and the top of the part, in metres above the ground |
+| `open_from_m`, `open_to_m` | DOUBLE | the range of the wall that is open to the air. NULL: the wall is inside the building (the next part is as tall or taller) |
+| `position` | VARCHAR | `outline`: on the outline of the building; `step`: inside the outline, where a part rises above another part |
+| `type` | VARCHAR | for `outline`: the `face_type` of the wall of [`building_faces`](#building_faces) within 0.5 m of the middle of this wall; for `step`: `step` |
+| `length_m` | FLOAT | the length of the wall |
+| `geometry` | GEOMETRY | the wall as a LineString |
+
 ## `features` schema
 
 The base-map layers: one table per layer, all with the columns `osm_id`, `osm_type`, `kind`,
 `name`, `tags`, `geom`; `traffic` also has `bearing` (DOUBLE). Every layer: [Base-map layers](features.md).
+
+### Building heights {#building-heights}
+
+`features.buildings` and `features.building_parts` have more columns, from their tags. The build makes them, and
+`duckosm overture-buildings` makes them again after it changes the tags.
+
+| Column | Type | Table | Description |
+|---|---|---|---|
+| `height_m` | DOUBLE | both | the top, in metres: the `height` tag (`ft`, `feet` and `'` are converted), else `building:levels` × 3.2 m, else 6 m |
+| `min_height_m` | DOUBLE | both | the base, in metres: the `min_height` tag, else `building:min_level` × 3.2 m, else 0 |
+| `height_source` | VARCHAR | both | the source of `height_m`: `height`, `levels` or `default` |
+| `has_parts` | BOOLEAN | buildings | one or more parts link to the building. A 3D map draws the parts in place of the building (OSM Simple 3D Buildings) |
+| `building_id`, `building_type` | BIGINT, VARCHAR | parts | the building of the part: from an OSM relation `type=building` (roles `outline` and `part`), else the smallest building that holds a point of the part. NULL: no building |
+| `support` | VARCHAR | parts | `ground` (`min_height_m` = 0); `stacked` (other parts of the building cover at least 90 % of it and reach its base); `floating` (for example a passage over a street) |
+
+A 3D user can make a `stacked` part solid from the ground. It must keep the space under a `floating` part empty.
 
 ## `visualization` schema
 

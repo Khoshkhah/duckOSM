@@ -780,7 +780,9 @@ OSM id of each building that comes from OSM, and adds attributes from other data
 Microsoft ML Buildings. The command joins on that id. By default, it adds a tag only where the OSM building does not
 have it, so OSM wins. With `--overwrite`, an Overture value also replaces a different OSM value, and the OSM value
 stays in `osm:<key>` (for example `osm:height`). The command does not add the buildings that are only in Overture. It
-changes the database in place. A second run with the same release changes nothing.
+changes the database in place. A second run with the same release changes nothing. The command does the same for
+`features.building_parts` with the Overture type `building_part`. Then it makes the [building heights](database.md#building-heights)
+and `main.building_part_faces` again from the new tags.
 
 ```text
 duckosm overture-buildings [OPTIONS] DB

@@ -280,6 +280,18 @@ pub fn run(args: &[String]) -> Result<()> {
                     println!("  {k}: {n}");
                 }
             }
+            if let Some(p) = &s.parts {
+                println!("building parts: {} of {} matched, {} got new tags", p.matched, p.rows, p.updated);
+                for (k, n) in &p.tags {
+                    println!("  {k}: {n}");
+                }
+                if overwrite {
+                    println!("{} parts got Overture values in place of OSM values", p.changed);
+                    for (k, n) in &p.changed_tags {
+                        println!("  {k}: {n}");
+                    }
+                }
+            }
         }
         Cmd::Admin { pbf, db, gpkg } => crate::admin::admin(&pbf, &db, gpkg.as_deref())?,
         Cmd::Bus { db } => {
