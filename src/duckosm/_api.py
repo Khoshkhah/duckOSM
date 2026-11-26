@@ -134,11 +134,13 @@ def to_elevation(db, dem=None, source="auto", modes=None, nodata_fill=0.0, suffi
                                            suffix, product, vertical_datum, license, reference))
 
 
-def overture_buildings(db, release=None):
+def overture_buildings(db, release=None, overwrite=False):
     """Add the building attributes of Overture Maps (heights, levels, roofs) to ``features.buildings`` of ``db``, in
-    place. Adds a tag only where the OSM building does not have it. Gives a dict: ``release``, ``buildings``,
-    ``matched``, ``updated`` and ``tags`` (the number of new tags of each key). See ``duckosm overture-buildings``."""
-    return json.loads(_rust().overture_buildings(_db(db), release))
+    place. Adds a tag only where the OSM building does not have it. ``overwrite=True``: an Overture value also replaces
+    a different OSM value, and the OSM value stays in ``osm:<key>``. Gives a dict: ``release``, ``buildings``,
+    ``matched``, ``updated``, ``tags`` (the number of new tags of each key), ``changed`` and ``changed_tags`` (with
+    ``overwrite``). See ``duckosm overture-buildings``."""
+    return json.loads(_rust().overture_buildings(_db(db), release, overwrite))
 
 
 # ---- routing -----------------------------------------------------------------------------------------------------

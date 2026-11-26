@@ -2,8 +2,8 @@
 //!
 //! Overture keeps the OSM id of each building that comes from OSM (`sources[].record_id`, for example `w123@4`), and adds
 //! attributes from other datasets to it (mostly the heights of Microsoft ML Buildings). The command joins on that id and
-//! adds a tag only where the OSM building does not have it: OSM always wins. Buildings that are only in Overture are
-//! not added.
+//! adds a tag only where the OSM building does not have it: OSM wins. With `overwrite`, the Overture value replaces a
+//! different OSM value, and the OSM value stays in `osm:<key>`. Buildings that are only in Overture are not added.
 
 use crate::Result;
 use std::path::Path;
@@ -22,10 +22,15 @@ pub struct Summary {
     pub updated: i64,
     /// The number of new tags of each key, the most frequent first.
     pub tags: Vec<(String, i64)>,
+    /// The buildings that got one or more Overture values in place of OSM values (only with `overwrite`).
+    pub changed: i64,
+    /// The number of changed values of each key, the most frequent first (only with `overwrite`).
+    pub changed_tags: Vec<(String, i64)>,
 }
 
 /// Add the attributes of Overture Maps (release `release`, or the newest one) to `features.buildings` of `db`, in place.
-pub fn overture_buildings(db: &Path, release: Option<&str>) -> Result<Summary> {
+/// `overwrite`: an Overture value also replaces a different OSM value; the OSM value stays in `osm:<key>`.
+pub fn overture_buildings(db: &Path, release: Option<&str>, overwrite: bool) -> Result<Summary> {
     // an in-memory connection with the file attached: the S3 settings stay out of the file
     let con = duckdb::Connection::open_in_memory().map_err(|e| e.to_string())?;
     let e = |e: duckdb::Error| e.to_string();
@@ -46,7 +51,7 @@ pub fn overture_buildings(db: &Path, release: Option<&str>) -> Result<Summary> {
         )
         .map_err(e)?;
     let (Some(x0), Some(y0), Some(x1), Some(y1)) = (x0, y0, x1, y1) else {
-        return Ok(Summary { release: release.unwrap_or_default().into(), buildings, matched: 0, updated: 0, tags: vec![] });
+        return Ok(Summary { release: release.unwrap_or_default().into(), buildings, matched: 0, updated: 0, tags: vec![], changed: 0, changed_tags: vec![] });
     };
     let release = match release {
         Some(r) => r.to_string(),
@@ -79,10 +84,21 @@ pub fn overture_buildings(db: &Path, release: Option<&str>) -> Result<Summary> {
                WHERE bbox.xmin < {x1} AND bbox.xmax > {x0} AND bbox.ymin < {y1} AND bbox.ymax > {y0})
          WHERE rid IS NOT NULL;
          CREATE TEMP TABLE added AS
-         SELECT b.osm_type, b.osm_id, list_filter(map_keys(ov.tags), k -> NOT list_contains(map_keys(b.tags), k)) AS keys
+         SELECT b.osm_type, b.osm_id,
+                list_filter(map_keys(ov.tags), k -> NOT list_contains(map_keys(b.tags), k)) AS keys,
+                list_filter(map_keys(ov.tags), k -> k != 'overture:id' AND b.tags[k] != ov.tags[k]) AS diff
          FROM d.features.buildings b JOIN ov USING (osm_type, osm_id);
-         UPDATE d.features.buildings b SET tags = map_concat(ov.tags, b.tags), name = coalesce(b.name, ov.name)
-         FROM ov WHERE b.osm_type = ov.osm_type AND b.osm_id = ov.osm_id;",
+         {update}",
+        update = if overwrite {
+            // Overture wins; a replaced OSM value stays in osm:<key>
+            "UPDATE d.features.buildings b
+             SET tags = map_concat(b.tags, map_from_entries(list_transform(a.diff, k -> ('osm:' || k, b.tags[k]))), ov.tags),
+                 name = coalesce(ov.name, b.name)
+             FROM ov JOIN added a USING (osm_type, osm_id) WHERE b.osm_type = ov.osm_type AND b.osm_id = ov.osm_id;"
+        } else {
+            "UPDATE d.features.buildings b SET tags = map_concat(ov.tags, b.tags), name = coalesce(b.name, ov.name)
+             FROM ov WHERE b.osm_type = ov.osm_type AND b.osm_id = ov.osm_id;"
+        },
         h = num("height"),
         mh = num("min_height"),
         rh = num("roof_height"),
@@ -96,6 +112,12 @@ pub fn overture_buildings(db: &Path, release: Option<&str>) -> Result<Summary> {
         .prepare("SELECT k, count(*) AS n FROM (SELECT unnest(keys) AS k FROM added) WHERE k != 'overture:id' GROUP BY k ORDER BY n DESC, k")
         .map_err(e)?;
     let tags = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).map_err(e)?.collect::<std::result::Result<_, _>>().map_err(e)?;
+    let (mut changed, mut changed_tags) = (0, vec![]);
+    if overwrite {
+        changed = con.query_row("SELECT count(*) FROM added WHERE len(diff) > 0", [], |r| r.get(0)).map_err(e)?;
+        let mut st = con.prepare("SELECT k, count(*) AS n FROM (SELECT unnest(diff) AS k FROM added) GROUP BY k ORDER BY n DESC, k").map_err(e)?;
+        changed_tags = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).map_err(e)?.collect::<std::result::Result<_, _>>().map_err(e)?;
+    }
     con.execute_batch("CHECKPOINT d").map_err(e)?;
-    Ok(Summary { release, buildings, matched, updated, tags })
+    Ok(Summary { release, buildings, matched, updated, tags, changed, changed_tags })
 }

@@ -165,7 +165,8 @@ enum Cmd {
     },
     /// Add the building attributes of Overture Maps (heights, levels, roofs, colours) to features.buildings, in place.
     /// Joins on the OSM id that Overture keeps; adds a tag only where the OSM building does not have it. Also adds
-    /// overture:id and, for a height from another dataset, source:height. Needs features.buildings and the internet.
+    /// overture:id and, for a height from another dataset, source:height. --overwrite: an Overture value also replaces
+    /// a different OSM value (the OSM value stays in osm:<key>). Needs features.buildings and the internet.
     #[command(name = "overture-buildings")]
     OvertureBuildings {
         /// The .duckdb file of a build with --features.
@@ -173,6 +174,9 @@ enum Cmd {
         /// The Overture release, for example 2026-11-18.0 (default: the newest).
         #[arg(long)]
         release: Option<String>,
+        /// An Overture value also replaces a different OSM value; the OSM value stays in osm:<key>.
+        #[arg(long)]
+        overwrite: bool,
     },
     /// Write the fully commented config template to PATH (default: duckosm.yaml). Edit it, then run
     /// `duckosm build --config PATH`.
@@ -263,12 +267,18 @@ pub fn run(args: &[String]) -> Result<()> {
                 r.column
             );
         }
-        Cmd::OvertureBuildings { db, release } => {
+        Cmd::OvertureBuildings { db, release, overwrite } => {
             need_db(&db)?;
-            let s = crate::buildings::overture_buildings(&db, release.as_deref())?;
+            let s = crate::buildings::overture_buildings(&db, release.as_deref(), overwrite)?;
             println!("Overture Maps {}: {} of {} buildings matched, {} got new tags", s.release, s.matched, s.buildings, s.updated);
             for (k, n) in &s.tags {
                 println!("  {k}: {n}");
+            }
+            if overwrite {
+                println!("{} buildings got Overture values in place of OSM values (the OSM values are in osm:<key>)", s.changed);
+                for (k, n) in &s.changed_tags {
+                    println!("  {k}: {n}");
+                }
             }
         }
         Cmd::Admin { pbf, db, gpkg } => crate::admin::admin(&pbf, &db, gpkg.as_deref())?,
