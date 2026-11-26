@@ -95,7 +95,7 @@ def test_paved_and_the_other_new_rules(osm):
 
 def test_features_check_lists_the_misses_and_the_reasons(osm):
     box(osm, 1, 0.000, 0.000, {"place": "square"})                                  # in paved: not listed
-    box(osm, 2, 0.002, 0.000, {"building:part": "yes", "height": "20"})              # left out on purpose: a part of a building
+    box(osm, 2, 0.002, 0.000, {"building:part": "yes", "height": "20"})              # in building_parts: not listed
     box(osm, 3, 0.004, 0.000, {"amenity": "fountain"})                               # left out on purpose: street furniture
     box(osm, 4, 0.006, 0.000, {"landuse": "salt_pond"})                              # a possible miss: no layer takes it, no reason
     box(osm, 5, 0.008, 0.000, {})                                                    # a ring of a relation that a table holds: not listed
@@ -108,7 +108,8 @@ def test_features_check_lists_the_misses_and_the_reasons(osm):
     line = lambda group: next(ln for ln in lines if group in ln)
     assert not any("place=square" in ln or "landuse=grass" in ln for ln in lines)         # held by a table
     assert "NOT EXPLAINED" in line("landuse=salt_pond")                                   # the one possible miss
-    assert "building" in line("building:part=yes") and "furniture" in line("amenity=fountain")
+    assert not any("building:part=yes" in ln for ln in lines)
+    assert "furniture" in line("amenity=fountain")
     assert "zone" in line("place=neighbourhood")
     assert "1 group(s) of polygons in no features table, with no reason" in out.output
     # the possible misses come first

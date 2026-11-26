@@ -1,4 +1,4 @@
--- duckOSM 0.6.1 (2044c4f): the base-map layers (features.*) from raw.*, recorded from FeaturesBuilder by
+-- duckOSM 0.9.0 (b19fa6a): the base-map layers (features.*) from raw.*, recorded from FeaturesBuilder by
 -- tools/make_features_sql.py. Do not change it by hand. It needs DuckDB's spatial extension.
 
 CREATE SCHEMA IF NOT EXISTS raw;
@@ -8,7 +8,7 @@ CREATE OR REPLACE TABLE raw.relations AS
     SELECT osm_id, tags, refs, ref_roles, ref_types::ENUM('node', 'way', 'relation')[] AS ref_types
     FROM read_parquet('raw_relations.parquet');
 
-INSTALL spatial; LOAD spatial;
+INSTALL spatial; LOAD spatial; SET geometry_always_xy = false;
 
 CREATE SCHEMA IF NOT EXISTS geom;
 
@@ -154,6 +154,27 @@ CREATE OR REPLACE TABLE features.buildings AS
                r.geom                            AS geom
         FROM geom.rel_area r
         WHERE r.geom IS NOT NULL AND NOT ST_IsEmpty(r.geom) AND (map_extract(tags,'building')[1] IS NOT NULL AND map_extract(tags,'building')[1] <> 'no');
+
+CREATE SCHEMA IF NOT EXISTS features;
+
+CREATE OR REPLACE TABLE features.building_parts AS
+        SELECT w.osm_id                          AS osm_id,
+               'way'                             AS osm_type,
+               map_extract(tags,'building:part')[1]                        AS kind,
+               map_extract(w.tags, 'name')[1]    AS name,
+               w.tags                            AS tags,
+               ST_MakePolygon(w.geom)            AS geom
+        FROM geom.way_line w
+        WHERE w.is_closed AND ST_NPoints(w.geom) >= 4 AND (map_extract(tags,'building:part')[1] IS NOT NULL AND map_extract(tags,'building:part')[1] <> 'no')
+        UNION ALL BY NAME
+        SELECT r.osm_id                          AS osm_id,
+               'relation'                        AS osm_type,
+               map_extract(tags,'building:part')[1]                        AS kind,
+               map_extract(r.tags, 'name')[1]    AS name,
+               r.tags                            AS tags,
+               r.geom                            AS geom
+        FROM geom.rel_area r
+        WHERE r.geom IS NOT NULL AND NOT ST_IsEmpty(r.geom) AND (map_extract(tags,'building:part')[1] IS NOT NULL AND map_extract(tags,'building:part')[1] <> 'no');
 
 CREATE SCHEMA IF NOT EXISTS features;
 

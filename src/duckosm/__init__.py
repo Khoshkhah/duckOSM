@@ -13,7 +13,7 @@ module for each group of users: ``analysis``, ``gis``, ``routing``, ``sim``, ``p
 >>> net.map()
 """
 
-__version__ = "0.8.0"
+__version__ = "0.9.0"
 
 _NAMES = {
     "DuckOSM": "duckosm._api", "Config": "duckosm.config",
@@ -34,6 +34,7 @@ _NAMES = {
     "Network": "duckosm.network", "ModeView": "duckosm.network", "open": "duckosm.network", "network": "duckosm.network",
     "DuckOSMError": "duckosm.errors",
     "build_lane_graph": "duckosm._api", "route_lanes": "duckosm._api", "to_elevation": "duckosm._api",
+    "overture_buildings": "duckosm._api",
 }
 # the modules of the SDK, one for each group of users: imported when first used (duckosm.sim, duckosm.routing ...)
 _MODULES = ("analysis", "gis", "routing", "sim", "planning", "mobility", "hdmap", "ml", "fixes")

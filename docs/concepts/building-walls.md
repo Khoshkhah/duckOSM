@@ -27,6 +27,14 @@ The walls need an OSM file and a boundary.
 | `party` | purple | is shared with another building (the same two nodes) |
 | `court` | cyan | is a wall of a courtyard (an inner ring of a multipolygon) |
 
+## The walls of the building parts
+
+A building can have parts (`building:part`) with different heights. The build then also writes
+[`main.building_part_faces`](../reference/database.md#building_part_faces): one row for each wall of each part, with
+the height range that is open to the air. A wall on the outline of the building takes the type of the building's wall
+there. A wall inside the outline, where a tall part rises above a lower part, has the type `step`. It is open from the
+top of the lower part to the top of the tall part.
+
 ## What the build uses
 
 - The buildings: ways and multipolygon relations with a `building` tag.

@@ -11,6 +11,38 @@
   Rust); `duckosm.routing.node_branches` and `node_out_degree` are removed; an error of the Rust code is a
   `RuntimeError`, except a bad edge id or point of a route (`ValueError`). New: `duckosm get --point LON,LAT --dist-m M`,
   and `duckosm commands`. `docs/design/all_in_rust.md`.
+
+- **The building parts in 3D: links, heights in metres and walls.** `features.buildings` and `features.building_parts`
+  get `height_m`, `min_height_m` and `height_source` (the `height` tag, else `building:levels` × 3.2 m, else 6 m).
+  A part gets `building_id` (from a `type=building` relation, else the building that holds it) and `support` (`ground`,
+  `stacked` or `floating`), and a building gets `has_parts`. With `--building-faces`, the new table
+  `main.building_part_faces` has each wall of each part with the height range that is open to the air, and `position`
+  `outline` or `step`. `duckosm overture-buildings` also reads the Overture type `building_part`. Norrmalm: 74 parts,
+  11 stacked, 3 floating, 569 walls. `docs/design/building_parts.md`.
+
+- **`features.building_parts`: the parts of the buildings.** A new base-map layer with each OSM `building:part`, and its
+  own `height`, `min_height` or `building:levels` (OSM Simple 3D Buildings). A 3D map draws the parts in place of the
+  building that they cover, as OpenFreeMap does. Before, the build left the parts out, and a building with parts of 8 to
+  16 levels (Norrmalm, way 440810380) was one block of 11 levels. Monaco: 61 parts; Norrmalm: 74. Ask knows the table.
+  `features-check` no longer lists the parts as left out.
+
+- **`duckosm overture-buildings --overwrite`: Overture values replace OSM values.** An Overture value also replaces a
+  different OSM value, and the OSM value stays in `osm:<key>`. Python: `overture_buildings(db, overwrite=True)`.
+  Norrmalm: 75 buildings changed, most of them colours in a new format (`white` to `#FFFFFF`).
+
+- **`duckosm overture-buildings DB`: the building attributes of Overture Maps.** It joins `features.buildings` to
+  Overture on the OSM id that Overture keeps, and adds the tags that OSM does not have: `height`, `building:levels`,
+  `roof:*`, colours and materials, with `overture:id` and `source:height`. OSM always wins. Python:
+  `duckosm.overture_buildings(db)`. Norrmalm (782 buildings): 781 matched, 12 new heights (5 before, 17 after).
+
+- **`duckosm elevation --source eudtm` works again.** OpenTopography sends EU-DTM in EPSG:3035, and the command stopped
+  with "the DEM must be in EPSG:4326". Now it converts the raster to EPSG:4326 with 32-bit floats (the nearest pixel at
+  each point; the Lambert azimuthal equal-area projection of EPSG:3035 is new in `duckosm_build::elevation`), then
+  samples it. `main.elevation_metadata.sha256` is the hash of the converted file. A DEM in a CRS that duckOSM cannot
+  read or convert gives an error with that CRS (for example "not EPSG:3006"), for `--source eudtm` and for `--dem`.
+
+## 0.9.0 (2026-11-24)
+
 - **`duckosm gmns`: the lane rules by default, the whole area at once, no tiles.** Each GMNS step works in chunks (junctions,
   road runs, lanes), so the memory stays about the same on a large area (docs/design/gmns_streaming.md). Kentucky (driving,
   Mac mini): 2.5 min and at most 2.2 GB of Rust memory in a step, with DuckDB at 2 GB. `--lane-source rules` is the default;
@@ -32,7 +64,7 @@
   `docs/reference/database.md`: `SELECT comment FROM duckdb_columns()`. The Rust build reads the page at compile time;
   the sdist includes it. The step writes a comment only for a table or a column that is in the file. Monaco, three
   modes: 247 of 428 columns have a comment, before 0.
-- **`duckosm gmns` by tiles.** An area with nodes in two or more map tiles (zoom 9, the tiles of `cut` and the build by
+- **`duckosm gmns` by tiles** (replaced in this release: GMNS now works in chunks with no tiles, the first entry). An area with nodes in two or more map tiles (zoom 9, the tiles of `cut` and the build by
   tiles; `--tile-zoom`, 0: the whole area) is made one tile at a time: a tile source with a band of 2 km, the GMNS steps
   without a change, then the rows that the tile owns. Kentucky (driving, with netconvert): 4.9 GB, before 25.9 GB.
   Without netconvert, each column but `lane.geom` is equal to the whole export; the lane lines can differ (the whole

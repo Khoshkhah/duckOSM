@@ -4,13 +4,14 @@
 //!
 //! The DEM is a GeoTIFF in EPSG:4326 with 32-bit float values (the reader of the build, `duckosm_build::elevation::Dem`),
 //! a local file or an HTTP address. `--source` downloads a global model with DuckDB's httpfs: the 1° tiles of Copernicus
-//! GLO-30 (AWS, no account), or EU-DTM from OpenTopography (`OPENTOPOGRAPHY_API_KEY`). The ground rule
+//! GLO-30 (AWS, no account), or EU-DTM from OpenTopography (`OPENTOPOGRAPHY_API_KEY`), which comes in EPSG:3035 and is
+//! converted to EPSG:4326 first. The ground rule
 //! (docs/concepts/ground-reference.md): a `--dem` file in `ele` is the area's reference ground, so it needs its product,
 //! vertical datum and license, or `--not-reference`.
 
 use crate::Result;
 use duckdb::Connection;
-use duckosm_build::elevation::{round_cm, sha256_file, Dem};
+use duckosm_build::elevation::{cut_projected, geotiff_epsg, round_cm, sha256_file, Dem};
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -294,13 +295,33 @@ fn make_sampler(con: &Connection, o: &Options, provider: Option<&Provider>, node
         );
         eprintln!("  fetching EU_DTM from OpenTopography for bbox {w:.2},{s:.2},{e:.2},{n:.2} …");
         let bytes = download(con, &url).map_err(|e| e.replace(&key, "***"))?;
-        let hash: String = con.query_row("SELECT sha256(?::BLOB)", [&bytes], |r| r.get(0)).map_err(|e| e.to_string())?;
-        let d = Dem::window(std::io::Cursor::new(bytes), "EU_DTM", window, 1)
-            .map_err(|e| format!("eudtm: OpenTopography returned no usable raster for this bbox (check API key / coverage) — {e}"))?;
+        let (d, hash) = eudtm_dem(bytes, window)?;
         return Ok((Sampler::File(d), meta(Some(hash))));
     }
     // the streamed tiles: no whole file is read, so there is no ground id
     Ok((Sampler::Tiles { bbox: window, got: (0, 0) }, meta(None)))
+}
+
+/// The DEM of the GeoTIFF that OpenTopography sends for EU-DTM, and the SHA-256 of the file that the step samples (the ground id).
+/// OpenTopography sends EU-DTM in its own CRS, EPSG:3035, so the step cuts the box `window` (degrees) out of it as an EPSG:4326 GeoTIFF of
+/// 32-bit floats, the nearest pixel at each point (`cut_projected`); the hash is that of the converted file. A raster in EPSG:4326 is used as it is.
+fn eudtm_dem(bytes: Vec<u8>, window: [f64; 4]) -> Result<(Dem, String)> {
+    let crs = geotiff_epsg(std::io::Cursor::new(&bytes), "EU_DTM")
+        .map_err(|e| format!("eudtm: OpenTopography returned no usable raster for this bbox (check API key / coverage) — {e}"))?;
+    let file = std::env::temp_dir().join(format!("duckosm-eudtm-{}.tif", std::process::id()));
+    let used = (|| {
+        match crs {
+            Some(4326) => std::fs::write(&file, &bytes).map_err(|e| format!("{}: {e}", file.display()))?,
+            Some(c) => {
+                let (w, h, res) = cut_projected(std::io::Cursor::new(&bytes), "EU_DTM", c, window, usize::MAX, &file).map_err(|e| format!("eudtm: {e}"))?;
+                eprintln!("  EU_DTM came in EPSG:{c}: converted to EPSG:4326, {w} × {h} pixels of about {res} m");
+            }
+            None => return Err("eudtm: OpenTopography returned a raster with no EPSG code; convert it with gdalwarp -t_srs EPSG:4326 -ot Float32 and give the file to --dem".to_string()),
+        }
+        Ok((Dem::open_window(&file, window, 1)?, sha256_file(&file)?))
+    })();
+    std::fs::remove_file(&file).ok();
+    used
 }
 
 /// A size of DuckDB's settings (`12.7 GiB`, `500.0 MiB`) in MiB.
@@ -562,6 +583,8 @@ fn write_metadata(con: &Connection, m: &Meta, fill: f64, n_nodes: usize, n_nodat
 #[cfg(test)]
 mod tests {
     use super::*;
+    use duckosm_build::elevation::sha256_file;
+    use std::path::Path;
 
     #[test]
     fn the_copernicus_tile_names() {
@@ -582,5 +605,25 @@ mod tests {
         assert_eq!(resolve_provider("auto", monaco).unwrap().name, "eudtm");
         assert_eq!(resolve_provider("auto", vancouver).unwrap().name, "copernicus");
         std::env::remove_var("OPENTOPOGRAPHY_API_KEY");
+    }
+
+    const DATA: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../duckosm-build/tests/data");
+
+    /// `--source eudtm` with no network: the bytes of an EPSG:3035 GeoTIFF (as OpenTopography sends EU-DTM) give a DEM in EPSG:4326 and the
+    /// hash of the converted file; the bytes of an EPSG:4326 GeoTIFF give the hash of those bytes; an answer that is not a GeoTIFF names the key.
+    #[test]
+    fn eudtm_dem_converts_epsg3035() {
+        let bytes = std::fs::read(Path::new(DATA).join("norrmalm-epsg3035.tif")).unwrap();
+        let (dem, hash) = eudtm_dem(bytes.clone(), [18.0495, 59.3285, 18.0615, 59.3360]).unwrap();
+        assert!(hash.len() == 64 && hash.chars().all(|c| c.is_ascii_hexdigit()));
+        assert!((dem.sample(18.0552141, 59.3321626).unwrap() - 20.8).abs() < 0.9); // x 4,779,360, y 4,051,720 (cs2cs): 10 + 3.6 + 7.2
+        assert_eq!(eudtm_dem(bytes, [18.0495, 59.3285, 18.0615, 59.3360]).unwrap().1, hash); // the same file each time
+
+        let monaco = Path::new(DATA).join("monaco-copernicus-glo30.tif");
+        let (_, hash) = eudtm_dem(std::fs::read(&monaco).unwrap(), [7.41, 43.725, 7.43, 43.745]).unwrap();
+        assert_eq!(hash, sha256_file(&monaco).unwrap());
+
+        let err = eudtm_dem(b"Invalid API key".to_vec(), [0.0; 4]).err().unwrap();
+        assert!(err.contains("check API key"), "{err}");
     }
 }

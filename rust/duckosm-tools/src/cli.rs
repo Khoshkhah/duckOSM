@@ -5,7 +5,7 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 /// The command names of this crate: `duckosm <name> ...` goes to [`run`].
-pub const COMMANDS: [&str; 9] = ["info", "way", "init-config", "boundary", "extract", "admin", "elevation", "bus", "multimodal"];
+pub const COMMANDS: [&str; 10] = ["info", "way", "init-config", "boundary", "extract", "admin", "elevation", "bus", "multimodal", "overture-buildings"];
 
 #[derive(Parser)]
 #[command(name = "duckosm")]
@@ -163,6 +163,21 @@ enum Cmd {
         #[arg(long)]
         not_reference: bool,
     },
+    /// Add the building attributes of Overture Maps (heights, levels, roofs, colours) to features.buildings, in place.
+    /// Joins on the OSM id that Overture keeps; adds a tag only where the OSM building does not have it. Also adds
+    /// overture:id and, for a height from another dataset, source:height. --overwrite: an Overture value also replaces
+    /// a different OSM value (the OSM value stays in osm:<key>). Needs features.buildings and the internet.
+    #[command(name = "overture-buildings")]
+    OvertureBuildings {
+        /// The .duckdb file of a build with --features.
+        db: PathBuf,
+        /// The Overture release, for example 2026-11-18.0 (default: the newest).
+        #[arg(long)]
+        release: Option<String>,
+        /// An Overture value also replaces a different OSM value; the OSM value stays in osm:<key>.
+        #[arg(long)]
+        overwrite: bool,
+    },
     /// Write the fully commented config template to PATH (default: duckosm.yaml). Edit it, then run
     /// `duckosm build --config PATH`.
     #[command(name = "init-config")]
@@ -251,6 +266,32 @@ pub fn run(args: &[String]) -> Result<()> {
                 r.modes.len(),
                 r.column
             );
+        }
+        Cmd::OvertureBuildings { db, release, overwrite } => {
+            need_db(&db)?;
+            let s = crate::buildings::overture_buildings(&db, release.as_deref(), overwrite)?;
+            println!("Overture Maps {}: {} of {} buildings matched, {} got new tags", s.release, s.matched, s.buildings, s.updated);
+            for (k, n) in &s.tags {
+                println!("  {k}: {n}");
+            }
+            if overwrite {
+                println!("{} buildings got Overture values in place of OSM values (the OSM values are in osm:<key>)", s.changed);
+                for (k, n) in &s.changed_tags {
+                    println!("  {k}: {n}");
+                }
+            }
+            if let Some(p) = &s.parts {
+                println!("building parts: {} of {} matched, {} got new tags", p.matched, p.rows, p.updated);
+                for (k, n) in &p.tags {
+                    println!("  {k}: {n}");
+                }
+                if overwrite {
+                    println!("{} parts got Overture values in place of OSM values", p.changed);
+                    for (k, n) in &p.changed_tags {
+                        println!("  {k}: {n}");
+                    }
+                }
+            }
         }
         Cmd::Admin { pbf, db, gpkg } => crate::admin::admin(&pbf, &db, gpkg.as_deref())?,
         Cmd::Bus { db } => {

@@ -29,7 +29,7 @@ const TABLES = {
   buildings: "kind:building", land: "kind:feature", paved: "kind:feature", place_labels: "kind:feature", pois: "kind:feature", public_transport: "kind:feature",
   sites: "kind:feature", streets: "kind:feature", traffic: "kind:node", water_lines: "kind:feature", water_polygons: "kind:feature", ocean: "kind:feature",
   // buildings
-  building_faces: "kind:building", building_entrances: "kind:building",
+  building_faces: "kind:building", building_entrances: "kind:building", building_parts: "kind:feature", building_part_faces: "kind:building",
   // the area
   boundary: "kind:boundary", boundary_cells: "kind:cell",
   // a pair or a path of roads: the parts of one row (step 3)

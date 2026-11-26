@@ -2308,6 +2308,21 @@ pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String>
                 duckosm_duckdb::write_building_faces(&db, &pq_dir)?;
                 log.step("building faces");
             }
+            // the parts of the buildings in 3D: links, heights in metres, support, and their walls (docs/design/building_parts.md)
+            if features {
+                let b = duckosm_duckdb::building_parts::refresh(&db)?;
+                if b.parts > 0 {
+                    eprintln!(
+                        "[features] building parts: {} ({} with no building, {} stacked, {} floating){}",
+                        b.parts,
+                        b.no_building,
+                        b.stacked,
+                        b.floating,
+                        b.faces.map(|n| format!(", {n} walls")).unwrap_or_default()
+                    );
+                }
+                log.step("building parts");
+            }
             after::run(&db, &p.name, &names, &p.after)?;
             log.step("indexes and checks");
             sum.files.push(("duckdb".to_string(), db));
