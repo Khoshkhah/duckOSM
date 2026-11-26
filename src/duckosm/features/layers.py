@@ -142,6 +142,15 @@ class Buildings(Layer):
     kind_sql = f"{_t('building')}"        # Shortbread buildings has no kind; carried for convenience
 
 
+class BuildingParts(Layer):
+    """The parts of a building (``building:part``), each with its own height or levels (OSM Simple 3D Buildings). A 3D
+    map draws the parts in place of the outline in ``buildings`` that they cover. Not in Shortbread."""
+    name = "building_parts"
+    geom_kind = "area"
+    where_sql = f"{_t('building:part')} IS NOT NULL AND {_t('building:part')} <> 'no'"
+    kind_sql = f"{_t('building:part')}"
+
+
 # ---- streets (roads + rails, merged per Shortbread) ---------------------------------------------
 _RAIL = "('rail','narrow_gauge','tram','light_rail','funicular','subway','monorail')"
 
@@ -260,6 +269,7 @@ LAYERS = [
     Paved,
     Sites,
     Buildings,
+    BuildingParts,
     Streets,
     Boundaries,
     PublicTransport,

@@ -38,6 +38,7 @@ export const TABLE_NOTES = {
   building_entrances: "The entrances and doors of the buildings.",
   building_info: "One row for each building: floors, height, roof shape, colors and materials, read from its OSM tags.",
   buildings: "The buildings of the base map, with their OSM tags.",
+  building_parts: "The parts of the buildings (building:part), each with its own height or levels. A 3D map draws the parts in place of the building that they cover.",
   land: "The land use and the natural areas of the base map (parks, woods, grass, and others).",
   ocean: "The sea.",
   paved: "The squares, the pedestrian areas and the piers.",
@@ -130,7 +131,7 @@ export function objectKinds({ names = [], hasTags = true } = {}) {
 
 // What `kind` holds in each base-map table (checked on Monaco), and the SQL for the common questions. The agent copies a hint, so the test runs each one on a Monaco database.
 export const FEATURE_KINDS = {
-  buildings: "the building tag (yes, apartments, house, ...)", traffic: "traffic_signals or crossing (there are no stop signs)", pois: "the shop, amenity or tourism value (bench, restaurant, ...)",
+  buildings: "the building tag (yes, apartments, house, ...)", building_parts: "the building:part tag (yes, roof, ...)", traffic: "traffic_signals or crossing (there are no stop signs)", pois: "the shop, amenity or tourism value (bench, restaurant, ...)",
   sites: "parking, platform, school, hospital, ...", public_transport: "bus_stop, station, ...", streets: "the highway or railway value (footway, residential, rail, ...)",
   land: "grass, park, forest, ...", paved: "pier, pedestrian, square, ...", place_labels: "suburb, town, ...", water_polygons: "water, swimming_pool, ...", water_lines: "stream, ditch, ...", ocean: "ocean",
 };

@@ -1017,7 +1017,7 @@ def features_check(db, limit):
     """List the OSM polygons that no features.* table holds, grouped by tag.
 
     A closed way with tags, or an area relation, that is in no feature table, is a group of the report.
-    A group that the build leaves out on purpose (zones, boundaries, street furniture, building parts)
+    A group that the build leaves out on purpose (zones, boundaries, street furniture)
     has its reason; a group with no reason is a possible miss. Needs raw.* and features.* in the db.
     """
     import duckdb

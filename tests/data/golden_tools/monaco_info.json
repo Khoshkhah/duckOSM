@@ -31,6 +31,7 @@
  "timezone": "Europe/Monaco",
  "raw": true,
  "features": [
+  "building_parts",
   "buildings",
   "land",
   "paved",

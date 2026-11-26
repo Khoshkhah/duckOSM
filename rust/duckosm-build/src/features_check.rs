@@ -9,11 +9,10 @@ const KEYS: [&str; 26] = [
 ];
 
 /// (reason, a SQL condition on the MAP column `tags`): the groups that the features build leaves out on purpose.
-const LEFT_OUT: [(&str, &str); 10] = [
+const LEFT_OUT: [(&str, &str); 9] = [
     ("a zone or a name, not ground (the name is in place_labels)", "tags['place'] IS NOT NULL AND tags['place'] <> 'square'"),
     ("an administrative or postal boundary: a line, not ground", "tags['boundary'] IS NOT NULL"),
     ("the coastline: the sea comes from the layer ocean", "tags['natural'] = 'coastline'"),
-    ("a part of a building: planned for a layer building_parts (phase 2)", "tags['building:part'] IS NOT NULL"),
     (
         "gone: a building, a place or a boundary that is demolished, disused or abandoned",
         "tags['building'] = 'no' OR len(list_filter(map_keys(tags), lambda x: x LIKE 'demolished:%' OR x LIKE 'disused:%' OR x LIKE 'abandoned:%')) > 0",

@@ -30,6 +30,7 @@ fn the_layers_without_a_boundary_equal_duckosm() {
     con.execute_batch("LOAD spatial").unwrap();
     for (t, n, md5) in [
         ("buildings", 1625, "88cb71771479071957b66716e465da96"),
+        ("building_parts", 61, "b716a78a39dadf25570784402ca44c7f"),
         ("land", 255, "a3b2b6b492bb93e3f11090344d1e7399"),
         ("paved", 90, "d35d37f03c63c62d17e9f24682a0bbd7"),
         ("place_labels", 10, "b04df83c12d905dca7ce941d09502e1a"),
@@ -63,7 +64,7 @@ fn the_layers_without_a_boundary_equal_duckosm() {
     lines.sort_unstable();
     let sorted = lines.join("\n") + "\n";
     let md5: String = Connection::open_in_memory().unwrap().query_row("SELECT md5(?)", [&sorted], |r| r.get(0)).unwrap();
-    assert_eq!((lines.len(), md5.as_str()), (51, "8ccc1af14808b44fabc656c3d4f811fc"), "features-check:\n{text}");
+    assert_eq!((lines.len(), md5.as_str()), (47, "e06f067b74f645d2d6715b2fcf57373e"), "features-check:\n{text}");
     let _ = std::fs::remove_dir_all(&out);
 }
 

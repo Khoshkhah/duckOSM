@@ -69,7 +69,7 @@ def test_paved_and_the_other_new_rules(con):
 
 def test_features_check_lists_the_misses_and_the_reasons(con):
     box(con, 1, 0.000, 0.000, {"place": "square"})                                  # in paved: not listed
-    box(con, 2, 0.002, 0.000, {"building:part": "yes", "height": "20"})              # left out on purpose: a part of a building
+    box(con, 2, 0.002, 0.000, {"building:part": "yes", "height": "20"})              # in building_parts: not listed
     box(con, 3, 0.004, 0.000, {"amenity": "fountain"})                               # left out on purpose: street furniture
     box(con, 4, 0.006, 0.000, {"landuse": "salt_pond"})                              # a possible miss: no layer takes it, no reason
     box(con, 5, 0.008, 0.000, {})                                                    # a ring of a relation that a table holds: not listed
@@ -78,10 +78,11 @@ def test_features_check_lists_the_misses_and_the_reasons(con):
     FeaturesBuilder(con).run()
     groups = {g["group"]: g for g in missing_polygons(con)}
     assert "place=square" not in groups and "landuse=grass" not in groups                # held by a table
+    assert "building:part=yes" not in groups
     assert not any(g["group"] == "other: " for g in groups.values())                     # the untagged ring is not a group
     assert groups["landuse=salt_pond"]["reason"] is None and groups["landuse=salt_pond"]["ways"] == 1
     assert groups["landuse=salt_pond"]["area_m2"] > 10_000                                # about 111 m x 111 m
-    assert "building" in groups["building:part=yes"]["reason"] and "furniture" in groups["amenity=fountain"]["reason"]
+    assert "furniture" in groups["amenity=fountain"]["reason"]
     assert "zone" in groups["place=neighbourhood"]["reason"]
     assert missing_polygons(con)[0]["group"] == "landuse=salt_pond"                       # the possible misses come first
 
