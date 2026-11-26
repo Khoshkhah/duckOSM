@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **`features.building_parts`: the parts of the buildings.** A new base-map layer with each OSM `building:part`, and its
+  own `height`, `min_height` or `building:levels` (OSM Simple 3D Buildings). A 3D map draws the parts in place of the
+  building that they cover, as OpenFreeMap does. Before, the build left the parts out, and a building with parts of 8 to
+  16 levels (Norrmalm, way 440810380) was one block of 11 levels. Monaco: 61 parts; Norrmalm: 74. Ask knows the table.
+  `features-check` no longer lists the parts as left out.
+
 - **`duckosm overture-buildings --overwrite`: Overture values replace OSM values.** An Overture value also replaces a
   different OSM value, and the OSM value stays in `osm:<key>`. Python: `overture_buildings(db, overwrite=True)`.
   Norrmalm: 75 buildings changed, most of them colours in a new format (`white` to `#FFFFFF`).

@@ -48,6 +48,7 @@ In drawing order, bottom first.
 | `sites` | area | `amenity` = `parking`, `bicycle_parking`, `bus_station`, `university`, `college`, `school`, `kindergarten`, `hospital`, `prison`; `public_transport` = `platform` / `station`; `leisure=sports_centre`, `landuse=construction`, `military=danger_area`, `man_made=bridge`, `tourism=zoo`, `railway=platform` | the value |
 | `paved` | area | open ground that people stand on: `place=square`; `area:highway=*`; a pedestrian, footway, service, living-street, steps, path or cycleway `highway` with `area=yes` (or a multipolygon relation); `man_made` = `pier`, `breakwater`, `groyne`, `quay`; `aeroway` = `helipad` / `heliport`; `amenity=marketplace` | `square`, the `area:highway` value, the `highway` value, `pier`, `quay`, `helipad`, `marketplace`, … |
 | `buildings` | area | `building`, except `building=no` | the raw `building` value (`yes` is common); not a Shortbread class. [`duckosm overture-buildings`](cli.md#overture-buildings) adds heights, levels and roofs from Overture Maps to `tags` |
+| `building_parts` | area | `building:part`, except `building:part=no` | the raw `building:part` value (`yes` is common). Not in Shortbread. Each part has its own `height`, `min_height` or `building:levels` (OSM Simple 3D Buildings): a 3D map draws the parts in place of the building in `buildings` that they cover |
 | `streets` | line | every way with `highway`, and `railway` = `rail`, `narrow_gauge`, `tram`, `light_rail`, `funicular`, `subway`, `monorail` | the `highway` value, else the `railway` value |
 | `public_transport` | point | `highway=bus_stop`, `railway` = `station`, `halt`, `tram_stop`; `amenity` = `bus_station`, `ferry_terminal`; `aeroway` = `aerodrome`, `helipad`; `aerialway=station` | `bus_stop`, `station`, `halt`, `tram_stop`, `ferry_terminal`, `aerialway_station`, … |
 | `pois` | point | `amenity` except `parking`, `bicycle_parking`, `bus_station`, `ferry_terminal`; `shop`, `tourism`, `office`; `leisure` except the values used by `land` and `sites`; `man_made` | the first of those tags that is set |
@@ -79,7 +80,7 @@ duckosm features-check monaco.duckdb
 
 | Group | Means |
 |---|---|
-| with a reason in the last column | the build leaves it out on purpose: zones such as `place=neighbourhood`, boundaries, the coastline, parts of buildings, street furniture |
+| with a reason in the last column | the build leaves it out on purpose: zones such as `place=neighbourhood`, boundaries, the coastline, street furniture |
 | with no reason | a possible miss: [open an issue](https://github.com/Khoshkhah/duckOSM/issues) |
 
 A way that is a ring of a relation in a table is not in the list. The check needs `raw.*`, so it cannot check a

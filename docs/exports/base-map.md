@@ -37,6 +37,7 @@ In drawing order, bottom first.
 | `sites` | area | parking, schools, hospitals, stations, platforms |
 | `paved` | area | squares, pedestrian areas, piers, quays |
 | `buildings` | area | each building |
+| `building_parts` | area | each part of a building (`building:part`), with its own height or levels |
 | `streets` | line | each way with a `highway` tag, and the railways, for drawing |
 | `public_transport` | point | bus stops, stations, tram stops, ferry terminals |
 | `pois` | point | amenities, shops, tourism, offices |

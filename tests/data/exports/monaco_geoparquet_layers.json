@@ -42,6 +42,12 @@
    "count": 1
   },
   {
+   "file": "features_building_parts.parquet",
+   "kind": "features",
+   "table": "building_parts",
+   "count": 61
+  },
+  {
    "file": "features_buildings.parquet",
    "kind": "features",
    "table": "buildings",

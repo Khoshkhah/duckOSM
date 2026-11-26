@@ -5,7 +5,7 @@ It makes a miss visible (docs/design/missing_polygons.md). It lists
 - the closed ways with tags that are in no feature table, and are not a ring of a relation that a feature table holds, and
 - the area relations (``type`` = ``multipolygon`` / ``boundary``) with tags that are in no feature table,
 
-grouped by their main tag. Some groups are left out on purpose (``LEFT_OUT``: zones, boundaries, street furniture, building parts,
+grouped by their main tag. Some groups are left out on purpose (``LEFT_OUT``: zones, boundaries, street furniture,
 …): the report names the reason. A group with no reason is a possible miss: add a rule to a layer, or to ``LEFT_OUT``.
 """
 
@@ -24,7 +24,6 @@ LEFT_OUT = [
      "tags['place'] IS NOT NULL AND tags['place'] <> 'square'"),
     ("an administrative or postal boundary: a line, not ground", "tags['boundary'] IS NOT NULL"),
     ("the coastline: the sea comes from the layer ocean", "tags['natural'] = 'coastline'"),
-    ("a part of a building: planned for a layer building_parts (phase 2)", "tags['building:part'] IS NOT NULL"),
     ("gone: a building, a place or a boundary that is demolished, disused or abandoned",
      "tags['building'] = 'no' OR len(list_filter(map_keys(tags), lambda x: x LIKE 'demolished:%' OR x LIKE 'disused:%' OR x LIKE 'abandoned:%')) > 0"),
     ("only an address, a name or a source: no kind of ground",
