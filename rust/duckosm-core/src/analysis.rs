@@ -643,3 +643,66 @@ mod tests {
         assert_eq!(nn.query((0.9, 0.8)).unwrap().0, 1);
     }
 }
+
+/// `duckosm.analysis.sample_points`: `n` points at random places on the streets of a mode. A street is picked with a
+/// chance in proportion to its length (the two rows of a two-way road are one street), then the point is at a random
+/// place along it. The same `seed` gives the same points. Gives `(edge_id, lon, lat)` for each point.
+pub fn sample_points(edges: &[Edge], n: usize, seed: u64) -> Vec<(i64, f64, f64)> {
+    let mut seen = HashSet::new();
+    let streets: Vec<&Edge> = edges
+        .iter()
+        .filter(|e| seen.insert((e.osm_id, e.source.min(e.target), e.source.max(e.target), e.length_m.to_bits())))
+        .collect();
+    let seg = |l: &[(f64, f64)]| l.windows(2).map(|w| great_circle(w[0], w[1])).collect::<Vec<f64>>();
+    let mut total = 0.0;
+    let cum: Vec<f64> = streets.iter().map(|e| { total += seg(&e.line).iter().sum::<f64>(); total }).collect();
+    if streets.is_empty() || total <= 0.0 {
+        return Vec::new();
+    }
+    let mut state = seed;
+    let mut uniform = || {
+        // splitmix64
+        state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
+        let mut z = state;
+        z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        ((z ^ (z >> 31)) >> 11) as f64 / (1u64 << 53) as f64
+    };
+    (0..n)
+        .map(|_| {
+            let i = cum.partition_point(|&c| c <= uniform() * total).min(streets.len() - 1);
+            let e = streets[i];
+            let lens = seg(&e.line);
+            let mut at = uniform() * lens.iter().sum::<f64>();
+            for (k, &l) in lens.iter().enumerate() {
+                if at <= l || k + 1 == lens.len() {
+                    let t = if l > 0.0 { (at / l).min(1.0) } else { 0.0 };
+                    let (a, b) = (e.line[k], e.line[k + 1]);
+                    return (e.edge_id, a.0 + t * (b.0 - a.0), a.1 + t * (b.1 - a.1));
+                }
+                at -= l;
+            }
+            (e.edge_id, e.line[0].0, e.line[0].1)
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod sample_tests {
+    use super::*;
+
+    #[test]
+    fn the_points_are_on_the_streets_and_the_seed_repeats_them() {
+        let line = |a: (f64, f64), b: (f64, f64)| vec![a, b];
+        let edges = vec![
+            Edge { edge_id: 1, osm_id: 9, source: 1, target: 2, length_m: 100.0, line: line((0.0, 0.0), (0.001, 0.0)) },
+            Edge { edge_id: 2, osm_id: 9, source: 2, target: 1, length_m: 100.0, line: line((0.001, 0.0), (0.0, 0.0)) },
+            Edge { edge_id: 3, osm_id: 8, source: 2, target: 3, length_m: 300.0, line: line((0.001, 0.0), (0.001, 0.003)) },
+        ];
+        let p = sample_points(&edges, 400, 1);
+        assert_eq!(p, sample_points(&edges, 400, 1));
+        assert!(p.iter().all(|&(e, x, y)| (e == 1 && y == 0.0 && (0.0..=0.001).contains(&x)) || (e == 3 && x == 0.001)));
+        let on_3 = p.iter().filter(|q| q.0 == 3).count();
+        assert!((250..350).contains(&on_3), "{on_3}: the long street has 3/4 of the points"); // edge 2 is the same street as 1
+    }
+}

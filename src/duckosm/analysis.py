@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import tempfile
 from pathlib import Path
 
@@ -180,43 +179,18 @@ def components(view, strong: bool = True, mode: str | None = None):
     return pd.Series(labels, index=pd.Index(ids, name="node_id"), name="component", dtype="int64")
 
 
-# the turn tables of a mode and their two edge columns (the tables of duckosm extract)
-_TURN_TABLES = {"edge_graph": ("from_edge", "to_edge"), "turn_restrictions": ("from_edge_id", "to_edge_id"),
-                "turn_permission": ("from_edge", "to_edge"), "turn_path_restrictions": ("from_edge", "to_edge")}
-
-
 def largest_component(view, out: str | os.PathLike | None = None, strong: bool = True, mode: str | None = None) -> Network:
     """A new network file with only the largest component of the mode (OSMnx ``largest_component``). The mode keeps the
     nodes, edges and turn tables of that component; the other modes do not change. ``out``: the new file (default
     ``<name>_largest.duckdb`` next to the file). Returns its :class:`Network`.
 
     >>> big = duckosm.analysis.largest_component(net.driving)"""
-    import duckdb
     db, mode, net = _view(view, mode)
-    keep = components(view, strong=strong, mode=mode)
-    keep = keep.index[keep == 0].tolist()
     out = Path(out) if out is not None else net.path.with_name(f"{net.path.name.split('.')[0]}_largest.duckdb")
     if out.resolve() == net.path.resolve():
         raise DuckOSMError("out must be a new file, not the file of the network")
     out.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(net.path, out)
-    con = duckdb.connect(str(out))
-    try:
-        con.load_extension("spatial")           # the RTREE index of the edges
-        tables = {t for (t,) in con.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = ?",
-                                            [mode]).fetchall()}
-        con.execute("CREATE TEMP TABLE _keep AS SELECT unnest($k::BIGINT[]) AS node_id", {"k": keep})
-        con.execute(f"DELETE FROM {mode}.edges WHERE source NOT IN (SELECT node_id FROM _keep) "
-                    "OR target NOT IN (SELECT node_id FROM _keep)")
-        con.execute(f"DELETE FROM {mode}.nodes WHERE node_id NOT IN (SELECT node_id FROM _keep)")
-        for t, (a, b) in _TURN_TABLES.items():
-            if t in tables:
-                con.execute(f"DELETE FROM {mode}.{t} WHERE {a} NOT IN (SELECT edge_id FROM {mode}.edges) "
-                            f"OR {b} NOT IN (SELECT edge_id FROM {mode}.edges)")
-        con.execute("CHECKPOINT")
-    finally:
-        con.close()
-    # ponytail: the multimodal graph mm.* keeps its rows; cut it too when a user routes across modes on the result
+    _rust().analysis_largest_component(db, mode, bool(strong), str(out))
     return Network(out)
 
 
@@ -234,24 +208,19 @@ def clip(net, *, bbox=None, polygon=None, point=None, dist_m: float | None = Non
     net = net if isinstance(net, Network) else Network(net)
     if sum(a is not None for a in (bbox, polygon, point)) != 1:
         raise DuckOSMError("give one area: bbox=, polygon= or point= with dist_m=")
-    shapely = require("shapely", "clip")
-    from shapely.geometry import box, mapping
-    if bbox is not None:
-        geom = box(*bbox)
-    elif point is not None:
-        if not dist_m:
-            raise DuckOSMError("point= needs dist_m= (the radius in metres)")
-        gpd = require("geopandas", "clip with point=")
-        p = gpd.GeoSeries([shapely.geometry.Point(point)], crs="EPSG:4326")
-        utm = p.estimate_utm_crs()
-        geom = p.to_crs(utm).buffer(float(dist_m), 64).to_crs("EPSG:4326").iloc[0]
-    else:
-        geom = polygon.to_crs("EPSG:4326").union_all() if hasattr(polygon, "to_crs") else polygon
     out = Path(out) if out is not None else net.path.with_name(f"{net.path.name.split('.')[0]}_clip.duckdb")
-    with tempfile.TemporaryDirectory() as tmp:
+    if point is not None and not dist_m:
+        raise DuckOSMError("point= needs dist_m= (the radius in metres)")
+    if polygon is None:
+        _rust().extract_area(str(net.path), str(out), None if bbox is None else [float(v) for v in bbox],
+                             None if point is None else tuple(map(float, point)), None if dist_m is None else float(dist_m))
+        return Network(out)
+    require("shapely", "clip with polygon=")
+    from shapely.geometry import mapping
+    with tempfile.TemporaryDirectory() as tmp:            # your polygon as a GeoJSON file; duckosm extract joins its parts
         area = Path(tmp) / "clip.geojson"
-        area.write_text(json.dumps({"type": "FeatureCollection", "features": [
-            {"type": "Feature", "properties": {}, "geometry": mapping(geom)}]}))
+        area.write_text(polygon.to_crs("EPSG:4326").to_json() if hasattr(polygon, "to_crs") else json.dumps(
+            {"type": "FeatureCollection", "features": [{"type": "Feature", "properties": {}, "geometry": mapping(polygon)}]}))
         _api.extract(net.path, out, boundary=area)
     return Network(out)
 
@@ -276,13 +245,13 @@ def grades(view, mode: str | None = None):
     indexed by ``edge_id``. Needs :func:`add_elevation` first.
 
     >>> duckosm.analysis.grades(net.driving).describe()"""
-    db, mode, net = _view(view, mode)
-    cols = set(net.columns(f"{mode}.edges").column_name)
-    if not {"z_from", "z_to"} <= cols:
-        raise DuckOSMError(f"{mode}.edges has no z_from and z_to: run duckosm.analysis.add_elevation(net) first")
-    df = net.sql(f"SELECT edge_id, (z_to - z_from) / nullif(length_m, 0) AS grade FROM {mode}.edges ORDER BY edge_id")
-    return df.set_index("edge_id")["grade"].astype("float64")
-
+    import pandas as pd
+    db, mode, _ = _view(view, mode)
+    try:
+        ids, grades = _rust().analysis_grades(db, mode)
+    except RuntimeError as e:
+        raise DuckOSMError(str(e)) from None
+    return pd.Series(grades, index=pd.Index(ids, name="edge_id"), name="grade", dtype="float64")
 
 def sample_points(view, n: int, seed: int | None = None, mode: str | None = None):
     """``n`` random points on the streets (OSMnx ``sample_points``): a street is chosen with a chance that follows its
@@ -290,21 +259,11 @@ def sample_points(view, n: int, seed: int | None = None, mode: str | None = None
     GeoDataFrame (EPSG:4326) with the ``edge_id`` of each point.
 
     >>> pts = duckosm.analysis.sample_points(net.walking, 200, seed=1)"""
-    np = require("numpy", "sample_points")
-    _, mode, net = _view(view, mode)
-    e = net.edges(mode)
-    a, b = np.minimum(e.source, e.target), np.maximum(e.source, e.target)
-    e = e.assign(_a=a, _b=b).drop_duplicates(["osm_id", "_a", "_b", "length_m"]).reset_index(drop=True)
-    utm = e.estimate_utm_crs()
-    lines = e.geometry.to_crs(utm)
-    rng = np.random.default_rng(seed)
-    w = lines.length.to_numpy()
-    pick = rng.choice(len(e), size=int(n), p=w / w.sum())
-    pts = lines.iloc[pick].reset_index(drop=True).interpolate(rng.random(int(n)), normalized=True)
+    import random
     gpd = require("geopandas", "sample_points")
-    return gpd.GeoDataFrame({"edge_id": e.edge_id.iloc[pick].to_numpy()}, geometry=pts.to_crs("EPSG:4326").values,
-                            crs="EPSG:4326")
-
+    db, mode, _ = _view(view, mode)
+    ids, xs, ys = _rust().analysis_sample_points(db, mode, int(n), random.getrandbits(64) if seed is None else int(seed) % 2**64)
+    return gpd.GeoDataFrame({"edge_id": ids}, geometry=gpd.points_from_xy(xs, ys), crs="EPSG:4326")
 
 def to_osmnx(view, mode: str | None = None):
     """The mode as the ``networkx.MultiDiGraph`` of OSMnx, so that each OSMnx function works on it (it passes
@@ -316,20 +275,8 @@ def to_osmnx(view, mode: str | None = None):
 
     >>> G = duckosm.analysis.to_osmnx(net.driving)
     >>> ox.plot_graph(G)"""
-    nx = require("networkx", "to_osmnx")
-    import pandas as pd
-    _, mode, net = _view(view, mode)
-    nodes = net.sql(f"SELECT node_id, ST_X(geom) AS x, ST_Y(geom) AS y FROM {mode}.nodes ORDER BY node_id")
-    e = net.edges(mode)
-    # simplified: each edge has its line, so ox.project_graph projects the lines too
-    G = nx.MultiDiGraph(crs="epsg:4326", name=net.path.name.split(".")[0], mode=mode, simplified=True)
-    spn = streets_per_node(view, mode=mode)
-    G.add_nodes_from((int(r.node_id), {"x": float(r.x), "y": float(r.y), "street_count": int(spn.get(r.node_id, 0))})
-                     for r in nodes.itertuples())
-    names = {"edge_id": "edge_id", "osm_id": "osmid", "length_m": "length", "highway": "highway", "name": "name",
-             "oneway": "oneway", "lanes": "lanes", "maxspeed_kmh": "speed_kph", "cost_s": "travel_time"}
-    cols = [c for c in names if c in e.columns]
-    for row, geom in zip(e[["source", "target", *cols]].itertuples(index=False), e.geometry):
-        d = {names[c]: v.item() if hasattr(v, "item") else v for c, v in zip(cols, row[2:]) if not pd.isna(v)}
-        G.add_edge(int(row[0]), int(row[1]), geometry=geom, **d)
-    return G
+    import pickle
+    require("networkx", "to_osmnx")
+    require("shapely", "to_osmnx")             # the pickle makes shapely lines
+    db, mode, net = _view(view, mode)
+    return pickle.loads(_rust().analysis_osmnx_pickle(db, mode, net.path.name.split(".")[0]))

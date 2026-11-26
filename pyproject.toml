@@ -23,18 +23,14 @@ classifiers = [
     "Topic :: Scientific/Engineering :: GIS",
 ]
 dependencies = [
-    "duckdb>=1.0.0,<2",   # edge_id uses DuckDB's hash(): pin the major version
-    "shapely>=2.0.0",
-    "pyyaml>=6.0",
-    "click>=8.0",
-    "h3>=4.0.0",
-    "rich>=13.0.0",
-    "pandas",             # gmns exporter (lane/curb tables); numpy already comes with shapely
-    "timezonefinder>=6.0",  # every area db stores its IANA time zone
+    "duckdb>=1.0.0,<2",   # the SDK reads the tables of a build (Network.sql); the Rust code has its own DuckDB
+    "shapely>=2.0.0",     # the geometry of the results (Route.geometry, the networkx pickles)
+    "pyyaml>=6.0",        # Config, the fixes files
+    "pandas",             # the DataFrames of the results
 ]
 
 [project.scripts]
-duckosm = "duckosm._main:main"   # the Rust program (duckosm._rust.cli); the Python CLI for the commands that are not ported yet
+duckosm = "duckosm._main:main"   # the Rust program (duckosm._rust.cli)
 
 [project.optional-dependencies]
 levels = ["roadstyle>=0.24.2"]               # duckosm levels: the level area (roadstyle-levels: make, solve, edit; its solver)

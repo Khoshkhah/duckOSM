@@ -64,7 +64,7 @@ def _serve(db, files=None, cwd=None):
     port = _free_port()
     fixes = str(db.with_name("osm_fixes.yaml"))
     files = ["--load", fixes, "--save", fixes] if files is None else files
-    proc = subprocess.Popen([sys.executable, "-c", "from duckosm.cli import main; main()", "edit", str(db), *files, "--port", str(port)], cwd=cwd,
+    proc = subprocess.Popen([sys.executable, "-m", "duckosm", "edit", str(db), *files, "--port", str(port)], cwd=cwd,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     line = ""
     for _ in range(600):

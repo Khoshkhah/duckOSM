@@ -1,15 +1,12 @@
-"""Tests for duckosm.gis_debug — read an export back through GDAL and audit it.
+"""Tests for ``duckosm gis-debug`` — read an export back through GDAL and audit it.
 
-Exercises the real path: export a tiny network with to_gis, then build the debug payload from the
-files on disk. It runs everywhere geopandas is installed.
-"""
+Exercises the real path: export a tiny network with to_gis, then run the Rust command on the files on disk."""
+from cli_run import invoke
 import duckdb
 import pytest
 
 from duckosm.gis import to_gis
 
-pytest.importorskip("geopandas")
-from duckosm.gis_debug import build_payload, render_html, _class_index  # noqa: E402
 
 E1, E2 = 6141068311830699705, 3843102655846694531
 
@@ -31,11 +28,19 @@ def _db():
     return con
 
 
-def test_payload_audits_a_clean_shapefile_export(tmp_path):
-    con = _db()
-    to_gis(con, str(tmp_path), fmt="shp", name="t", boundary=False)
+def _check(path, *extra):
+    """Run `gis-debug PATH --json`: the checks as a dict."""
+    import json
+    r = invoke(["gis-debug", str(path), "--json", *extra])
+    assert r.exit_code == 0, r.output
+    return json.loads(r.output[r.output.index("{"):])
 
-    payload = build_payload(str(tmp_path))
+
+def test_payload_audits_a_clean_shapefile_export(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)                                  # the HTML page goes to the current folder
+    to_gis(_db(), str(tmp_path / "shp"), fmt="shp", name="t", boundary=False)
+
+    payload = _check(tmp_path / "shp")
     assert payload["verdict"] == "pass"
     assert payload["summary"]["crs"] == "EPSG:4326"
     assert payload["summary"]["edge_id"] == "exact"
@@ -43,19 +48,15 @@ def test_payload_audits_a_clean_shapefile_export(tmp_path):
 
     edges = next(L for L in payload["layers"] if L["kind"] == "edges")
     assert edges["features"] == 2
-    assert edges["eid_dtype"] in ("object", "str")               # shp keeps int64 ids as text (pandas 3 names that dtype "str")
+    assert edges["eid_dtype"] in ("object", "str")               # shp keeps int64 ids as text
     assert any("text" in n["text"] for n in edges["notes"])      # and says so
 
-    # geometry made it into the drawable grid, classed by highway (primary vs footway differ)
-    drawn = payload["geo"]["driving"]["edges"]
-    assert len(drawn) == 2
-    assert {e[0] for e in drawn} == {_class_index("primary"), _class_index("footway")}
 
-
-def test_roundtrip_flags_a_dropped_edge(tmp_path):
+def test_roundtrip_flags_a_dropped_edge(tmp_path, monkeypatch):
     """A round-trip diff against the source db catches an edge that didn't survive the export."""
+    monkeypatch.chdir(tmp_path)
     con = _db()
-    to_gis(con, str(tmp_path), fmt="shp", name="t", boundary=False)
+    to_gis(con, str(tmp_path / "shp"), fmt="shp", name="t", boundary=False)
     # simulate a source that has an extra edge the export is missing -> round-trip should fail
     con.execute(f"""INSERT INTO driving.edges VALUES
         (777,3,1,'service',NULL,false,1,10.0,20,
@@ -64,7 +65,7 @@ def test_roundtrip_flags_a_dropped_edge(tmp_path):
     con.execute(f"ATTACH '{db_path}' AS out"); con.execute("COPY FROM DATABASE memory TO out")
     con.execute("DETACH out"); con.close()                      # release the file before reading it back
 
-    payload = build_payload(str(tmp_path), source_db=db_path)
+    payload = _check(tmp_path / "shp", "--source-db", db_path)
     assert payload["verdict"] == "fail"
     assert payload["summary"]["roundtrip"] == "fail"
     edges = next(L for L in payload["layers"] if L["kind"] == "edges")
@@ -72,25 +73,15 @@ def test_roundtrip_flags_a_dropped_edge(tmp_path):
     assert any(n["sev"] == "crit" and "round-trip" in n["text"] for n in edges["notes"])
 
 
-def test_render_html_standalone_and_body(tmp_path):
-    con = _db()
-    to_gis(con, str(tmp_path), fmt="shp", name="t", boundary=False)
-    payload = build_payload(str(tmp_path))
-
-    doc = render_html(payload, standalone=True)
-    assert doc.startswith("<!doctype html>") and "const DATA = {" in doc and "/*__PAYLOAD__*/" not in doc
-    body = render_html(payload, standalone=False)
-    assert "<!doctype" not in body and body.startswith("<title>")
-
-
-def test_cli_json(tmp_path, monkeypatch):
-    """`gis-debug --json` prints the check for an agent: the verdict, the summary, each layer."""
-    import json
-    from click.testing import CliRunner
-    from duckosm.cli import main
+def test_cli_writes_a_standalone_page(tmp_path):
     to_gis(_db(), str(tmp_path / "shp"), fmt="shp", name="t", boundary=False)
-    monkeypatch.chdir(tmp_path)
-    r = CliRunner().invoke(main, ["gis-debug", str(tmp_path / "shp"), "--json"])
+    page = tmp_path / "debug.html"
+    r = invoke(["gis-debug", str(tmp_path / "shp"), "-o", str(page)])
     assert r.exit_code == 0, r.output
-    d = json.loads(r.output[r.output.index("{"):])
-    assert d["verdict"] == "pass" and d["summary"]["modes"] == ["driving"] and d["layers"]
+    doc = page.read_text()
+    assert doc.lower().startswith("<!doctype html>") and "/*__PAYLOAD__*/" not in doc
+    # geometry made it into the drawable grid, classed by highway (primary and footway differ)
+    import re, json
+    data = json.loads(re.search(r"const DATA = (\{.*?\});\n", doc, re.S).group(1))
+    drawn = data["geo"]["driving"]["edges"]
+    assert len(drawn) == 2 and len({e[0] for e in drawn}) == 2

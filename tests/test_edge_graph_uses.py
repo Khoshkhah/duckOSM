@@ -1,5 +1,6 @@
 """The restricted edges (private_edges: bus, private, pedestrian, delivery) have turn rows in edge_graph, labelled in `uses`;
-every reader takes the mode's own rows by default and has a `uses` option (docs/design/restricted_edge_graph_rows.md)."""
+every reader takes the mode's own rows by default and has a `uses` option (docs/design/restricted_edge_graph_rows.md).
+The build is the Rust build of Monaco; the readers are the SDK (`routing.routed_graph`, `to_networkx(uses=...)`, `to_gmns`)."""
 import os
 from pathlib import Path
 
@@ -7,7 +8,9 @@ import duckdb
 import pytest
 
 from duckosm import Config, DuckOSM
-from duckosm.processors.edge_graph import RESTRICTED_USES, check_uses, routed_graph
+from duckosm.routing import routed_graph, to_networkx
+
+RESTRICTED_USES = ("bus", "private", "pedestrian", "delivery")   # the `access` labels of private_edges that edge_graph has rows for
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -53,33 +56,35 @@ def test_every_row_is_labelled_by_what_it_touches(monaco):
     assert {r[0] for r in rows} >= {"car", "bus", "pedestrian", "private"}   # the sample has them all (Monaco)
 
 
-def test_the_default_is_the_modes_own_rows(monaco):
-    own = monaco.execute(f"SELECT count(*) FROM {routed_graph(monaco, 'driving')}").fetchone()[0]
-    assert own == monaco.execute("SELECT count(*) FROM driving.edge_graph WHERE uses = 'car'").fetchone()[0]
-    both = monaco.execute(f"SELECT count(*) FROM {routed_graph(monaco, 'driving', 'bus,pedestrian')}").fetchone()[0]
-    assert both == monaco.execute("SELECT count(*) FROM driving.edge_graph WHERE uses IN ('car', 'bus', 'pedestrian')").fetchone()[0] > own
-    for mode, own_uses in (("walking", "walk"), ("cycling", "bike")):       # the same rule in every mode
-        n = monaco.execute(f"SELECT count(*) FROM {routed_graph(monaco, mode)}").fetchone()[0]
-        assert n == monaco.execute(f"SELECT count(*) FROM {mode}.edge_graph WHERE uses = '{own_uses}'").fetchone()[0]
-
-
-def test_uses_is_checked():
-    assert check_uses(None) == () and check_uses("") == ()
-    assert check_uses("bus, pedestrian,bus") == ("bus", "pedestrian") and check_uses(["private"]) == ("private",)
-    with pytest.raises(ValueError, match="choose from bus, private, pedestrian, delivery"):
-        check_uses("flying")
-
-
-def test_networkx_has_the_extra_turns_only_when_asked(monaco):
+def test_the_default_is_the_modes_own_rows(monaco, monaco_path):
     pytest.importorskip("networkx")
-    from duckosm.routing import to_networkx
-    g0 = to_networkx(monaco, "driving")
-    g1 = to_networkx(monaco, "driving", uses="pedestrian,private")
+    for mode, own_uses in (("driving", "car"), ("walking", "walk"), ("cycling", "bike")):       # the same rule in every mode
+        n = monaco.execute(f"SELECT count(*) FROM {routed_graph(str(monaco_path), mode)}").fetchone()[0]
+        assert n == monaco.execute(f"SELECT count(*) FROM {mode}.edge_graph WHERE uses = '{own_uses}'").fetchone()[0]
+        assert to_networkx(str(monaco_path), mode, node_attrs=False).number_of_edges() == n    # the networkx graph has the same turns
+    own = to_networkx(str(monaco_path), "driving", node_attrs=False).number_of_edges()
+    both = to_networkx(str(monaco_path), "driving", node_attrs=False, uses="bus,pedestrian").number_of_edges()
+    assert both == monaco.execute("SELECT count(*) FROM driving.edge_graph WHERE uses IN ('car', 'bus', 'pedestrian')").fetchone()[0] > own
+
+
+def test_uses_is_checked(monaco_path):
+    pytest.importorskip("networkx")
+    n = lambda **kw: to_networkx(str(monaco_path), "driving", node_attrs=False, **kw).number_of_edges()
+    assert n(uses=None) == n(uses="") == n()
+    assert n(uses="bus, pedestrian,bus") == n(uses=["bus", "pedestrian"]) == n(uses="bus,pedestrian")      # spaces and doubles are fine
+    with pytest.raises(Exception, match="choose from bus, private, pedestrian, delivery"):
+        n(uses="flying")
+
+
+def test_networkx_has_the_extra_turns_only_when_asked(monaco_path):
+    pytest.importorskip("networkx")
+    g0 = to_networkx(str(monaco_path), "driving")
+    g1 = to_networkx(str(monaco_path), "driving", uses="pedestrian,private")
     assert g1.number_of_edges() > g0.number_of_edges() and g1.number_of_nodes() > g0.number_of_nodes()
     assert not any("access" in d for _, d in g0.nodes(data=True))
     assert {d["access"] for _, d in g1.nodes(data=True) if "access" in d} == {"pedestrian", "private"}
     assert all(w is not None for *_, w in g1.edges(data="weight"))
-    assert to_networkx(monaco, "driving", weight="length", uses="bus").number_of_edges() >= g0.number_of_edges()
+    assert to_networkx(str(monaco_path), "driving", weight="length", uses="bus").number_of_edges() >= g0.number_of_edges()
 
 
 def test_gmns_movements_do_not_take_the_new_labels(monaco_path, tmp_path):

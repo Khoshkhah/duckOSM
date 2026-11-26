@@ -1,64 +1,58 @@
-"""Synthetic turn-restriction overrides — RestrictionProcessor injects `turn_restrictions:` rules from
-the OSM-overrides file into `restrictions_pivoted` (then the normal mapping turns them into edge-level
-restrictions). See docs/design/turn-restriction-overrides.md and known_osm_issues.md #6."""
+"""Synthetic turn-restriction overrides: the `turn_restrictions:` rules of the OSM fixes file become rows of
+`driving.turn_restrictions` (negative id, -position in the list) and close the turn in `driving.edge_graph`.
+See docs/design/turn-restriction-overrides.md and known_osm_issues.md #6. Built with the Rust build (tests/osm_build.py);
+the parse rules (skipped rules) are also tested in rust/duckosm-build/src/config.rs (`osm_fixes_file`)."""
+import sys
+from pathlib import Path
+
 import duckdb
-import pytest
 
-from duckosm.processors.restrictions import RestrictionProcessor
+sys.path.insert(0, str(Path(__file__).parent))
+from osm_build import build
 
-_PIVOTED = ("CREATE TABLE restrictions_pivoted(restriction_id BIGINT, restriction_type VARCHAR, "
-            "from_way BIGINT, via_node BIGINT, to_way BIGINT)")
-
-
-def _con():
-    con = duckdb.connect()
-    con.execute(_PIVOTED)
-    return con
+# two roads meet at node 2: way 100 (1-2) and way 200 (2-3)
+NODES = {1: (7.0, 43.0), 2: (7.0, 43.001), 3: (7.001, 43.001)}
+WAYS = {100: ([1, 2], {"highway": "residential"}), 200: ([2, 3], {"highway": "residential"})}
 
 
-def _rules(tmp_path, text):
-    p = tmp_path / "ov.yaml"; p.write_text(text); return str(p)
+def _build(tmp_path, fixes):
+    f = tmp_path / "ov.yaml"
+    f.write_text(fixes)
+    con = duckdb.connect(str(build(tmp_path, NODES, WAYS, args=["--fixes", f])), read_only=True)
+    ids = {r: i for r, i in con.execute("SELECT edge_ref, edge_id FROM driving.edges").fetchall()}
+    return con, ids
+
+
+def _turn_exists(con, a, b):
+    return con.execute("SELECT count(*) FROM driving.edge_graph WHERE from_edge = ? AND to_edge = ?", [a, b]).fetchone()[0] == 1
 
 
 def test_synthetic_restriction_injected(tmp_path):
-    con = _con()
-    path = _rules(tmp_path, """
-turn_restrictions:
-  - from_way: 1307524008
-    via_node: 330045016
-    to_way: 997402723
-    restriction: no_u_turn
-""")
-    assert RestrictionProcessor(con, path)._inject_overrides() == 1
-    row = con.execute("SELECT restriction_type, from_way, via_node, to_way "
-                      "FROM restrictions_pivoted WHERE restriction_id < 0").fetchone()
-    assert row == ("no_u_turn", 1307524008, 330045016, 997402723)   # negative id keeps it clear of OSM ids
+    con, ids = _build(tmp_path, "turn_restrictions:\n  - {from_way: 100, via_node: 2, to_way: 100, restriction: no_u_turn}\n")
+    assert con.execute("SELECT restriction_id, restriction_type, via_node, from_edge_id, to_edge_id FROM driving.turn_restrictions").fetchall() \
+        == [(-1, "no_u_turn", 2, ids["100#1f"], ids["100#1r"])]   # negative id keeps it clear of OSM ids
+    assert not _turn_exists(con, ids["100#1f"], ids["100#1r"])    # the U-turn is closed
+    assert _turn_exists(con, ids["100#1f"], ids["200#1f"])        # the other turn is open
 
 
 def test_default_restriction_and_skips(tmp_path):
-    con = _con()
-    path = _rules(tmp_path, """
+    con, ids = _build(tmp_path, """
 turn_restrictions:
-  - from_way: 1        # no `restriction` -> defaults to no_u_turn
+  - from_way: 100        # no `restriction` -> defaults to no_u_turn
     via_node: 2
-    to_way: 3
-  - from_way: 4        # unknown restriction -> skipped
-    via_node: 5
-    to_way: 6
+    to_way: 100
+  - from_way: 100        # unknown restriction -> skipped
+    via_node: 2
+    to_way: 200
     restriction: banana
-  - via_node: 9        # missing from_way -> skipped
-    to_way: 8
+  - via_node: 2          # missing from_way -> skipped
+    to_way: 200
 """)
-    assert RestrictionProcessor(con, path)._inject_overrides() == 1
-    assert con.execute("SELECT restriction_type FROM restrictions_pivoted").fetchone()[0] == "no_u_turn"
+    assert con.execute("SELECT restriction_id, restriction_type FROM driving.turn_restrictions").fetchall() == [(-1, "no_u_turn")]
+    assert _turn_exists(con, ids["100#1f"], ids["200#1f"])
 
 
-def test_no_section_and_missing_file_are_noops(tmp_path):
-    con = _con()
-    assert RestrictionProcessor(con, _rules(tmp_path, "overrides:\n  - osm_id: 1\n    oneway: true\n"))._inject_overrides() == 0
-    assert RestrictionProcessor(con, "/no/such/file.yaml")._inject_overrides() == 0
-    assert RestrictionProcessor(con, None)._inject_overrides() == 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(pytest.main([__file__, "-q"]))
+def test_no_section_is_a_noop(tmp_path):
+    con, ids = _build(tmp_path, "overrides:\n  - osm_id: 100\n    lanes: 2\n")
+    assert con.execute("SELECT count(*) FROM driving.turn_restrictions").fetchone()[0] == 0
+    assert _turn_exists(con, ids["100#1f"], ids["100#1r"])

@@ -156,6 +156,12 @@ pub fn route(con: &Connection, g: &Graph, from_edge: i64, to_edge: i64, mode: &s
         return Err(format!("edge id(s) not in the {mode} routing graph: [{}]", missing.join(", ")));
     }
     let Some((_, path)) = g.bidirectional_dijkstra(from_edge, to_edge)? else { return Ok(None) };
+    details(con, &path, mode).map(Some)
+}
+
+/// The dict of a route along `path` (edge ids): `{edges, time_s, length_m, path}`, `path` with the row of each edge.
+pub fn details(con: &Connection, path: &[i64], mode: &str) -> Result<J> {
+    let path = path.to_vec();
     let ids = path.iter().map(i64::to_string).collect::<Vec<_>>().join(", ");
     let mut st = con
         .prepare(&format!(
@@ -182,11 +188,121 @@ pub fn route(con: &Connection, g: &Graph, from_edge: i64, to_edge: i64, mode: &s
     }
     let any_cost = path.iter().any(|e| detail[e].3.is_some());
     let any_len = path.iter().any(|e| detail[e].2.is_some());
-    Ok(Some(json!({
+    Ok(json!({
         "edges": path,
         // sum() of nothing is the int 0 in Python
         "time_s": if any_cost { json!(time) } else { json!(0) },
         "length_m": if any_len { json!(length) } else { json!(0) },
         "path": rows_out,
-    })))
+    }))
+}
+
+fn id_list(ids: &[i64]) -> String {
+    if ids.is_empty() { "NULL".into() } else { ids.iter().map(i64::to_string).collect::<Vec<_>>().join(",") }
+}
+
+/// The cost of each edge of `ids` in the weight of a router: the cost of the last edge of a route, which the graph does not hold
+/// (an arc costs its from-edge). `time` and `length`: `cost_s` and `length_m` (NULL: 0). Own costs: the own cost, else the
+/// edge's `cost_s`, or NaN with `skip`.
+pub fn edge_weights(con: &Connection, mode: &str, weight: &str, own: Option<&Own>, ids: &[i64]) -> Result<std::collections::HashMap<i64, f64>> {
+    let col = match (own, weight) {
+        (None, "length") => "coalesce(length_m, 0)::DOUBLE",
+        _ => "coalesce(cost_s, 0)::DOUBLE",
+    };
+    let mut st = con.prepare(&format!("SELECT edge_id, {col} FROM {mode}.edges WHERE edge_id IN ({})", id_list(ids))).map_err(err)?;
+    let rows = st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, f64>(1)?))).map_err(err)?;
+    let mut out = std::collections::HashMap::new();
+    for r in rows {
+        let (e, t) = r.map_err(err)?;
+        let w = match own {
+            None => t,
+            Some(o) => o.costs.get(&e).copied().unwrap_or(if o.skip { f64::NAN } else { t }),
+        };
+        out.insert(e, w);
+    }
+    Ok(out)
+}
+
+/// The merged line of the edges `ids` (ST_LineMerge; a MultiLineString where they do not join), as WKB.
+pub fn line(con: &Connection, mode: &str, ids: &[i64]) -> Result<Vec<u8>> {
+    con.query_row(
+        &format!("SELECT ST_AsWKB(ST_LineMerge(ST_Collect(list(geometry)))) FROM {mode}.edges WHERE edge_id IN ({})", id_list(ids)),
+        [],
+        |r| r.get(0),
+    )
+    .map_err(err)
+}
+
+/// The area of the edges `ids`: the union of the edges, each with a buffer of `buffer_m` metres in the UTM zone of the area.
+/// Gives the polygon (WKB, in lon/lat) and its area in km² (in the UTM zone), or None for no edges.
+pub fn reach_area(con: &Connection, mode: &str, ids: &[i64], buffer_m: f64, utm: &str) -> Result<Option<(Vec<u8>, f64)>> {
+    if ids.is_empty() {
+        return Ok(None);
+    }
+    let sql = format!(
+        "SELECT ST_AsWKB(ST_Transform(u, '{utm}', 'EPSG:4326', true)), ST_Area(u) / 1e6 FROM (
+           SELECT ST_Union_Agg(ST_Buffer(ST_Transform(geometry, 'EPSG:4326', '{utm}', true), {buffer_m}, 4)) AS u
+           FROM {mode}.edges WHERE edge_id IN ({}))",
+        id_list(ids)
+    );
+    con.query_row(&sql, [], |r| Ok(Some((r.get(0)?, r.get(1)?)))).map_err(err)
+}
+
+/// The UTM zone of the edges of a mode (the middle of their box).
+pub fn utm_of(con: &Connection, mode: &str) -> Result<String> {
+    let (x, y): (f64, f64) = con
+        .query_row(
+            &format!("SELECT (min(ST_XMin(geometry)) + max(ST_XMax(geometry))) / 2, (min(ST_YMin(geometry)) + max(ST_YMax(geometry))) / 2 FROM {mode}.edges"),
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .map_err(err)?;
+    Ok(duckosm_export::utm_epsg(x, y))
+}
+
+/// The `(lon, lat)` of a place name: the middle of the longest edge of that name in the mode, else the first hit of
+/// OpenStreetMap's Nominatim in the box of the mode (this needs the internet).
+pub fn geocode(con: &Connection, mode: &str, name: &str) -> Result<(f64, f64)> {
+    let local: Option<(f64, f64)> = con
+        .query_row(
+            &format!(
+                "SELECT ST_X(c), ST_Y(c) FROM (SELECT ST_LineInterpolatePoint(geometry, 0.5) AS c FROM {mode}.edges
+                 WHERE lower(name) = lower(?) ORDER BY length_m DESC, edge_id LIMIT 1)"
+            ),
+            [name],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .map(Some)
+        .or_else(|e| if matches!(e, duckdb::Error::QueryReturnedNoRows) { Ok(None) } else { Err(err(e)) })?;
+    if let Some(p) = local {
+        return Ok(p);
+    }
+    let (w, s, e, n): (f64, f64, f64, f64) = con
+        .query_row(
+            &format!("SELECT min(ST_XMin(geometry)), min(ST_YMin(geometry)), max(ST_XMax(geometry)), max(ST_YMax(geometry)) FROM {mode}.edges"),
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .map_err(err)?;
+    let enc: String = name
+        .bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => (b as char).to_string(),
+            b' ' => "+".to_string(),
+            _ => format!("%{b:02X}"),
+        })
+        .collect();
+    let url = format!("https://nominatim.openstreetmap.org/search?q={enc}&format=json&limit=1&viewbox={w},{n},{e},{s}&bounded=1");
+    let ua = format!("duckOSM/{} (+https://github.com/Khoshkhah/duckOSM)", env!("CARGO_PKG_VERSION"));
+    let mem = Connection::open_in_memory().map_err(err)?;
+    let text: String = mem
+        .execute_batch(&format!("INSTALL httpfs; LOAD httpfs; CREATE SECRET (TYPE http, EXTRA_HTTP_HEADERS MAP {{'User-Agent': '{ua}'}});"))
+        .and_then(|_| mem.query_row(&format!("SELECT content FROM read_text('{url}')"), [], |r| r.get(0)))
+        .map_err(|x| format!("Nominatim: {x}"))?;
+    let hits: J = serde_json::from_str(&text).map_err(|x| format!("Nominatim: {x}"))?;
+    let num = |v: &J| v.as_str().and_then(|t| t.parse::<f64>().ok());
+    match hits.get(0) {
+        Some(h) => Ok((num(&h["lon"]).ok_or("Nominatim: no lon")?, num(&h["lat"]).ok_or("Nominatim: no lat")?)),
+        None => Err(format!("no place {name:?} in the network or in Nominatim inside the box of the network")),
+    }
 }

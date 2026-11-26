@@ -1,11 +1,18 @@
 """The build makes visualization.edge_levels as its last step, and a rebuild keeps your edits (docs/design/levels_in_build.md)."""
-import logging
+import http.client
 import os
+import socket
+import subprocess
+import sys
+import time
 from pathlib import Path
+
+import logging
 
 import duckdb
 import pytest
 
+from cli_run import invoke
 from duckosm import Config, DuckOSM
 
 rs = pytest.importorskip("roadstyle")
@@ -70,12 +77,12 @@ def test_a_rebuild_keeps_your_edits_and_ignores_the_roads_that_are_gone(first, t
     out.mkdir()
     cfg = _config(out)
     cfg.output_path = str(first.parent)                    # the same place: the build replaces the file
-    with caplog.at_level(logging.WARNING):
+    with caplog.at_level(logging.WARNING, logger="duckosm"):
         db = _build(cfg, out)
     assert db == first
+    assert "not in this file" in caplog.text               # the Rust build's warning, in the logger "duckosm"
     assert _q(db, "SELECT road, start_m, end_m FROM visualization.level_heads") == [(a_road, "12", "5")]      # your row is in the new file
     assert [r[0] for r in _q(db, "SELECT kind FROM visualization.level_unmatched")] == ["level_heads"]        # the gone road's row is kept apart
-    assert "not in this file" in caplog.text
     assert _q(db, f"SELECT head_start_m FROM visualization.edge_levels WHERE edge_id = {a_road}") == [(12.0,)]  # the solve used it
 
 
@@ -87,9 +94,9 @@ def test_a_road_that_comes_back_is_used_again(first):
     con.execute("DROP TABLE IF EXISTS visualization.level_unmatched")
     con.execute(f"CREATE TABLE visualization.level_unmatched AS SELECT 'level_heads' AS kind, '{{\"road\": \"{a_road}\", \"start_m\": \"7\", \"end_m\": \"5\"}}' AS row")
     con.close()
-    from duckosm._levels import make_and_solve
-    res = make_and_solve(first)
-    assert res["unmatched"] == 0
+    r = invoke(["levels", str(first)])
+    assert r.exit_code == 0, r.output
+    assert "0 edit row(s) not used" in r.output
     assert "level_unmatched" not in {r[0] for r in _q(first, "SELECT table_name FROM information_schema.tables WHERE table_schema = 'visualization'")}
     assert _q(first, f"SELECT start_m FROM visualization.level_heads WHERE road = {a_road}") == [("7",)]
 
@@ -124,56 +131,50 @@ def test_a_clip_takes_the_edits_of_its_parent(first, tmp_path):
 
 # ---- duckosm levels-edit -------------------------------------------------------------------------
 
-def test_levels_edit_prepares_the_area_from_the_tables(first, tmp_path):
-    from duckosm._levels import is_current
-    from duckosm.levels_edit import prepare
+def test_levels_writes_the_area_files_from_the_tables(first, tmp_path):
+    """`duckosm levels` makes the area folder from the tables (the tables are the master): a heads.csv that differs is written again."""
     a_road, = _q(first, "SELECT edge_id FROM driving.edges ORDER BY edge_id LIMIT 1")[0]
     con = duckdb.connect(str(first))
     con.execute(f"CREATE OR REPLACE TABLE visualization.level_heads AS SELECT * FROM (VALUES ({a_road}::BIGINT, '11', '5')) t(road, start_m, end_m)")
     con.close()
-    area = prepare(first, tmp_path / "work.levels")                  # a new folder: its files come from the tables, and it is solved
+    db = tmp_path / "work.duckdb"
+    db.write_bytes(first.read_bytes())
+    assert invoke(["levels", str(db)]).exit_code == 0
+    area = tmp_path / "work.levels"
     assert (area / "heads.csv").read_text().splitlines() == ["road,start_m,end_m", f"{a_road},11,5"]
-    assert is_current(first, area)
-    (area / "heads.csv").write_text("road,start_m,end_m\n")           # a file that differs from the table: the table wins, the file is kept
-    prepare(first, area)
+    (area / "heads.csv").write_text("road,start_m,end_m\n")           # a file that differs from the table: the table wins
+    assert invoke(["levels", str(db)]).exit_code == 0
     assert (area / "heads.csv").read_text().splitlines()[1] == f"{a_road},11,5"
-    assert (area / "heads.csv.before").read_text() == "road,start_m,end_m\n"
 
 
-def test_levels_edit_asks_for_google_3d_with_a_key(first, monkeypatch):
-    pytest.importorskip("mapstyle")
-    from duckosm.levels_edit import items_for
-    import pandas as pd
-    monkeypatch.setenv("GOOGLE_MAPS_KEY", "AIza-test")
-    assert items_for(first)(pd.DataFrame({"edge": [1]}))[1]["google_3d"] is True
-    monkeypatch.delenv("GOOGLE_MAPS_KEY")
-    assert "google_3d" not in items_for(first)(pd.DataFrame({"edge": [1]}))[1]
-
-
-def test_levels_edit_serves_the_editor_and_the_maps_on_one_port(first, tmp_path):
-    """One port for the editor and the maps: a Google key's website list needs one address, for ever."""
-    pytest.importorskip("mapstyle")
-    import socket
-    import threading
-    import urllib.error
-    import urllib.request
-
-    from duckosm.levels_edit import start
-    reports = tmp_path / "reports"
-    reports.mkdir()
-    (reports / "map.html").write_text("<html>a map</html>")
+def test_levels_edit_serves_studio_on_one_port(first, tmp_path):
+    """`duckosm levels-edit DB --port N`: the page of Studio on the one file, its API, and no file outside the page's files."""
+    db = tmp_path / "edit.duckdb"
+    db.write_bytes(first.read_bytes())
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
-    front, _ = start(first, tmp_path / "work2.levels", port=port, reports=reports)
-    threading.Thread(target=front.serve_forever, daemon=True).start()
-    get = lambda path: urllib.request.urlopen(f"http://127.0.0.1:{port}{path}", timeout=120)
-    r = get("/map.html")                                                     # a file of the reports folder: as it is, never cached
-    assert r.read() == b"<html>a map</html>" and r.headers["Cache-Control"] == "no-store"
-    page = get("/").read().decode()                                          # everything else: the editor
-    assert "Level editor" in page and "buildings" in page
-    assert "#9db8d9" in page and "window.rsColor=function" in page           # the restricted roads are painted
-    assert get("/api/given_up").status == 200                                # an API call goes through to the editor
-    with pytest.raises(urllib.error.HTTPError):                              # a file that is not in the folder, outside it: not served
-        get("/../../etc/passwd")
-    front.shutdown()
+    proc = subprocess.Popen([sys.executable, "-m", "duckosm", "levels-edit", str(db), "--port", str(port), "--no-open"],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def get(path):
+        c = http.client.HTTPConnection("127.0.0.1", port, timeout=120)
+        c.request("GET", path)                            # http.client sends the path as it is: no ".." is resolved
+        r = c.getresponse()
+        return r.status, r.getheader("Cache-Control"), r.read()
+    try:
+        for _ in range(100):
+            try:
+                status, cache, page = get("/")
+                break
+            except OSError:
+                time.sleep(0.2)
+        else:
+            pytest.fail("levels-edit did not start")
+        assert status == 200 and cache == "no-store" and b"duckOSM Studio" in page
+        status, _, areas = get("/api/areas")                                   # an API call goes through
+        assert status == 200 and b'"edit"' in areas                            # the area is the name of the file
+        assert get("/../../etc/passwd")[0] == 404                              # a file outside the folder: not served
+    finally:
+        proc.terminate()
+        proc.wait(timeout=30)

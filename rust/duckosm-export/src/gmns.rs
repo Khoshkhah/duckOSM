@@ -149,6 +149,8 @@ impl Default for GmnsOptions {
 pub struct GmnsSummary {
     pub modes: Vec<ModeSummary>,
     pub combined: Option<(i64, i64)>,
+    /// The report of the lanes from netconvert of each mode that used it (`lanes_from_sumo`).
+    pub sumo: Vec<(String, crate::gmns_sumo::SumoReport)>,
 }
 
 /// Write the GMNS db `out` from the built duckOSM db `source`, as `to_gmns` with its defaults (every mode when `modes` is
@@ -231,6 +233,7 @@ fn build_gmns(source: &Path, out: &Path, name: &str, o: &GmnsOptions) -> Result<
     // the whole area at once: each step works in chunks (docs/design/gmns_streaming.md), and DuckDB spills to disk at its limit
     c.exec(&format!("SET memory_limit = '{}'", crate::MEMORY_LIMIT))?;
     let mut summary = Vec::new();
+    let mut sumo = Vec::new(); // the reports of the lanes from netconvert
     for mode in &chosen {
         let sch = format!("gmns_{mode}");
         let uses = mode_use(mode);
@@ -284,7 +287,7 @@ fn build_gmns(source: &Path, out: &Path, name: &str, o: &GmnsOptions) -> Result<
                 };
                 crate::gmns_lane_rules::lanes_from_rules(&c, &sch, mode, o.lane_geometry && mode == "driving", drive_side, &ring)?;
             } else {
-                crate::gmns_sumo::lanes_from_sumo(&c, source, &sch, mode, o.lane_geometry && mode == "driving", drive_side)?;
+                sumo.push((mode.clone(), crate::gmns_sumo::lanes_from_sumo(&c, source, &sch, mode, o.lane_geometry && mode == "driving", drive_side)?));
             }
             if o.lane_geometry {
                 meet_lanes(&c, &sch)?;
@@ -327,7 +330,7 @@ fn build_gmns(source: &Path, out: &Path, name: &str, o: &GmnsOptions) -> Result<
         c.exec("CREATE OR REPLACE TABLE main.elevation_metadata AS SELECT * FROM s.main.elevation_metadata")?;
     }
     c.exec("DETACH s")?;
-    Ok(GmnsSummary { modes: summary, combined })
+    Ok(GmnsSummary { modes: summary, combined, sumo })
 }
 
 /// `_build_combined`: one mode-tagged `gmns_all` network: the modes' nodes and links merged on their id, `allowed_uses` the
@@ -2348,8 +2351,61 @@ mod tests {
 
     /// A tagged 2-lane one-way road, then two untagged pieces: both take 2 lanes, piece by piece.
     #[test]
+    fn default_lane_width_by_class() {
+        assert_eq!((default_lane_w(Some("service")), default_lane_w(Some("residential_link")), default_lane_w(Some("primary"))), (2.5, 3.0, 3.25));
+    }
+
+    #[test]
     fn lanes_inherit_piece_by_piece() {
         let got = inherit_lanes(vec![e(3, 3, 4, 1, false), e(2, 2, 3, 1, false), e(1, 1, 2, 2, true)], 6);
         assert_eq!(got, vec![(2, 2), (3, 2)]);
     }
+}
+
+/// `duckosm.planning.to_path4gmns`: `node.csv` and `link.csv` of the GMNS schema `gmns_<mode>` of the GMNS database `gmns_db` in
+/// the folder `out` (the columns that are not geometry), as path4gmns reads them.
+pub fn node_link_csv(gmns_db: &Path, out: &Path, mode: &str) -> Result<()> {
+    let con = crate::open(gmns_db)?;
+    let e = |e: duckdb::Error| e.to_string();
+    std::fs::create_dir_all(out).map_err(|x| format!("{}: {x}", out.display()))?;
+    for table in ["node", "link"] {
+        let sch = format!("gmns_{mode}");
+        let mut st = con
+            .prepare("SELECT column_name FROM duckdb_columns() WHERE schema_name = ? AND table_name = ? AND data_type <> 'GEOMETRY'")
+            .map_err(e)?;
+        let cols: Vec<String> = st.query_map([&sch, table], |r| r.get(0)).map_err(e)?.collect::<std::result::Result<_, _>>().map_err(e)?;
+        if cols.is_empty() {
+            return Err(format!("{}: no table {sch}.{table}. Make it with duckosm.planning.to_gmns(...)", gmns_db.display()));
+        }
+        let sel: Vec<String> = cols.iter().map(|c| format!("\"{c}\"")).collect();
+        let path = out.join(format!("{table}.csv")).display().to_string().replace('\'', "''");
+        con.execute_batch(&format!("COPY (SELECT {} FROM {sch}.{table}) TO '{path}' (HEADER)", sel.join(", "))).map_err(e)?;
+    }
+    Ok(())
+}
+
+/// One link of `duckosm.planning.to_aequilibrae`.
+pub type AeqLink = (i64, i64, String, Option<String>, Option<f64>, f64, Option<f64>, Vec<u8>);
+
+/// The links of `duckosm.planning.to_aequilibrae` for the edges of `mode`, in the order of `edge_id`: `(link_id, edge_id,
+/// link_type = the OSM highway, name, speed km/h, capacity = lanes × the capacity of a lane of the road class (as GMNS),
+/// minutes, WKB)`.
+pub fn aequilibrae_links(db: &Path, mode: &str) -> Result<Vec<AeqLink>> {
+    if mode.is_empty() || !mode.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return Err(format!("{mode:?} is not a mode name"));
+    }
+    let con = crate::open(db)?;
+    let e = |e: duckdb::Error| e.to_string();
+    let hw = "coalesce(regexp_replace(split_part(highway, ';', 1), '_link$', ''), 'road')";
+    let sql = format!(
+        "SELECT row_number() OVER (ORDER BY edge_id), edge_id, coalesce(highway, 'road'), name, maxspeed_kmh::DOUBLE,
+                (coalesce(lanes, 1) * ({}))::DOUBLE, cost_s::DOUBLE / 60, ST_AsWKB(geometry)
+         FROM \"{mode}\".edges ORDER BY edge_id",
+        capacity_case(hw)
+    );
+    let mut st = con.prepare(&sql).map_err(e)?;
+    let rows = st
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?)))
+        .map_err(e)?;
+    rows.collect::<std::result::Result<Vec<AeqLink>, _>>().map_err(e)
 }

@@ -340,7 +340,11 @@ pub(crate) fn mv_new_apply(c: &Ctx, sch: &str) -> Result<()> {
 }
 
 /// `lanes_from_sumo`: see the module comment. `source`: the duckOSM db. `geometry`: also `lane.geom_cut` and `lane_connector`.
-pub(crate) fn lanes_from_sumo(c: &Ctx, source: &Path, sch: &str, mode: &str, geometry: bool, drive_side: &str) -> Result<()> {
+/// The report of `lanes_from_sumo` (the `sumo` entry of the result of `to_gmns`): the movements, the rows, the connectors, the
+/// links whose lane count differs from netconvert's, and the number of `lane_check` rows of each kind.
+pub type SumoReport = Vec<(String, i64)>;
+
+pub(crate) fn lanes_from_sumo(c: &Ctx, source: &Path, sch: &str, mode: &str, geometry: bool, drive_side: &str) -> Result<SumoReport> {
     let (to_dir, marked, unmatched) = if mode == "driving" { arrow_fit(c, sch, drive_side)? } else { (HashMap::new(), Vec::new(), Vec::new()) };
     let fits: HashSet<i64> = to_dir.keys().map(|k| k.0).collect();
     let sql = format!("SELECT link_id, allowed_uses, COALESCE(width, 3.25)::DOUBLE, turn FROM {sch}.lane ORDER BY link_id, lane_num");
@@ -606,5 +610,29 @@ pub(crate) fn lanes_from_sumo(c: &Ctx, source: &Path, sch: &str, mode: &str, geo
         bad.len(),
         check.len()
     );
-    Ok(())
+    let mut report: SumoReport = vec![
+        ("movements".into(), mv.len() as i64),
+        ("rows".into(), rows.len() as i64),
+        ("connectors".into(), connectors.len() as i64),
+        ("lane_count_mismatch".into(), bad.len() as i64),
+    ];
+    for k in ["no way out", "no way in", "against its arrow", "arrows not matched"] {
+        report.push((k.into(), check.iter().filter(|x| x.0 == k).count() as i64));
+    }
+    Ok(report)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Lane pairs that go on side by side are one movement row; a lane feeding two lanes ahead is two rows (ported from
+    /// tests/test_gmns.py).
+    #[test]
+    fn lane_pairs_become_runs_side_by_side() {
+        assert_eq!(runs(&[(1, 1), (2, 2)]), vec![vec![(1, 1), (2, 2)]]);
+        assert_eq!(runs(&[(2, 1), (2, 2)]), vec![vec![(2, 1)], vec![(2, 2)]]);
+        assert_eq!(runs(&[(1, 1), (1, 2), (2, 3)]), vec![vec![(1, 1)], vec![(1, 2), (2, 3)]]);
+    }
+}
+

@@ -695,3 +695,64 @@ pub fn lane_report(gmns_db: &std::path::Path) -> crate::Result<Vec<String>> {
     }
     Ok(out)
 }
+
+/// The checks of the Python GMNS tests (tests/test_gmns.py, tests/test_lane_taper.py), ported when the Python GMNS build went
+/// (AGENTS.md, "The library is Rust").
+#[cfg(test)]
+mod ported_tests {
+    use super::*;
+
+    const M: f64 = 111_320.0;
+
+    #[test]
+    fn placement_values() {
+        let w = [3.25, 3.25, 3.0];
+        assert_eq!(placement(Some("left_of:1"), &w), Some(0.0));
+        assert_eq!(placement(Some("middle_of:2"), &w), Some(4.875));
+        assert_eq!(placement(Some("right_of:3"), &w), Some(9.5));
+        assert_eq!((placement(Some("transition"), &w), placement(Some("left_of:4"), &w), placement(None, &w)), (None, None, None));
+    }
+
+    #[test]
+    fn smooth_ring_puts_a_circle_through_a_coarse_roundabout_and_leaves_other_rings_alone() {
+        use std::f64::consts::PI;
+        let (n, r) = (8, 10.0);
+        let mut ring: Vec<P> = (0..n).map(|k| (r * (2.0 * PI * k as f64 / n as f64).cos(), r * (2.0 * PI * k as f64 / n as f64).sin())).collect();
+        ring.push(ring[0]);
+        let out = smooth_ring(&ring, false);
+        assert!(ring.iter().all(|p| out.contains(p)) && out.len() >= 120 && out[0] == out[out.len() - 1]);
+        assert!(out.iter().all(|p| ((p.0 * p.0 + p.1 * p.1).sqrt() - r).abs() < 1e-9));
+        let step = out.windows(2).map(|w| ((w[1].1.atan2(w[1].0) - w[0].1.atan2(w[0].0) + PI).rem_euclid(2.0 * PI) - PI).abs().to_degrees()).fold(0.0, f64::max);
+        assert!(step < 3.0001);
+        let square: Vec<P> = vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0), (0.0, 0.0)];
+        let mut oval: Vec<P> = (0..12).map(|k| (15.0 * (2.0 * PI * k as f64 / 12.0).cos(), 8.0 * (2.0 * PI * k as f64 / 12.0).sin())).collect();
+        oval.push(oval[0]);
+        let open: Vec<P> = vec![(0.0, 0.0), (5.0, 1.0), (10.0, 3.0), (15.0, 6.0), (20.0, 10.0)];
+        assert_eq!(smooth_ring(&square, false), square);
+        assert_eq!(smooth_ring(&oval, false), oval);
+        assert_eq!(smooth_ring(&open, false), open);
+    }
+
+    #[test]
+    fn taper_moves_the_ends_and_leaves_the_middle() {
+        // about 57 m, east; left of an east-going line is north
+        let g = taper(&[(18.0, 59.0), (18.001, 59.0)], 1.0, 10.0, -0.5, 6.0).unwrap();
+        let dy = |y: f64| (y - 59.0) * M;
+        assert!((dy(g[0].1) - 1.0).abs() < 0.01);
+        assert!((dy(g[g.len() - 1].1) + 0.5).abs() < 0.01);
+        assert!(dy(shp::interpolate(&g, shp::length(&g) / 2.0).1).abs() < 0.01);
+    }
+
+    #[test]
+    fn a_carriageway_goes_straight_on_through_the_v() {
+        // a lane 2 m north of the line it should continue (east, from 18.0 59.0), over 57 m; the V ends at 20 m
+        let lane = [(18.0, 59.00001797), (18.001, 59.00001797)];
+        let g = straight(&lane, (18.0, 59.0), (1.0, 0.0), 20.0, true).unwrap();
+        let dy = |y: f64| (y - 59.0) * M;
+        assert!(dy(g[0].1).abs() < 0.01);
+        let kx = 59.0f64.to_radians().cos() * M;
+        // past the V (30 m east of the start) the lane is its own line again
+        let past = g.windows(2).find(|w| (w[1].0 - 18.0) * kx >= 30.0).map(|w| w[1]).unwrap();
+        assert!((dy(past.1) - 2.0).abs() < 0.05);
+    }
+}

@@ -40,24 +40,22 @@ rows, or the same file bytes where the format allows. A golden file holds the Py
 
 ## Step 6: the state
 
-Done (before GMNS and the maps): the program `duckosm` (`duckosm-rust` is an alias for one release), the wheel with the
-whole program in `duckosm._rust` (`cli`), and the Python API on Rust (`src/duckosm/_api.py`): the exports, the routing
-and the elevation. A connection to an in-memory database runs the Python code. The command `duckosm` of the
-wheel (`src/duckosm/_main.py`) runs Rust in the Python process. Work in other processes (the tiles) starts
-`python -m duckosm` again (`DUCKOSM_PYTHON`, `duckosm_build::self_command`).
+Done (2026-11-23). The Python package has no engine code: `tests/test_no_python_engine.py` lists each module of
+`src/duckosm` as a thin layer, and its list of modules still to port is empty.
 
-To do:
+- The build: `DuckOSM(config).run()` and `duckosm.build()` run the Rust `duckosm build`. The Python build (`importer.py`,
+  `processors/`, `rust_engine.py`, `validate.py`, `report.py`, `features/`) is deleted. Its unit tests build small
+  networks with the Rust build (`tests/osm_build.py`, the binding `write_pbf`).
+- The commands: all are Rust; the old Python CLI (`cli.py`) is deleted. `duckosm commands` lists them.
+- The SDK: each function calls `duckosm._rust` or the program, and makes the Python objects. The work that was in the SDK
+  modules moved to Rust: the routes with your own cost, the matrix, the isochrones and the accessibility (`Router`), the
+  geocoding, the OSMnx graph, the clip by a box or a circle, the largest component, the grades, the random points, the
+  diff of two builds, the GMNS CSV files and the AequilibraE links, the CommonRoad lanelets and the road surfaces, the
+  graph arrays of `duckosm.ml`, the OSM XML file, the features of `duckosm.gis`, the data of `Network.plot`, the summary
+  and the row counts, the aggregation of `duckosm.mobility`, and the DEM source rules.
+- The pages (`edit`, `ask`, `studio`) use the Rust database host in the Python module too.
 
-- The build: `DuckOSM.run()` and `duckosm build --pbf/--config` run the Python steps with the Rust network step, as before.
-  The whole build in Rust (`duckosm --config`) is not yet equal to it. With it, these tests fail: `test_engine_rust.py`
-  (no `features.ocean`), `test_levels_in_build.py` (no `visualization.level_heads` and the other tables of the level
-  edits), `test_ask_schema.py` and `test_editor_changes.py` (no `main.building_faces`), `test_page_fixes.py` (other
-  tables), `test_sample_config.py` (`duckosm_version` is `duckosm 0.7.0`, not `0.7.0`).
-- GMNS (group C): the command `gmns` is Rust; the functions `to_gmns`, `to_meso`, `to_micro`, `check_gmns`, and `to_sumo` with `bus_edges`, `edge_attrs` or `lanes`.
-- No Rust port yet: `levels`, `clip-pbf`, and the options of `duckosm build` (`--pbf`, `--output`, ...):
-  the Python CLI reads them and the build runs in Rust.
-- Then: remove `PYTHON_COMMANDS` of `src/duckosm/_main.py`, remove the Python engine code (the tag `python-engine-final`
-  keeps it), release 1.0.0.
+To do: release 1.0.0, then move the pins in Studio, sensor-matching, SonoFlow and the other projects.
 
 ## Group D: the state
 

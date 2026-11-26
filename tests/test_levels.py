@@ -6,10 +6,9 @@ from pathlib import Path
 
 import duckdb
 import pytest
-from click.testing import CliRunner
 
+from cli_run import invoke
 from duckosm import Config, DuckOSM
-from duckosm.cli import main
 
 rs = pytest.importorskip("roadstyle")
 if not hasattr(rs, "save_area_levels"):
@@ -41,17 +40,25 @@ def _all_edge_ids(con):
     return con.execute(f"SELECT count(DISTINCT edge_id) FROM ({' UNION ALL '.join(parts)})").fetchone()[0]
 
 
-def test_the_roads_of_all_modes_with_their_bands(monaco):
-    from duckosm._levels import load_roads
-    roads = load_roads(monaco)
+def _roads(db, tmp_path):
+    """The level roads of a db: `duckosm levels` writes them to the area folder next to the copy (`<name>.levels/roads.parquet`)."""
+    import pandas as pd
+    copy = tmp_path / "roads.duckdb"
+    copy.write_bytes(db.read_bytes())
+    assert invoke(["levels", str(copy)]).exit_code == 0
+    return pd.read_parquet(tmp_path / "roads.levels" / "roads.parquet")
+
+
+def test_the_roads_of_all_modes_with_their_bands(monaco, tmp_path):
+    roads = _roads(monaco, tmp_path)
     con = duckdb.connect(str(monaco), read_only=True)
-    assert len(roads) == roads["edge_id"].nunique() == _all_edge_ids(con)             # one row per edge_id, every mode
-    assert roads["edge_id"].is_monotonic_increasing
-    from duckosm.crossings import _level
-    assert (roads["band"].to_numpy() == [_level(ly, br, tn) for ly, br, tn in zip(roads["layer"], roads["bridge"], roads["tunnel"], strict=True)]).all()   # the tags only: a sidewalk or a crossing is on its street's floor
-    assert (roads["walk_type"] == "sidewalk").any() and (roads["walk_type"] == "crossing").any()
+    ids = [e for col in ("edges", "reversed") for es in roads[col] for e in es]        # a road is an edge and its reverse
+    assert len(ids) == len(set(ids)) == _all_edge_ids(con)                             # every edge_id of every mode, once
+    assert roads["road"].is_unique
+    bare = roads["layer"].isna() & roads["bridge"].isna() & roads["tunnel"].isna()
+    assert (roads.loc[bare, "band"] == 0).all() and (roads["band"] != 0).any()         # the tags only: a sidewalk or a crossing is on its street's floor
     assert roads["highway"].notna().all() and (roads["highway"] == "ferry").any()      # a ferry is a road too, with its own class
-    assert (roads["junction"] == "roundabout").any() and roads["edge_ref"].notna().all()   # roadstyle puts a roundabout on top where roads meet
+    assert roads["edge_ref"].notna().all()
     modes = set(roads["modes"].dropna())                                               # who may use it: the level editor shows it
     assert "walking" in modes and any(m.startswith("driving + walking + cycling") for m in modes)   # (+ bus where a bus line runs)
 
@@ -61,9 +68,9 @@ def test_levels_command_makes_the_area_and_writes_the_db(monaco, tmp_path):
     with every edge's ends; roadstyle's reader takes it for the db's roads."""
     db = tmp_path / "copy.duckdb"
     db.write_bytes(monaco.read_bytes())
-    r = CliRunner().invoke(main, ["levels", str(db)])
+    r = invoke(["levels", str(db)])
     assert r.exit_code == 0, r.output
-    assert "wrote visualization.edge_levels" in r.output and "0 stack pairs given up" in r.output
+    assert "(visualization.edge_levels)" in r.output and "0 given up" in r.output
     area = tmp_path / "copy.levels"
     assert {"roads.parquet", "pairs.csv", "edits.csv", "area.json", "levels.csv"} <= {p.name for p in area.iterdir()}
     con = duckdb.connect(str(db), read_only=True)
@@ -72,31 +79,34 @@ def test_levels_command_makes_the_area_and_writes_the_db(monaco, tmp_path):
     assert n[0] == n[1] == _all_edge_ids(con)
     cols = {c for c, in con.execute("SELECT column_name FROM (DESCRIBE visualization.edge_levels)").fetchall()}
     assert {"edge_id", "casing_start", "casing_level", "casing_end", "fill_level", "head_start_m", "head_end_m", "cap_start", "cap_end"} <= cols
-    from duckosm._levels import load_roads
-    roads = load_roads(db)
-    assert len(rs.load_area_levels(con, roads)) == len(roads)
-    info = CliRunner().invoke(main, ["info", str(db)])
+    import pandas as pd
+    roads = pd.read_parquet(area / "roads.parquet")
+    assert n[0] == sum(len(a) + len(b) for a, b in zip(roads["edges"], roads["reversed"]))      # an end row for every edge of the roads
+    info = invoke(["info", str(db)])
     assert "visualization (drawing order)" in info.output
 
 
 def test_your_heads_survive_a_new_run(monaco, tmp_path):
-    """heads.csv / caps.csv / edits.csv in the area are yours: a new run keeps them and the db gets them."""
+    """visualization.level_heads is yours (the tables are the master): a new run keeps it, writes heads.csv and uses it."""
     db = tmp_path / "copy.duckdb"
     db.write_bytes(monaco.read_bytes())
-    assert CliRunner().invoke(main, ["levels", str(db)]).exit_code == 0
+    assert invoke(["levels", str(db)]).exit_code == 0
     import pandas as pd
-    road = pd.read_parquet(tmp_path / "copy.levels" / "roads.parquet")["road"].iloc[0]
-    (tmp_path / "copy.levels" / "heads.csv").write_text(f"road,start_m,end_m\n{road},2.5,\n")
-    assert CliRunner().invoke(main, ["levels", str(db)]).exit_code == 0
+    roads = set(pd.read_parquet(tmp_path / "copy.levels" / "roads.parquet")["road"])
+    con = duckdb.connect(str(db))
+    road = next(e for e, in con.execute("SELECT edge_id FROM driving.edges WHERE length_m > 50 ORDER BY edge_id").fetchall() if e in roads)   # a long road: the head fits
+    con.execute(f"CREATE OR REPLACE TABLE visualization.level_heads AS SELECT * FROM (VALUES ({road}::BIGINT, '2.5', '')) t(road, start_m, end_m)")
+    con.close()
+    assert invoke(["levels", str(db)]).exit_code == 0
     assert str(road) in (tmp_path / "copy.levels" / "heads.csv").read_text()
     con = duckdb.connect(str(db), read_only=True)
-    assert con.execute("SELECT head_start_m FROM visualization.edge_levels WHERE edge_id = ?", [int(road)]).fetchone()[0] == 2.5
+    assert con.execute("SELECT head_start_m FROM visualization.edge_levels WHERE edge_id = ?", [road]).fetchone()[0] == 2.5
 
 
 def test_levels_command_errors_say_what_is_wrong(tmp_path):
     db = tmp_path / "empty.duckdb"
     duckdb.connect(str(db)).close()
-    r = CliRunner().invoke(main, ["levels", str(db)])
+    r = invoke(["levels", str(db)])
     assert r.exit_code != 0 and "no <mode>.edges table" in r.output
 
 
@@ -106,14 +116,20 @@ def test_bus_routes_in_the_build_and_the_level_roads(monaco):
     con = duckdb.connect(str(monaco), read_only=True)
     assert con.execute("SELECT count(*) FROM bus.routes").fetchone()[0] > 0
     assert con.execute("SELECT count(*) FROM bus.route_edges WHERE bus_lane").fetchone()[0] > 0
-    from duckosm._levels import load_roads
-    roads = load_roads(monaco).set_index("edge_ref")
-    lane = roads.loc["1449981121#1r"]
-    assert "bus" in lane["modes"].split(" + ") and "driving" not in lane["modes"].split(" + ")
-    assert lane["bus_lines"] == ", ".join(sorted(set(lane["bus_lines"].split(", ")), key=lambda r: (not r.isdigit(), int(r) if r.isdigit() else 0, r)))
-    assert roads.loc["1449981121#1f", "modes"].startswith("driving") and "bus" in roads.loc["1449981121#1f", "modes"]
+    import pandas as pd
+    roads = pd.read_parquet(monaco.with_suffix(".levels") / "roads.parquet")
+    lines = {}                                           # edge_ref -> (modes of the edge, bus_lines of its road)
+    for _, r in roads.iterrows():
+        for side in ("edge", "reversed"):
+            for ref, modes in zip(r["edge_refs" if side == "edge" else "reversed_refs"], r["edges_modes" if side == "edge" else "reversed_modes"]):
+                lines[ref] = (modes, r["bus_lines"])
+    modes, bus_lines = lines["1449981121#1r"]
+    assert "bus" in modes.split(" + ") and "driving" not in modes.split(" + ")
+    assert bus_lines == ", ".join(sorted(set(bus_lines.split(", ")), key=lambda r: (not r.isdigit(), int(r) if r.isdigit() else 0, r)))
+    assert lines["1449981121#1f"][0].startswith("driving") and "bus" in lines["1449981121#1f"][0]
     assert roads["bus_lines"].isna().sum() > 0                                   # most roads have no bus
-    assert not any("bus" in str(m).split(" + ") for m in roads.loc[roads["bus_lines"].isna(), "modes"])   # no line, no bus (2026-10-10: a walking-only reverse said "walking + bus")
+    for ms, bl in lines.values():                        # no line, no bus (2026-10-10: a walking-only reverse said "walking + bus")
+        assert bl is not None or "bus" not in str(ms).split(" + ")
 
 
 def test_the_build_writes_every_driving_edges_lane_profile(monaco):

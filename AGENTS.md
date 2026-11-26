@@ -9,6 +9,7 @@ Use the project venv — `duckosm` and `pytest` are only on `PATH` when it's act
 
 ```bash
 pip install -e ".[dev,routing]"                     # dev = pytest, lxml (MATSim schema tests), networkx. It builds rust/ with maturin (needs a Rust toolchain): run it again after a change in rust/
+# run pytest with an absolute PYTHONPATH (or none): a test that changes the folder starts `python -m duckosm`, and a relative path then loads another duckosm
 
 .venv/bin/python -m pytest tests/ -q                          # full suite
 .venv/bin/python -m pytest tests/test_merge_segments.py -q    # one file
@@ -29,37 +30,36 @@ Several tests skip themselves unless local artifacts or tools exist: `pbf/soderm
 
 ## Architecture
 
-**Build = `DuckOSM(config).run()`** (`src/duckosm/importer.py`). `run()` assembles an ordered step
-list from the config and executes it; read it first — step order carries real dependencies:
+The library is Rust (`rust/`). The `duckosm` program is `duckosm-cli` (`rust/duckosm-cli/src/main.rs` dispatches the
+commands to the crates). The wheel holds the whole program in the Python module `duckosm._rust` (maturin,
+`rust/duckosm-py`): `python -m duckosm` runs it in the Python process (`src/duckosm/_main.py`).
 
-- **Global steps once:** connect → (osmium pre-clip of the PBF to the boundary, cached in `pbf/`) →
-  `ST_READOSM` into `raw.nodes/ways/relations` → boundary → `global_junctions` (a mode-agnostic
+**Build = `duckosm build`** (`build_cmd` in `rust/duckosm-cli/src/main.rs`; the steps in `rust/duckosm-build/src/lib.rs`,
+the network in `rust/duckosm-core`, the DuckDB steps in `rust/duckosm-duckdb`). Step order carries real dependencies:
+
+- **Global steps once:** read the PBF and cut it to the boundary → OSM fixes → `global_junctions` (a mode-agnostic
   junction set so every mode splits roads at the same points and shares `edge_id`s).
-- **Per mode** (`CREATE SCHEMA <mode>; USE <mode>`, so unqualified table names are per-mode):
-  RoadFilter → OSM overrides → GraphBuilder → GraphSimplifier (incl. `merge_segments`) →
-  path connector → dismount → speeds → costs → functional type → turn restrictions (driving only)
-  → EdgeGraph → ComponentFilter → H3 → indexes → validate.
-- **After modes:** multimodal `mm.*`, `features.*` base-map layers (needs `raw.*`, so before
-  cleanup), persist `edge_id_hash` macros, cleanup, `main.visualization_metadata`, report, viz.
-- **Clip mode** (`source.type: duckdb`): no PBF — `DuckdbClipper` copies rows out of an attached
-  parent build (e.g. `sodermalm ← sweden`), then ComponentFilter/validate. Edge ids are preserved
-  verbatim; `duckosm extract` does the same ad hoc.
-- **Rust engine** (`options.engine: rust`, the default since 2026-11-04; `--engine python` is the reference): `duckosm._rust.build()` (the Rust code in
-  `rust/`, built into the wheel by maturin) builds the network step for all modes at once and writes GeoParquet;
-  `rust_engine.py` loads `edges`, `private_edges`, `nodes` and `edge_id_map` into each mode's schema.
-  RoadFilter still runs (`ways`, `way_nodes` for the restrictions), and the steps after the network
-  (restrictions, EdgeGraph, ComponentFilter, H3, …) run in Python as before. `docs/design/rust_engine.md`.
+- **Per mode:** road filter → network (merge of the chains of one road, virtual nodes) → path connector → dismount →
+  speeds → costs → functional type → turn restrictions → edge graph → H3 and tile keys.
+- **After modes:** the `.duckdb` file, multimodal `mm.*`, `features.*` base-map layers (they need `raw.*`), bus routes,
+  lane profile, the `edge_id_hash` macros, `main.visualization_metadata`, validation, and the drawing order
+  (`visualization.edge_levels`) with the edits of the file that the build replaces.
+- **Clip mode** (`source.type: duckdb`): no PBF; the rows of an attached parent build are copied (e.g.
+  `sodermalm ← sweden`). Edge ids are preserved verbatim; `duckosm extract` does the same ad hoc.
 
-Each stage is a `BaseProcessor` subclass in `src/duckosm/processors/` that runs SQL on the shared
-connection — logic lives in SQL, not Python loops. `config.py` holds the YAML schema
-(`src/duckosm/templates/config.yaml` is the commented reference `duckosm init-config` writes;
-`docs/reference/configuration.md` every field). Relative paths resolve against the current folder: a pip
-install has no repo, so only files inside `src/duckosm/` ship.
+`config.py` holds the YAML schema in Python (`DuckOSM(config).run()` writes it as a file and runs `duckosm build -c`);
+`rust/duckosm-build/src/config.rs` reads the file and knows every key. `src/duckosm/templates/config.yaml` is the
+commented reference that `duckosm init-config` writes; `docs/reference/configuration.md` has every field. Relative paths
+resolve against the current folder: a pip install has no repo, so only files inside `src/duckosm/` ship.
 
-**Exporters** (`sumo.py`, `matsim*.py`, `gmns*.py`, `opendrive.py`, `lanelet2.py`, `railml.py`,
-`gis.py`, `routing.py`) read a *finished* db and are wired as subcommands in `cli.py`. Lane-level
-exporters (`matsim-lanes`, `lanelet2`, `opendrive --junctions`, `lane-graph`) take a **GMNS db**
-produced by `duckosm gmns`, not the core db. `railml` re-extracts rail from `raw.*`.
+**Exporters** (`rust/duckosm-export`: SUMO, MATSim, GMNS, OpenDRIVE, Lanelet2, railML, GIS, OSM XML, CommonRoad lanelets)
+read a *finished* db. Lane-level exporters (`matsim-lanes`, `lanelet2`, `opendrive --junctions`, `lane-graph`) take a
+**GMNS db** produced by `duckosm gmns`, not the core db. `railml` re-extracts rail from `raw.*`. Routing is
+`rust/duckosm-route`; the pages (`edit`, `ask`, `studio`, `viz`, `route-map`) are `rust/duckosm-edit`.
+
+**The Python SDK** (`src/duckosm/*.py`) calls `duckosm._rust` (the bindings in `rust/duckosm-py/src/`) or the `duckosm`
+program, and makes Python objects of the results (DataFrames, GeoDataFrames, networkx graphs from a Rust pickle). See
+"The library is Rust" below.
 
 ## GMNS lanes, movements and footpaths (2026-10-02, branch `gmns-values`)
 
@@ -86,10 +86,22 @@ or continuing a matched footpath); `--walk-frame` (moves footpaths to the kerb) 
   when named: config `osm_overrides:` or `build --fixes` (no default since 2026-09-30; Kaveh's local
   area configs name it). Only enable a rule once verified; provenance goes in `known_osm_issues.md`.
 
+## The library is Rust (Kaveh, 2026-11-23)
+
+- **Python is only a thin layer.** Each SDK function calls `duckosm._rust`. The only exception: a function that must return a
+  Python object (a networkx graph). No Python engine code: no build steps, exporters or routers in Python.
+- **Port and delete in the same PR.** When a part moves to Rust, its Python version goes. No fallbacks to Python code.
+- **No computing in Python.** A Python function may call Rust, check its arguments, read tables for the user, and make Python
+  objects of the results (a DataFrame, a networkx graph, an AequilibraE project, a CommonRoad scenario, a matplotlib picture).
+  It may not compute results: no SQL that joins, aggregates or writes, no geometry (offsets, buffers, unions), no graph
+  search. That work goes into a Rust function and a binding.
+- **`tests/test_no_python_engine.py` guards this.** Each module of `src/duckosm` must be in its list of thin modules; the list
+  of modules still to port (`LEFT`) is empty since 2026-11-23 and stays empty.
+- Do not ask Kaveh about Python leftovers, and do not report them as open questions. Port them.
+
 ## Conventions
 
-- Heavy/optional deps (geopandas, networkx, rasterio, roadstyle, sumolib) are imported lazily
-  inside functions; the core install is duckdb/shapely/h3/click/rich/pyyaml/pandas/timezonefinder only.
+- Heavy/optional deps (geopandas, networkx, roadstyle) are imported lazily inside functions.
 - Maps go through **roadstyle** (`duckosm viz`, `scripts/roadstyle_map.py`), not hand-rolled
   folium/matplotlib.
 - Design docs for non-trivial changes live in `docs/design/`; update the matching `docs/*.md`

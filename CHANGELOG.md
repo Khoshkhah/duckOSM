@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **The Python package has no engine code: the library is Rust.** `DuckOSM(config).run()` runs the Rust build, and the
+  SDK functions call the Rust module `duckosm._rust`. Removed: the Python build (`duckosm.importer`, `duckosm.processors`,
+  `duckosm.validate`, `duckosm.features`), the old Python CLI (`duckosm.cli`), the Python routers, exporters and pages
+  (`duckosm.point_routing`, `duckosm.directions`, `duckosm.railml`, `duckosm.elevation`, `duckosm.edit`, `duckosm.studio`,
+  `duckosm.viz`, `duckosm.route_map`, `duckosm.query`, `duckosm.gis_debug`), and the dependencies `click`, `rich`, `h3`
+  and `timezonefinder`. Changed: `route()` has no `graph=` and `Router` has no `.graph` (`Router` keeps its graph in
+  Rust); `duckosm.routing.node_branches` and `node_out_degree` are removed; an error of the Rust code is a
+  `RuntimeError`, except a bad edge id or point of a route (`ValueError`). New: `duckosm get --point LON,LAT --dist-m M`,
+  and `duckosm commands`. `docs/design/all_in_rust.md`.
+
 - **The building parts in 3D: links, heights in metres and walls.** `features.buildings` and `features.building_parts`
   get `height_m`, `min_height_m` and `height_source` (the `height` tag, else `building:levels` × 3.2 m, else 6 m).
   A part gets `building_id` (from a `type=building` relation, else the building that holds it) and `support` (`ground`,

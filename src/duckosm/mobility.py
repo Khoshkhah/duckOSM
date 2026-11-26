@@ -121,12 +121,12 @@ def match(view, traces, *, trace: str | None = "trace_id", time: str | None = "t
         if not pd.api.types.is_numeric_dtype(t):                  # a time: whole seconds since 1970 (any unit of datetime64)
             t = (pd.to_datetime(t, utc=True) - pd.Timestamp("1970-01-01", tz="UTC")) / pd.Timedelta("1s")
         ts = t.round().astype("int64").tolist()
-    cols, (rt, re) = _rust().mobility_match(db, mode, list(map(int, ids)), xs.tolist(), ys.tolist(), float(radius_m),
+    cols, (rt, re, seq) = _rust().mobility_match(db, mode, list(map(int, ids)), xs.tolist(), ys.tolist(), float(radius_m),
                                             float(sigma_m), float(beta_m), 4.0, float(uturn_m), method, ts, int(window_s))
     points = _columns(df, cols)
     labels = df[tcol].drop_duplicates().to_numpy() if tcol else [0]
-    edges = pd.DataFrame({"trace_id": [labels[i] for i in rt], "edge_id": pd.array(re, dtype="int64")})
-    edges.insert(1, "seq", edges.groupby("trace_id", sort=False).cumcount())
+    edges = pd.DataFrame({"trace_id": [labels[i] for i in rt], "seq": pd.array(seq, dtype="int64"),
+                          "edge_id": pd.array(re, dtype="int64")})
     return Match(points, edges)
 
 
@@ -155,19 +155,30 @@ def aggregate(view, matched, by: str = "edge_id", time: str | None = "hour", *, 
     import pandas as pd
     resolve(view, mode)                          # the mode rules, as the other calls
     df = matched.dropna(subset=[by])
-    keys = [by]
+    codes, labels = pd.factorize(df[by], sort=True)
+    times = bin_ns = tz = None
     if time is not None:
         if time_column not in df:
             raise DuckOSMError(f"no column {time_column!r}: give time_column=, or time=None")
-        freq = {"hour": "h", "day": "D"}.get(time, time)
-        df = df.assign(**{"time": pd.to_datetime(df[time_column]).dt.floor(freq)})
-        keys.append("time")
-    g = df.groupby(keys)
-    out = g.size().rename("count").to_frame()
+        t = pd.to_datetime(df[time_column])
+        tz = t.dt.tz
+        if tz is not None:                       # the bins are in the local time of the column, as pandas floor
+            t = t.dt.tz_localize(None)
+        try:
+            bin_ns = int(pd.tseries.frequencies.to_offset({"hour": "h", "day": "D"}.get(time, time)).nanos)
+        except ValueError as e:
+            raise DuckOSMError(f"time={time!r}: give a fixed bin, for example 'hour', '15min' or 'day'") from e
+        times = t.to_numpy("datetime64[ns]").astype("int64").tolist()
+    vals = None if value is None else pd.to_numeric(df[value]).astype("float64").tolist()
+    k, b, n, mean = _rust().mobility_aggregate(codes.tolist(), times, bin_ns, vals)
+    out = pd.DataFrame({by: labels.take(k)})
+    if time is not None:
+        when = pd.to_datetime(pd.Series(b, dtype="int64"), unit="ns")
+        out["time"] = when.dt.tz_localize(tz) if tz is not None else when
+    out["count"] = pd.Series(n, dtype="int64")
     if value is not None:
-        out[f"{value}_mean"] = g[value].mean()
-    return out.reset_index()
-
+        out[f"{value}_mean"] = mean
+    return out
 
 def edge_id_map(old_net, new_net, mode: str | None = None, tol_m: float = 2.0):
     """The ``edge_id`` of an old build on the edges of a new build of the same area (after an OSM update or a change of

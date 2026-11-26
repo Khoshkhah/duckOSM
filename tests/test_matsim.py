@@ -6,7 +6,7 @@ from pathlib import Path
 import duckdb
 import pytest
 
-from duckosm.matsim import to_matsim
+from duckosm._api import to_matsim
 
 _DTD = Path(__file__).parent / "fixtures" / "network_v2.dtd"   # vendored official MATSim network_v2 DTD
 
@@ -127,7 +127,7 @@ def test_crs_override(tmp_path):
 
 
 def test_bad_mode(tmp_path):
-    with pytest.raises(ValueError, match="cycling"):
+    with pytest.raises(RuntimeError, match="cycling"):
         to_matsim(str(_src(tmp_path / "s.duckdb")), tmp_path / "net.xml", mode="cycling")
 
 
@@ -228,11 +228,3 @@ def test_multimodal_dtd_valid(tmp_path):
     dtd = lxml_etree.DTD(str(_DTD))
     tree = lxml_etree.parse(str(tmp_path / "n.xml"))
     assert dtd.validate(tree), "\n".join(e.message for e in dtd.error_log)   # modes="car,bike,walk" valid CDATA
-
-
-def test_utm_zone_default():
-    from duckosm.utils import utm_epsg
-    assert utm_epsg(7.42, 43.73) == "EPSG:32632"       # Monaco
-    assert utm_epsg(18.06, 59.33) == "EPSG:32634"      # Stockholm
-    assert utm_epsg(151.2, -33.87) == "EPSG:32756"     # Sydney: southern hemisphere
-    assert utm_epsg(180.0, 10.0) == "EPSG:32601"       # the antimeridian wraps to zone 1

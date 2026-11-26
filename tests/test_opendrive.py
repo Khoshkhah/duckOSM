@@ -9,7 +9,7 @@ import duckdb
 import pytest
 
 from duckosm.gmns import to_gmns
-from duckosm.opendrive import to_opendrive
+from duckosm._api import to_opendrive
 
 A, B = 6141068311830699705, 3843102655846694531
 C, AR = 5555555555555555555, 1234567890123456789
@@ -98,7 +98,7 @@ def test_georeference_and_metric_coords(tmp_path):
 
 
 def test_bad_mode_raises(tmp_path):
-    with pytest.raises(ValueError, match="cycling"):
+    with pytest.raises(RuntimeError, match="cycling"):
         to_opendrive(str(_src(tmp_path / "s.duckdb")), tmp_path / "n.xodr", mode="cycling")
 
 
@@ -152,5 +152,5 @@ def test_junctions_structure(tmp_path):
 
 def test_junctions_requires_gmns(tmp_path):
     # core db (no gmns_driving.movement) → --junctions raises
-    with pytest.raises(ValueError, match="GMNS"):
+    with pytest.raises(RuntimeError, match="GMNS"):
         to_opendrive(str(_src(tmp_path / "core.duckdb")), tmp_path / "n.xodr", junctions=True)

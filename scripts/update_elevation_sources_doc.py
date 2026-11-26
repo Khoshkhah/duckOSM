@@ -7,7 +7,27 @@ import re
 import sys
 from pathlib import Path
 
-from duckosm.dem_sources import render_tables
+from duckosm.dem_sources import load
+
+
+def _row(cells) -> str:
+    return "| " + " | ".join(cells) + " |"
+
+
+def render_tables() -> dict[str, str]:
+    """The two tables of `docs/reference/elevation-sources.md` that come from the catalog: `global` (the models that
+    `--dem` reads and `--source` does not fetch) and `national`."""
+    g = [_row(["Model", "Resolution", "Covers", "Type", "Access", "Licence"]), _row(["---"] * 6)]
+    n = [_row(["Country", "Model", "Resolution", "CRS (coordinate system)", "Access", "Licence"]), _row(["---"] * 6)]
+    for s in load():
+        a = s["access"]
+        if s["rank"] == 1:
+            n.append(_row([s["country"], s["name"], s["resolution_text"] + " " + s["product_text"],
+                           f"{s['crs']}, heights {s['vertical_datum']}", a["text"], s["license_text"]]))
+        elif s["rank"] < 9 and not s["duckosm_source"]:
+            g.append(_row([s["name"], s["resolution_text"], s["covers_text"], s["product_text"], a["text"], s["license_text"]]))
+    return {"global": "\n".join(g), "national": "\n".join(n)}
+
 
 DOC = Path(__file__).resolve().parent.parent / "docs/reference/elevation-sources.md"
 

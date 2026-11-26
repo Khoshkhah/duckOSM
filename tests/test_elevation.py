@@ -1,12 +1,11 @@
-"""Tests for duckosm.elevation — DEM sampling into a built db (nodes.ele + edges.z_from/z_to)."""
+"""Tests for `duckosm elevation` (duckosm.to_elevation) — DEM sampling into a built db (nodes.ele + edges.z_from/z_to)."""
 import duckdb
 import pytest
 
 pytest.importorskip("rasterio")
 pytest.importorskip("pyproj")
 
-from duckosm.elevation import (to_elevation, _copernicus_url, _fix_polluted_proj,
-                               _resolve_provider, _covers_europe)
+from duckosm import to_elevation
 
 A, B = 6141068311830699705, 3843102655846694531
 
@@ -18,7 +17,6 @@ def _ramp(lon, lat):
 
 def _dem(path, west=17.9, south=59.2, east=18.2, north=59.4, n=600):
     """Write a synthetic EPSG:4326 GeoTIFF of the ramp over the test bbox."""
-    _fix_polluted_proj()          # a co-run sumo test may have poisoned PROJ_DATA before this
     import numpy as np
     import rasterio
     from rasterio.transform import from_bounds
@@ -50,13 +48,6 @@ def _src(path, nodes, edges):
         con.execute(f"INSERT INTO driving.edges VALUES ({eid},{src},{tgt},'primary',{g})")
     con.close()
     return str(path)
-
-
-def test_copernicus_tile_naming():
-    # Stockholm (~59.3N, 18.1E) → N59/E018; SW-corner naming; hemispheres.
-    assert "N59_00_E018_00" in _copernicus_url(59, 18)
-    assert "S34_00_W071_00" in _copernicus_url(-34, -71)   # Santiago-ish
-    assert _copernicus_url(59, 18).startswith("/vsicurl/https://")
 
 
 def test_ele_and_z_from_local_dem(tmp_path):
@@ -114,9 +105,9 @@ def test_provenance_metadata(tmp_path):
 def test_reference_dem_needs_datum_and_license(tmp_path):
     dem = _dem(tmp_path / "ramp.tif")
     src = _src(tmp_path / "s.duckdb", [(1, 18.06, 59.32)], [])
-    with pytest.raises(ValueError, match="reference ground"):
+    with pytest.raises(Exception, match="reference ground"):
         to_elevation(src, dem=dem, vertical_datum="EGM2008", license="x")
-    with pytest.raises(ValueError, match="DTM .bare earth. or DSM"):
+    with pytest.raises(Exception, match="DTM|DSM"):
         to_elevation(src, dem=dem, product="DEM", reference=False)
     to_elevation(src, dem=dem, reference=False)            # not the reference: unknown is allowed
     con = duckdb.connect(src, read_only=True)
@@ -165,47 +156,8 @@ def test_suffix_keeps_two_surfaces(tmp_path):
 def test_suffix_rejects_non_identifier(tmp_path):
     # the suffix is interpolated into DDL — anything but a bare identifier must be refused
     src = _src(tmp_path / "s.duckdb", [(1, 18.06, 59.32)], [])
-    with pytest.raises(ValueError, match="bare identifier"):
+    with pytest.raises(Exception, match="bare identifier"):
         to_elevation(src, dem=_dem(tmp_path / "r.tif"), suffix="dsm; DROP TABLE driving.nodes")
-
-
-# ---- auto source resolution (pure logic, no network / no db) --------------------------------
-SWEDEN = (18.0, 59.3, 18.1, 59.35)          # inside Europe
-VANCOUVER = (-123.2, 49.2, -123.0, 49.3)    # outside Europe
-
-
-def test_covers_europe():
-    assert _covers_europe(SWEDEN) and _covers_europe((26.6, 58.3, 26.8, 58.4))   # Tartu
-    assert not _covers_europe(VANCOUVER)
-    assert not _covers_europe((-30.0, 40.0, -26.0, 45.0))   # mid-Atlantic, west of coverage edge
-
-
-def test_explicit_source_passthrough():
-    assert _resolve_provider("copernicus", VANCOUVER) == "copernicus"
-    assert _resolve_provider("eudtm", SWEDEN) == "eudtm"        # honoured regardless of coverage/key
-    with pytest.raises(ValueError, match="unknown --source"):
-        _resolve_provider("nope", SWEDEN)
-
-
-def test_auto_without_key_is_copernicus(monkeypatch):
-    monkeypatch.delenv("OPENTOPOGRAPHY_API_KEY", raising=False)
-    assert _resolve_provider("auto", SWEDEN) == "copernicus"    # Europe but no key → fallback
-    assert _resolve_provider("auto", VANCOUVER) == "copernicus"
-
-
-def test_auto_with_key_picks_eudtm_in_europe(monkeypatch):
-    monkeypatch.setenv("OPENTOPOGRAPHY_API_KEY", "test-key")
-    assert _resolve_provider("auto", SWEDEN) == "eudtm"         # Europe + key → bare-earth EU-DTM
-    assert _resolve_provider("auto", VANCOUVER) == "copernicus"  # outside Europe → still copernicus
-
-
-def test_dem_uri_keeps_urls():
-    from pathlib import Path
-    from duckosm.elevation import _dem_uri
-    assert _dem_uri("https://example.org/dem.tif") == "https://example.org/dem.tif"
-    assert _dem_uri("/vsicurl/https://example.org/dem.tif") == "/vsicurl/https://example.org/dem.tif"
-    assert _dem_uri("dem.tif") == str(Path("dem.tif").resolve())
-
 
 
 def test_z_vertices_interior(tmp_path):

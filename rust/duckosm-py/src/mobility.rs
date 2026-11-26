@@ -100,7 +100,7 @@ fn mobility_match(
     method: String,
     ts: Option<Vec<i64>>,
     window_s: usize,
-) -> PyResult<(Snapped, (Vec<i64>, Vec<i64>))> {
+) -> PyResult<(Snapped, (Vec<i64>, Vec<i64>, Vec<i64>))> {
     if xs.len() != ys.len() || xs.len() != trace.len() {
         return Err(PyValueError::new_err("trace, x and y must have the same length"));
     }
@@ -121,7 +121,7 @@ fn mobility_match(
         let net = Net::new(&r);
         let dtw_net = if dtw { Some(mm::dtw_network(&net, turns(&db, &mode, &r)?)) } else { None };
         let mut points = Vec::with_capacity(xs.len());
-        let mut route = (Vec::new(), Vec::new());
+        let mut route = (Vec::new(), Vec::new(), Vec::new());
         let mut start = 0;
         while start < trace.len() {
             let end = (start..trace.len()).find(|&i| trace[i] != trace[start]).unwrap_or(trace.len());
@@ -133,8 +133,11 @@ fn mobility_match(
             };
             points.extend(m.points);
             for e in m.route {
+                // seq: 0, 1, … along the route of each trace
+                let seq = if route.0.last() == Some(&trace[start]) { route.2.last().map_or(0, |s| s + 1) } else { 0 };
                 route.0.push(trace[start]);
                 route.1.push(r[e].edge_id);
+                route.2.push(seq);
             }
             start = end;
         }
@@ -155,7 +158,19 @@ fn mobility_edge_id_map(py: Python<'_>, old: PathBuf, new: PathBuf, mode: String
     .map_err(err)
 }
 
+/// `duckosm.mobility.aggregate` (duckosm_core::matching::aggregate): for each key and time bin, the count and the mean of the
+/// values: (key, bin start, count, mean), in the order of the key, then the bin.
+#[pyfunction]
+#[pyo3(signature = (keys, times=None, bin=None, values=None))]
+#[allow(clippy::type_complexity)]
+fn mobility_aggregate(keys: Vec<i64>, times: Option<Vec<i64>>, bin: Option<i64>, values: Option<Vec<f64>>)
+                      -> PyResult<(Vec<i64>, Vec<i64>, Vec<i64>, Vec<f64>)> {
+    let rows = mm::aggregate(&keys, times.as_deref(), bin, values.as_deref()).map_err(err)?;
+    Ok((rows.iter().map(|r| r.0).collect(), rows.iter().map(|r| r.1).collect(), rows.iter().map(|r| r.2).collect(), rows.iter().map(|r| r.3).collect()))
+}
+
 pub fn add(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(mobility_aggregate, m)?)?;
     m.add_function(wrap_pyfunction!(mobility_snap, m)?)?;
     m.add_function(wrap_pyfunction!(mobility_match, m)?)?;
     m.add_function(wrap_pyfunction!(mobility_edge_id_map, m)?)?;

@@ -103,14 +103,13 @@ def test_walk_only_on_one_edge():
 def test_the_walk_to_the_road_never_crosses_another_road():
     """Kaveh: "it can't jump from roads". Edge 7 lies between the point and edge 1: edge 1 is out
     of reach, though within the radius; a road met only at the road point doesn't count."""
-    from duckosm.point_routing import candidates
     con = _db()
-    con.execute(f"INSERT INTO driving.edges VALUES (7, 20, 21, 'r7', 'residential', 100, 10, "
+    con.execute(f"INSERT INTO driving.edges VALUES (7, 20, 21, 'r7', 'residential', 100, 1000, "
                 f"ST_GeomFromText('{_line((0, 0.0001), (0.001, 0.0001))}'))")
-    assert {c["edge_id"] for c in candidates(con, "driving", (0.0005, 0.0002), 50)} == {7}
-    assert {c["edge_id"] for c in candidates(con, "driving", (0.0005, -0.0001), 50)} == {1}   # other side
-    # at a junction: the point beside the shared node reaches both edges that meet there
-    assert {c["edge_id"] for c in candidates(con, "driving", (0.001, -0.0001), 50)} == {1, 2}
+    con.execute("INSERT INTO driving.edge_graph VALUES (7, 2, 1000)")
+    # edge 1 is cheaper, but the walk to it crosses edge 7
+    assert route_points(con, (0.0005, 0.0002), (0.0015, 0))["edges"] == [7, 2]
+    assert route_points(con, (0.0005, -0.0001), (0.0015, 0))["edges"] == [1, 2]     # the other side
 
 
 def test_a_road_for_cars_blocks_the_walk_even_when_it_isnt_walkable():

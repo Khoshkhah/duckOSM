@@ -2,6 +2,7 @@
 //! Python export in src/duckosm/ and writes the same file. `cli` has the commands of `duckosm`.
 
 pub mod cli;
+pub mod commonroad;
 pub mod crossings;
 pub mod gis;
 pub mod gis_debug;
@@ -22,6 +23,7 @@ pub mod matsim;
 pub mod matsim_lanes;
 pub mod offset;
 pub mod opendrive;
+pub mod osm_xml;
 pub mod railml;
 pub mod shapely;
 pub mod stream;
@@ -181,5 +183,7 @@ mod tests {
         assert_eq!(quoteattr("a\"b'c&"), "\"a&quot;b'c&amp;\"");
         assert_eq!(utm_epsg(7.42, 43.73), "EPSG:32632");
         assert_eq!(utm_epsg(-70.0, -33.0), "EPSG:32719");
+        assert_eq!(utm_epsg(18.07, 59.33), "EPSG:32634"); // Stockholm
+        assert_eq!(utm_epsg(180.0, 10.0), "EPSG:32601"); // the antimeridian wraps to zone 1
     }
 }

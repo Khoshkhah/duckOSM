@@ -3,7 +3,7 @@ import duckdb
 import pytest
 
 from duckosm.gmns import to_gmns
-from duckosm.lane_routing import build_lane_graph, route_lanes
+from duckosm._api import build_lane_graph, route_lanes
 
 A, B, C, AR = 6141068311830699705, 3843102655846694531, 5555555555555555555, 1234567890123456789
 
@@ -90,17 +90,17 @@ def test_unreachable(tmp_path):
 def test_bad_db_raises(tmp_path):
     bare = tmp_path / "bare.duckdb"
     duckdb.connect(str(bare)).close()
-    with pytest.raises(ValueError, match="lane"):
+    with pytest.raises(RuntimeError, match="lane"):
         build_lane_graph(str(bare))
 
 
 def test_cli_json(tmp_path):
     import json
-    from click.testing import CliRunner
-    from duckosm.cli import main
+    import subprocess
+    import sys
     db = _gmns(tmp_path)
-    r = CliRunner().invoke(main, ["route-lanes", str(db), f"{A}_1", f"{C}_1", "--json"])
-    assert r.exit_code == 0, r.output
-    d = json.loads(r.output[r.output.index("{"):])
+    r = subprocess.run([sys.executable, "-m", "duckosm", "route-lanes", str(db), f"{A}_1", f"{C}_1", "--json"], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    d = json.loads(r.stdout[r.stdout.index("{"):])
     assert d["lanes"][0] == f"{A}_1" and d["lanes"][-1] == f"{C}_1" and d["cost"] > 0
 

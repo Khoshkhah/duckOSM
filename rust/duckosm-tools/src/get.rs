@@ -24,6 +24,12 @@ struct GetCli {
     /// An H3 cell (hex text).
     #[arg(long)]
     h3_cell: Option<String>,
+    /// A point: the area is the box --dist-m metres from it in each direction (as osmnx graph_from_point).
+    #[arg(long, value_name = "LON,LAT", allow_hyphen_values = true)]
+    point: Option<String>,
+    /// The distance of --point, in metres.
+    #[arg(long, default_value_t = 1000.0)]
+    dist_m: f64,
     /// A boundary file (GeoJSON, docs/reference/boundary.md).
     #[arg(long)]
     boundary: Option<PathBuf>,
@@ -50,6 +56,15 @@ struct GetCli {
     index: Option<String>,
 }
 
+/// The `LON,LAT` of `--point`.
+fn point_box(p: &str) -> Result<[f64; 2]> {
+    let v: Vec<f64> = p.split(',').map(|x| x.trim().parse::<f64>().map_err(|_| format!("--point {p}: not LON,LAT"))).collect::<Result<_>>()?;
+    match v.as_slice() {
+        [lon, lat] => Ok([*lon, *lat]),
+        _ => Err(format!("--point {p}: not LON,LAT")),
+    }
+}
+
 /// A file name: letters, digits, `_` and `-`, lower case (`duckosm boundary` names its file the same way).
 fn slug(text: &str) -> String {
     let s: String = text.split(',').next().unwrap_or_default().trim().to_lowercase().chars().map(|c| if c.is_alphanumeric() || c == '-' { c } else { '_' }).collect();
@@ -57,7 +72,16 @@ fn slug(text: &str) -> String {
 }
 
 pub fn run(args: &[String]) -> Result<()> {
-    let cli = GetCli::parse_from(args);
+    let mut cli = GetCli::parse_from(args);
+    if let Some(p) = cli.point.take() {
+        if cli.bbox.is_some() {
+            return Err("give one area: --point or --bbox".into());
+        }
+        let [lon, lat] = point_box(&p)?;
+        let (dy, dx) = (cli.dist_m / 111_320.0, cli.dist_m / (111_320.0 * lat.to_radians().cos()));
+        cli.bbox = Some(format!("{},{},{},{}", lon - dx, lat - dy, lon + dx, lat + dy));
+        cli.name.get_or_insert_with(|| "point".into());
+    }
     let given = [cli.place.is_some() || cli.osm_id.is_some(), cli.bbox.is_some(), cli.h3_cell.is_some(), cli.boundary.is_some()];
     if given.iter().filter(|&&g| g).count() != 1 {
         return Err("give one area: a NAME (or --osm-id), --bbox, --h3-cell or --boundary".into());

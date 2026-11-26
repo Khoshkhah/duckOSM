@@ -2108,6 +2108,14 @@ pub fn build(pbf_path: &Path, out: &Path, p: &Params) -> Result<Summary, String>
         Some(f) => config::read_osm_fixes(f)?,
         None => OsmFixes::default(),
     };
+    if !p.building_faces && !fixes.face_edits.is_empty() {
+        // the wall rules act only where the build makes the walls
+        eprintln!(
+            "warning: the fixes file has {} wall rule(s) (extra.building_faces). They do nothing: set options.building_faces: true \
+             (it needs a boundary) to make main.building_faces",
+            fixes.face_edits.len()
+        );
+    }
     if p.sidewalks_step {
         let (Some(tile), Some(b)) = (p.tile, &p.boundary) else {
             return Err("the sidewalk step needs --tile and --boundary".into());

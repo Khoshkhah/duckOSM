@@ -164,41 +164,16 @@ fn set_formats(p: &mut Params, formats: Option<Vec<String>>) -> PyResult<()> {
     }
 }
 
-/// The database of `duckosm edit` in Python (src/duckosm/edit.py): the module has no DuckDB, so the server calls the methods of a Python
-/// object (open, close, execute, texts, build).
-struct PyDb(Py<PyAny>);
-
-impl duckosm_edit::Db for PyDb {
-    fn open(&mut self) -> Result<(), String> {
-        Python::attach(|py| self.0.call_method0(py, "open").map(|_| ()).map_err(|e| e.to_string()))
-    }
-    fn close(&mut self) {
-        let _ = Python::attach(|py| self.0.call_method0(py, "close"));
-    }
-    fn execute(&mut self, sql: &str) -> Result<(), String> {
-        Python::attach(|py| self.0.call_method1(py, "execute", (sql,)).map(|_| ()).map_err(|e| e.to_string()))
-    }
-    fn texts(&mut self, sql: &str) -> Result<Vec<Option<String>>, String> {
-        Python::attach(|py| self.0.call_method1(py, "texts", (sql,)).and_then(|r| r.bind(py).extract()).map_err(|e| e.to_string()))
-    }
-    fn build(&mut self, config: &str, dir: &std::path::Path, fixes: &std::path::Path, db: &std::path::Path) -> Result<String, String> {
-        Python::attach(|py| {
-            self.0.call_method1(py, "build", (config, dir.display().to_string(), fixes.display().to_string(), db.display().to_string()))
-                .and_then(|r| r.bind(py).extract()).map_err(|e| e.to_string())
-        })
-    }
-}
-
 /// `duckosm edit` (rust/duckosm-edit, docs/design/edit_page.md): serve the page of the database `db` on 127.0.0.1:`port` in a thread of its
-/// own. The page reads the fixes file `load` and writes the fixes file `save` (None: not chosen; the page asks for the save file at the first
-/// Save). `backend` is the Python object of the database (duckosm/edit.py). Returns the address of the page at once; the server stops with
-/// the Python process.
+/// own, with the database of the program (`native::NativeDb`). The page reads the fixes file `load` and writes the fixes file `save` (None: not
+/// chosen; the page asks for the save file at the first Save). Returns the address of the page at once; the server stops with the Python process.
 #[pyfunction]
-#[pyo3(signature = (db, load, save, port, backend))]
-fn edit(py: Python<'_>, db: PathBuf, load: Option<PathBuf>, save: Option<PathBuf>, port: u16, backend: Py<PyAny>) -> PyResult<String> {
+#[pyo3(signature = (db, load, save, port))]
+fn edit(py: Python<'_>, db: PathBuf, load: Option<PathBuf>, save: Option<PathBuf>, port: u16) -> PyResult<String> {
     let listener = duckosm_edit::bind(port).map_err(PyValueError::new_err)?;
     let port = listener.local_addr().map_err(|e| PyRuntimeError::new_err(e.to_string()))?.port();
-    let site = py.detach(|| duckosm_edit::Site::new(Box::new(PyDb(backend)), &db, std::path::Path::new(""), port)).map_err(PyRuntimeError::new_err)?;
+    let native = duckosm_edit::native::NativeDb::new(&db);
+    let site = py.detach(|| duckosm_edit::Site::new(Box::new(native), &db, std::path::Path::new(""), port)).map_err(PyRuntimeError::new_err)?;
     site.set_files(load, save);
     let url = site.url();
     std::thread::spawn(move || duckosm_edit::serve(std::sync::Arc::new(site), listener));
@@ -208,33 +183,14 @@ fn edit(py: Python<'_>, db: PathBuf, load: Option<PathBuf>, save: Option<PathBuf
 /// `duckosm ask` (docs/design/ask_page.md): the same server, with roadstyle's data dock and Ask in place of the editor. `fixes` is the file whose
 /// changes Ask can read (the table `extra.edits`).
 #[pyfunction]
-fn ask(py: Python<'_>, db: PathBuf, fixes: PathBuf, port: u16, backend: Py<PyAny>) -> PyResult<String> {
-    serve_page(py, db, fixes, port, backend, duckosm_edit::Mode::Ask)
-}
-
-fn serve_page(py: Python<'_>, db: PathBuf, fixes: PathBuf, port: u16, backend: Py<PyAny>, mode: duckosm_edit::Mode) -> PyResult<String> {
+fn ask(py: Python<'_>, db: PathBuf, fixes: PathBuf, port: u16) -> PyResult<String> {
     let listener = duckosm_edit::bind(port).map_err(PyValueError::new_err)?;
     let port = listener.local_addr().map_err(|e| PyRuntimeError::new_err(e.to_string()))?.port();
-    let site = py.detach(|| duckosm_edit::Site::with_mode(Box::new(PyDb(backend)), &db, &fixes, port, mode)).map_err(PyRuntimeError::new_err)?;
+    let native = duckosm_edit::native::NativeDb::new(&db);
+    let site = py.detach(|| duckosm_edit::Site::with_mode(Box::new(native), &db, &fixes, port, duckosm_edit::Mode::Ask)).map_err(PyRuntimeError::new_err)?;
     let url = site.url();
     std::thread::spawn(move || duckosm_edit::serve(std::sync::Arc::new(site), listener));
     Ok(url)
-}
-
-/// The record tables of a build, as the Rust build writes them, into the folder `out` (Parquet files `<table>_main.parquet`): `fixes_main`
-/// (`main.fixes`) when `fixes` is a fixes file, and `osm_source_main` (`main.osm_source`) of the `.osm.pbf` file `pbf`. The Python engine
-/// (DuckOSM.run) loads them, so that both engines have the same records.
-#[pyfunction]
-#[pyo3(signature = (out, fixes=None, pbf=None))]
-fn build_records(out: PathBuf, fixes: Option<PathBuf>, pbf: Option<PathBuf>) -> PyResult<()> {
-    let p = duckosm_build::Params { osm_fixes: fixes, ..Default::default() };
-    let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_micros() as i64);
-    let file = |name: &str| std::fs::File::create(out.join(name)).map(std::io::BufWriter::new).map_err(|e| e.to_string());
-    duckosm_build::write_fixes_record(&p, at, file).map_err(PyRuntimeError::new_err)?;
-    match pbf {
-        Some(pbf) => duckosm_build::write_osm_source(&pbf, file).map_err(PyRuntimeError::new_err),
-        None => Ok(()),
-    }
 }
 
 /// The pixels of the DEM file `dem` over the box `bbox` (west, south, east, north) plus 3 pixels on each side, written to the Parquet file `out`: the table
@@ -244,62 +200,15 @@ fn elevation_grid(py: Python<'_>, dem: PathBuf, out: PathBuf, bbox: [f64; 4]) ->
     py.detach(|| duckosm_build::elevation::write_grid_file(&dem, &out, bbox, 3)).map_err(PyRuntimeError::new_err)
 }
 
-/// The steps of a build, from Python to the page of `duckosm studio`: the Python build calls `step(text)`, and the server shows the text.
-#[pyclass]
-struct StepSink(std::sync::Mutex<Option<std::sync::mpsc::Sender<String>>>);
-
-#[pymethods]
-impl StepSink {
-    fn step(&self, text: String) {
-        if let Some(tx) = self.0.lock().unwrap().as_ref() {
-            let _ = tx.send(text);
-        }
-    }
-}
-
-/// The host of `duckosm studio` in Python (src/duckosm/studio.py): the database of the result page, and the build of `duckosm build`.
-struct PyHost(Py<PyAny>);
-
-impl duckosm_edit::studio::Host for PyHost {
-    fn db(&self, path: &std::path::Path) -> Box<dyn duckosm_edit::Db> {
-        let db = Python::attach(|py| self.0.call_method1(py, "db", (path.display().to_string(),)).expect("the host gives a database"));
-        Box::new(PyDb(db))
-    }
-    fn buffer(&self, wkt: &str, epsg: u32, metres: f64) -> Result<String, String> {
-        Python::attach(|py| self.0.call_method1(py, "buffer", (wkt, epsg, metres)).and_then(|r| r.bind(py).extract::<String>()).map_err(|e| e.to_string()))
-    }
-    fn write(&self, db: &std::path::Path, sql: &str) -> Result<(), String> {
-        Python::attach(|py| self.0.call_method1(py, "write", (db.display().to_string(), sql)).map(|_| ()).map_err(|e| e.to_string()))
-    }
-    fn build(&self, config: &str, dir: &std::path::Path, db: &std::path::Path, log: &(dyn Fn(&str) + Sync)) -> Result<String, String> {
-        let (tx, rx) = std::sync::mpsc::channel::<String>();
-        // the steps of the Rust engine (read ways, build driving, ...) go to the page too, inside the step of Python that calls the engine
-        let engine = tx.clone();
-        duckosm_build::set_progress(Some(Box::new(move |step| {
-            let _ = engine.send(format!("    Rust engine: {step}"));
-        })));
-        let sink = Python::attach(|py| Py::new(py, StepSink(std::sync::Mutex::new(Some(tx)))).map_err(|e| e.to_string()))?;
-        std::thread::scope(|s| {
-            s.spawn(move || rx.iter().for_each(|line| log(&line)));
-            let r = Python::attach(|py| {
-                self.0.call_method1(py, "build", (config, dir.display().to_string(), db.display().to_string(), sink.clone_ref(py)))
-                    .and_then(|r| r.bind(py).extract::<String>()).map_err(|e| e.to_string())
-            });
-            duckosm_build::set_progress(None);
-            Python::attach(|py| sink.borrow(py).0.lock().unwrap().take());       // the sender goes: the reader ends
-            r
-        })
-    }
-}
-
-/// `duckosm studio` (rust/duckosm-edit/src/studio.rs): serve the build page on 127.0.0.1:`port` in a thread of its own, for the folder `out`. `host` is the
-/// Python object of the build (duckosm/studio.py). `index`: the list of the Geofabrik extracts (URL or file; None: Geofabrik's). Returns the address of the page.
+/// `duckosm studio` (rust/duckosm-edit/src/studio.rs): serve the build page on 127.0.0.1:`port` in a thread of its own, for the folder `out`, with
+/// the host of the program (`native::NativeHost`: the build by tiles, the bundled DuckDB). `index`: the list of the Geofabrik extracts (URL or file;
+/// None: Geofabrik's). Returns the address of the page.
 #[pyfunction]
-#[pyo3(signature = (out, port, host, index = None))]
-fn studio(py: Python<'_>, out: PathBuf, port: u16, host: Py<PyAny>, index: Option<String>) -> PyResult<String> {
+#[pyo3(signature = (out, port, index = None))]
+fn studio(py: Python<'_>, out: PathBuf, port: u16, index: Option<String>) -> PyResult<String> {
     let listener = duckosm_edit::bind(port).map_err(PyValueError::new_err)?;
     let port = listener.local_addr().map_err(|e| PyRuntimeError::new_err(e.to_string()))?.port();
-    let site = py.detach(|| duckosm_edit::studio::Studio::new(Box::new(PyHost(host)), &out, port, index)).map_err(PyRuntimeError::new_err)?;
+    let site = py.detach(|| duckosm_edit::studio::Studio::new(Box::new(duckosm_edit::native::NativeHost), &out, port, index)).map_err(PyRuntimeError::new_err)?;
     let url = site.url();
     std::thread::spawn(move || duckosm_edit::studio::serve(std::sync::Arc::new(site), listener));
     Ok(url)
@@ -311,17 +220,75 @@ fn edge_id_hash(osm_id: i64, source: i64, target: i64) -> i64 {
     duckosm_core::hash::edge_id(osm_id, source, target)
 }
 
+/// The previous edge id (v1), with `is_reverse`: `(hash(osm_id, source, target, is_reverse) >> 1)` with the DuckDB hash.
+#[pyfunction]
+fn edge_id_hash_v1(osm_id: i64, source: i64, target: i64, is_reverse: bool) -> i64 {
+    duckosm_core::hash::edge_id_v1(osm_id, source, target, is_reverse)
+}
+
+/// An `.osm.pbf` file at `path` from Python lists (for tests and small examples): nodes `(id, lon, lat, tags)`, ways `(id, refs, tags)`,
+/// relations `(id, members, tags)` with members `(type, ref, role)`, type `"node"`, `"way"` or `"relation"`. Each list is sorted by id here.
+#[pyfunction]
+#[allow(clippy::type_complexity)]
+fn write_pbf(
+    path: PathBuf,
+    nodes: Vec<(i64, f64, f64, Vec<(String, String)>)>,
+    ways: Vec<(i64, Vec<i64>, Vec<(String, String)>)>,
+    relations: Vec<(i64, Vec<(String, i64, String)>, Vec<(String, String)>)>,
+) -> PyResult<()> {
+    use duckosm_core::graph::{MemberType, Relation};
+    use duckosm_core::raw::{Raw, RawNode, RawWay};
+    let mut raw = Raw {
+        nodes: nodes.into_iter().map(|(id, lon, lat, tags)| RawNode { id, lon, lat, tags }).collect(),
+        ways: ways.into_iter().map(|(id, refs, tags)| RawWay { id, tags, refs }).collect(),
+        relations: Vec::new(),
+        timestamp: None,
+    };
+    for (id, members, tags) in relations {
+        let members = members
+            .into_iter()
+            .map(|(t, r, role)| match t.as_str() {
+                "node" => Ok((r, MemberType::Node, role)),
+                "way" => Ok((r, MemberType::Way, role)),
+                "relation" => Ok((r, MemberType::Relation, role)),
+                _ => Err(PyValueError::new_err(format!("member type {t:?}: node, way or relation"))),
+            })
+            .collect::<PyResult<Vec<_>>>()?;
+        raw.relations.push(Relation { id, tags, members });
+    }
+    raw.nodes.sort_by_key(|n| n.id);
+    raw.ways.sort_by_key(|w| w.id);
+    raw.relations.sort_by_key(|r| r.id);
+    let mut f = std::io::BufWriter::new(std::fs::File::create(&path).map_err(|e| PyRuntimeError::new_err(format!("{}: {e}", path.display())))?);
+    duckosm_core::cutfile::write_pbf(&raw, None, &mut f).map_err(PyRuntimeError::new_err)?;
+    std::io::Write::flush(&mut f).map_err(|e| PyRuntimeError::new_err(e.to_string()))
+}
+
+/// A `[west, south, east, north]` box as GeoJSON Polygon text (`duckosm.area.bbox_geojson`); a wrong box: ValueError.
+#[pyfunction]
+fn bbox_geojson(bbox: Vec<f64>) -> PyResult<String> {
+    duckosm_build::place::bbox_geojson(&bbox).map(|v| v.to_string()).map_err(PyValueError::new_err)
+}
+
+/// The outline of an H3 cell as GeoJSON Polygon text (`duckosm.area.h3_geojson`); not a cell: ValueError.
+#[pyfunction]
+fn h3_geojson(cell: String) -> PyResult<String> {
+    duckosm_build::place::h3_geojson(&cell).map(|v| v.to_string()).map_err(PyValueError::new_err)
+}
+
 #[pymodule]
 fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(build, m)?)?;
     m.add_function(wrap_pyfunction!(build_from_config, m)?)?;
     m.add_function(wrap_pyfunction!(edge_id_hash, m)?)?;
+    m.add_function(wrap_pyfunction!(edge_id_hash_v1, m)?)?;
+    m.add_function(wrap_pyfunction!(write_pbf, m)?)?;
+    m.add_function(wrap_pyfunction!(bbox_geojson, m)?)?;
+    m.add_function(wrap_pyfunction!(h3_geojson, m)?)?;
     m.add_function(wrap_pyfunction!(edit, m)?)?;
     m.add_function(wrap_pyfunction!(ask, m)?)?;
     m.add_function(wrap_pyfunction!(studio, m)?)?;
     m.add_function(wrap_pyfunction!(elevation_grid, m)?)?;
-    m.add_function(wrap_pyfunction!(build_records, m)?)?;
-    m.add_class::<StepSink>()?;
     #[cfg(feature = "duckdb")]
     api::add(m)?;
     #[cfg(feature = "duckdb")]

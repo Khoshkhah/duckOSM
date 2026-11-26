@@ -5,7 +5,7 @@ import duckdb
 import pytest
 
 from duckosm.gmns import to_gmns
-from duckosm.matsim_lanes import to_matsim_lanes
+from duckosm._api import to_matsim_lanes
 
 _XSD = Path(__file__).parent / "fixtures" / "matsim_xsd"       # vendored MATSim v2.0 schemas
 A, B, C, AR = 6141068311830699705, 3843102655846694531, 5555555555555555555, 1234567890123456789
@@ -86,5 +86,5 @@ def test_signalised_node_only(tmp_path):
 def test_bad_db_raises(tmp_path):
     empty = tmp_path / "empty.duckdb"
     duckdb.connect(str(empty)).close()
-    with pytest.raises(ValueError, match="movement"):
+    with pytest.raises(RuntimeError, match="movement"):
         to_matsim_lanes(str(empty), out_dir=tmp_path)

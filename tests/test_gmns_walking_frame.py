@@ -88,10 +88,9 @@ def test_a_footpath_is_one_strip_for_both_directions(tmp_path):
     assert ys[9001] == pytest.approx(y, abs=1e-7) and ys[9002] == pytest.approx(y, abs=1e-7)
 
 
-def test_a_sidewalk_still_on_the_road_is_pushed_out_to_the_kerb_and_not_deleted(tmp_path, monkeypatch):
-    """Plan A: a mapped sidewalk that lies inside a road (here the frame step is off, as for a far-side sidewalk) is moved to the road's
-    kerb, half its width beyond it; a footway that is no sidewalk stays where it is."""
-    monkeypatch.setattr("duckosm.gmns._walk_frame", lambda *a, **k: None)
+def test_a_sidewalk_still_on_the_road_is_pushed_out_to_the_kerb_and_not_deleted(tmp_path):
+    """Plan A: a mapped sidewalk that lies inside a road is moved to the road's kerb, half its width beyond it; a footway that is no
+    sidewalk stays where it is."""
     inside = 59.32 + 3 / M                                   # inside AR's lanes (the road is 13 m wide: y within +-6.5 m)
     c = _run(tmp_path, inside, road_in_walking=False)
     y = c.execute("SELECT ST_Y(ST_LineInterpolatePoint(geom, 0.1)), ST_Y(ST_LineInterpolatePoint(geom, 0.5)), "

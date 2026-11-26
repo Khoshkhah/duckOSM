@@ -319,6 +319,8 @@ pub struct Summary {
     pub n_traffic_lights: usize,
     pub n_stop_signs: usize,
     pub n_bus_stops: usize,
+    /// the via-way restrictions applied as one connection through a joined junction (`junctions.join`)
+    pub n_path_restrictions: usize,
 }
 
 fn e(e: duckdb::Error) -> String {
@@ -327,7 +329,11 @@ fn e(e: duckdb::Error) -> String {
 
 /// netconvert: `SUMO_HOME/bin`, the PATH, or the eclipse-sumo package of the active Python environment (`VIRTUAL_ENV`).
 /// Returns the program and the SUMO_HOME that it needs.
-pub(crate) fn find_netconvert() -> Result<(PathBuf, Option<PathBuf>)> {
+pub fn find_netconvert() -> Result<(PathBuf, Option<PathBuf>)> {
+    // an explicit program (the Python API's `netconvert_bin`)
+    if let Some(p) = std::env::var_os("DUCKOSM_NETCONVERT").map(PathBuf::from).filter(|p| p.is_file()) {
+        return Ok((p, None));
+    }
     if let Some(h) = std::env::var_os("SUMO_HOME").map(PathBuf::from) {
         if h.join("bin/netconvert").is_file() {
             return Ok((h.join("bin/netconvert"), None));
@@ -1149,6 +1155,7 @@ pub fn to_sumo_with(db: &Path, out_dir: &Path, mode: &str, net_name: &str, conne
         n_traffic_lights,
         n_stop_signs,
         n_bus_stops,
+        n_path_restrictions: 0,
     };
     // the built-in netconvert config (.netccfg) with the options `opts`, and the signal programs `tll`
     let write_cfg = |opts: &[(String, String)], tll: Option<&Path>| -> Result<()> {
@@ -1256,6 +1263,7 @@ pub fn to_sumo_with(db: &Path, out_dir: &Path, mode: &str, net_name: &str, conne
                 j.m.n_paths,
                 n_rules.len()
             );
+            s.n_path_restrictions = j.m.n_paths;
             joined = Some(j);
         }
     }
@@ -1457,6 +1465,20 @@ fn merge_joined<'a>(nodes: &[(i64, f64, f64)], rows: &'a [Edge], cs: &[Conn], st
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
+    /// A lone lane into a wider road feeds all its lanes (ported from tests/test_lane_taper.py). SUMO's indices: 0 is the
+    /// right-most lane.
+    #[test]
+    fn a_lone_lane_into_a_wider_road_feeds_all_its_lanes() {
+        let lane = |n: usize| (0..n).map(|_| ("".to_string(), 3.25, None)).collect::<Vec<_>>();
+        let prof: HashMap<i64, Vec<(String, f64, Option<String>)>> = HashMap::from([(4, lane(2)), (2, lane(2)), (7, lane(1))]);
+        let got = super::split_lone_lanes(vec![(4, vec![(1, 7, 0), (0, 2, 1)])], &prof);
+        let mut out = got.into_iter().find(|x| x.0 == 4).unwrap().1;
+        out.sort();
+        assert_eq!(out, vec![(0, 2, 0), (0, 2, 1), (1, 7, 0)]);
+    }
+
     use super::*;
 
     #[test]

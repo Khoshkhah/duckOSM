@@ -24,9 +24,12 @@ impl NativeDb {
 fn read_config(config: &str, dir: &Path) -> Result<duckosm_build::config::FromConfig, String> {
     let file = std::env::temp_dir().join(format!("duckosm-edit-{}-config.yaml", std::process::id()));
     std::fs::write(&file, config).map_err(|e| format!("{}: {e}", file.display()))?;
-    // ponytail: the config's relative paths are for the folder of the build, so the process goes there; the server does nothing else
+    // the config's relative paths are for the folder of the build, so the process goes there to read it, and then back: the page names
+    // the fixes files relative to the folder of the server
+    let here = std::env::current_dir().map_err(|e| e.to_string())?;
     std::env::set_current_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let r = duckosm_build::config::read(&file, false, false);
+    let _ = std::env::set_current_dir(&here);
     let _ = std::fs::remove_file(&file);
     r
 }
@@ -61,6 +64,11 @@ impl Db for NativeDb {
 
     fn build(&mut self, config: &str, dir: &Path, fixes: &Path, db: &Path) -> Result<String, String> {
         let fixes = std::fs::canonicalize(fixes).map_err(|e| format!("{}: {e}", fixes.display()))?;
+        // the build by tiles makes no base-map layers (features.*): an area that has them is built again as it was built first
+        let p = read_config(config, dir)?.params;
+        if p.features || p.building_faces {
+            return build_whole(config, dir, db, Some(fixes.as_path()));
+        }
         build_by_tiles(config, dir, db, Some(&fixes), &|_| {})
     }
 }
@@ -103,6 +111,26 @@ pub fn build_by_tiles(config: &str, dir: &Path, db: &Path, fixes: Option<&Path>,
     Ok(lines.join("\n"))
 }
 
+/// The build of the whole area in one process (`duckosm build -c`, the build of the first run), into the `.duckdb` file `db`, with the
+/// OSM fixes file `fixes`: for an area with the base-map layers, which the build by tiles does not make. The build writes the record.
+fn build_whole(config: &str, dir: &Path, db: &Path, fixes: Option<&Path>) -> Result<String, String> {
+    let file = dir.join("config.yaml");
+    std::fs::write(&file, config).map_err(|e| format!("{}: {e}", file.display()))?;
+    let db = std::path::absolute(db).map_err(|e| e.to_string())?;
+    let mut cmd = duckosm_build::self_command().map_err(|e| e.to_string())?;
+    cmd.current_dir(dir).args(["build", "-c"]).arg(&file).arg("-o").arg(&db);
+    if let Some(f) = fixes {
+        cmd.arg("--fixes").arg(f);
+    }
+    let out = cmd.output().map_err(|e| format!("the build: {e}"))?;
+    let text = String::from_utf8_lossy(&out.stderr).to_string();
+    if !out.status.success() {
+        return Err(format!("the build failed: {}", text.lines().last().unwrap_or("")));
+    }
+    record(&db, config, dir)?; // the config as it was given (the build writes its own text with the options in it)
+    Ok(text)
+}
+
 /// Write the build's record into `db` (main.visualization_metadata: `build_config`, the config as YAML, and `build_dir`, the folder of
 /// the build), so that `duckosm edit` can build it again. `duckosm --config` calls it after a build, and Build again after its build.
 pub fn record(db: &Path, config: &str, dir: &Path) -> Result<(), String> {
@@ -139,8 +167,15 @@ impl crate::studio::Host for NativeHost {
         con.query_row(&sql, [], |r| r.get::<_, String>(0)).map_err(|e| e.to_string())
     }
 
-    /// The build by tiles of this program, for every area ([`build_by_tiles`]).
+    /// The build by tiles of this program ([`build_by_tiles`]); an area with the base map or the walls: the whole build.
     fn build(&self, config: &str, dir: &Path, db: &Path, log: &(dyn Fn(&str) + Sync)) -> Result<String, String> {
+        // the build by tiles makes no base-map layers and no walls: an area with them is built whole
+        let p = read_config(config, dir)?.params;
+        if p.features || p.building_faces {
+            let text = build_whole(config, dir, db, None)?;
+            text.lines().for_each(log);
+            return Ok(text);
+        }
         build_by_tiles(config, dir, db, None, log)
     }
 }

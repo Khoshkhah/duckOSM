@@ -993,6 +993,30 @@ pub fn parse_osm_fixes(text: &str, label: &str) -> Result<OsmFixes, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn typed_build_flags_override_the_config() {
+        // with -c, the options typed on the command line win over the file; the options not typed keep the file's values
+        let dir = std::env::temp_dir().join(format!("duckosm-overrides-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("c.yaml");
+        std::fs::write(&f, "name: a\nmodes: [driving]\noptions:\n  build_graph: true\n  h3_resolution: 9\n").unwrap();
+        let o = Overrides { modes: Some(vec!["walking".into()]), features: Some(false), graph: Some(false), ..Default::default() };
+        let text = with_overrides(Some(&f), &o).unwrap();
+        let y = &YamlLoader::load_from_str(&text).unwrap()[0];
+        assert_eq!(y["modes"][0].as_str(), Some("walking"));
+        assert_eq!(y["options"]["build_features"].as_bool(), Some(false));
+        assert_eq!(y["options"]["build_graph"].as_bool(), Some(false));
+        assert_eq!(y["options"]["h3_resolution"].as_i64(), Some(9));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn the_output_is_named_after_the_input() {
+        assert_eq!(stem("maps/monaco-latest.osm.pbf"), "monaco-latest");
+        assert_eq!(stem("sodermalm.geojson"), "sodermalm");
+        assert_eq!(stem("out/area.duckdb"), "area");
+    }
+
     use super::*;
 
     fn write(text: &str) -> PathBuf {

@@ -27,6 +27,10 @@ pub enum Area<'a> {
     Name(&'a str),
     OsmId(i64),
     Boundary(&'a Path),
+    /// `[west, south, east, north]` in degrees.
+    Bbox([f64; 4]),
+    /// A circle: `(lon, lat)` and the radius in metres (a polygon of 256 sides, in the UTM zone of the point).
+    Circle((f64, f64), f64),
 }
 
 /// The temporary table `_clip(geom, osm_id, name, admin_level)` with the area (duckOSM `build_clip`); its label.
@@ -41,6 +45,23 @@ fn build_clip(con: &Connection, area: &Area) -> Result<String> {
             ))
             .map_err(err)?;
             b.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default()
+        }
+        Area::Bbox([w, s, e, n]) => {
+            con.execute_batch(&format!(
+                "CREATE TEMP TABLE _clip AS SELECT ST_MakeEnvelope({w}, {s}, {e}, {n}) AS geom, NULL::BIGINT AS osm_id,
+                        NULL::VARCHAR AS name, NULL::INTEGER AS admin_level"
+            ))
+            .map_err(err)?;
+            format!("bbox {w},{s},{e},{n}")
+        }
+        Area::Circle((lon, lat), m) => {
+            let utm = format!("EPSG:{}{:02}", if *lat >= 0.0 { 326 } else { 327 }, (((lon + 180.0) / 6.0).floor() as i64).rem_euclid(60) + 1);
+            con.execute_batch(&format!(
+                "CREATE TEMP TABLE _clip AS SELECT ST_Transform(ST_Buffer(ST_Transform(ST_Point({lon}, {lat}), 'EPSG:4326', '{utm}', true), {m}, 64),
+                        '{utm}', 'EPSG:4326', true) AS geom, NULL::BIGINT AS osm_id, NULL::VARCHAR AS name, NULL::INTEGER AS admin_level"
+            ))
+            .map_err(err)?;
+            format!("{m} m around {lon},{lat}")
         }
         _ => {
             let mut st = con
@@ -71,7 +92,7 @@ fn build_clip(con: &Connection, area: &Area) -> Result<String> {
                     )
                     .map_err(err)?;
                 }
-                Area::Boundary(_) => unreachable!(),
+                _ => unreachable!(),
             }
             let row: Option<(Option<String>, Option<i32>)> = {
                 let mut st = con.prepare("SELECT name, admin_level FROM _clip").map_err(err)?;
@@ -85,7 +106,7 @@ fn build_clip(con: &Connection, area: &Area) -> Result<String> {
                 let what = match area {
                     Area::Name(n) => n.to_string(),
                     Area::OsmId(id) => id.to_string(),
-                    Area::Boundary(_) => unreachable!(),
+                    _ => unreachable!(),
                 };
                 return Err(format!("No admin boundary matched '{what}'."));
             };

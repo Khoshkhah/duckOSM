@@ -21,26 +21,16 @@ def to_gmns(net, out_path, mode=None, modes=None, **kwargs):
 
 
 def _gmns_csv(gmns, out_dir, mode):
-    """Write ``node.csv`` and ``link.csv`` of the GMNS schema ``gmns_<mode>`` of the database ``gmns`` in ``out_dir``
-    (DuckDB writes them). Returns ``out_dir``."""
-    import duckdb
+    """Write ``node.csv`` and ``link.csv`` of the GMNS schema ``gmns_<mode>`` of the database ``gmns`` in ``out_dir`` (Rust).
+    Returns ``out_dir``."""
     from pathlib import Path
-    out = Path(out_dir)
-    out.mkdir(parents=True, exist_ok=True)
-    con = duckdb.connect(str(gmns), read_only=True)
+
+    from duckosm import _rust
     try:
-        for table in ("node", "link"):
-            cols = [c for c, in con.execute(
-                "SELECT column_name FROM duckdb_columns() WHERE schema_name = ? AND table_name = ? AND data_type <> 'GEOMETRY'",
-                [f"gmns_{mode}", table]).fetchall()]
-            if not cols:
-                raise ValueError(f"{gmns}: no table gmns_{mode}.{table}. Make it with duckosm.planning.to_gmns(...)")
-            sel = ", ".join(f'"{c}"' for c in cols)
-            path = str(out / f"{table}.csv").replace("'", "''")
-            con.execute(f"COPY (SELECT {sel} FROM gmns_{mode}.{table}) TO '{path}' (HEADER)")
-    finally:
-        con.close()
-    return out
+        _rust.gmns_node_link_csv(str(gmns), str(out_dir), mode)
+    except RuntimeError as e:
+        raise ValueError(str(e)) from None
+    return Path(out_dir)
 
 
 def to_path4gmns(gmns, out_dir=None, mode="driving"):
@@ -77,17 +67,13 @@ def to_aequilibrae(net, project_dir, mode=None):
     from pathlib import Path
 
     from duckosm.errors import require
-    from duckosm.gmns import _capacity_case
     from duckosm.network import Network, resolve
     require("aequilibrae", "duckosm.planning.to_aequilibrae")
     from aequilibrae import Project
     db, mode = resolve(net, mode)
     db = db if isinstance(db, Network) else Network(db)
-    hw = "coalesce(regexp_replace(split_part(highway, ';', 1), '_link$', ''), 'road')"
-    rows = db.sql(f"""SELECT row_number() OVER (ORDER BY edge_id) AS link_id, edge_id, coalesce(highway, 'road') AS link_type,
-                             name, maxspeed_kmh::DOUBLE AS speed, coalesce(lanes, 1) * ({_capacity_case(hw)})::DOUBLE AS capacity,
-                             cost_s::DOUBLE / 60 AS minutes, ST_AsWKB(geometry) AS wkb
-                      FROM "{mode}".edges ORDER BY edge_id""")
+    from duckosm import _rust
+    links = _rust.aequilibrae_links(str(db.path), mode)
     path = Path(project_dir)
     project = Project()
     project.new(str(path))
@@ -95,7 +81,7 @@ def to_aequilibrae(net, project_dir, mode=None):
         project.network.links.fields.add("edge_id", "the duckOSM edge_id of the link", "INTEGER")
         # one link type for each OSM highway value; AequilibraE gives each a one-letter id
         letters = [c for c in "abcdefghijklmnopqrstuvwxABCDEFGHIJKLMNOPQRSTUVWXYZ" if c not in ("y", "z")]
-        types = sorted(set(rows.link_type))
+        types = sorted({r[2] for r in links})
         if len(types) > len(letters):
             raise ValueError(f"{len(types)} highway values: AequilibraE has {len(letters)} link type ids")
         m = _AEQ_MODES.get(mode, "c")
@@ -105,10 +91,11 @@ def to_aequilibrae(net, project_dir, mode=None):
             con.executemany(
                 "INSERT INTO links (link_id, a_node, b_node, direction, modes, link_type, name, speed_ab, capacity_ab, "
                 "travel_time_ab, edge_id, geometry) VALUES (?, 0, 0, 1, ?, ?, ?, ?, ?, ?, ?, GeomFromWKB(?, 4326))",
-                [(int(r.link_id), m, r.link_type, r.name, r.speed, r.capacity, r.minutes, int(r.edge_id), bytes(r.wkb))
-                 for r in rows.itertuples()])
+                [(link_id, m, link_type, name, speed, capacity, minutes, edge_id, bytes(wkb))
+                 for link_id, edge_id, link_type, name, speed, capacity, minutes, wkb in links])
         with project.db_connection as con:
             links, nodes = (con.execute(f"SELECT count(*) FROM {t}").fetchone()[0] for t in ("links", "nodes"))
     finally:
         project.close()
     return {"path": path, "links": links, "nodes": nodes}
+

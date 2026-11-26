@@ -88,4 +88,5 @@ looks wrong.
 | `--json` | one JSON object |
 | `-o way.csv` | write the table to a `.csv`, `.parquet` or `.json` file |
 
-In Python: `from duckosm.query import way_table; way_table(con, 4230100).show()`.
+In Python: `duckosm.open("monaco.duckdb").sql(...)` reads any table; the command `duckosm way DB ID --json` gives the
+same table as JSON.

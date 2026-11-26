@@ -44,7 +44,7 @@ class Options:
     h3_resolution: int = 8
     merge_segments: bool = True            # merge same-road degree-2 chains (across osm_id); writes <mode>.edge_id_map. Default on; set false for a no-merge build
     global_junctions: bool = True          # segment every mode at one mode-agnostic road-junction set (main.global_junctions) so a road keeps the SAME edge_id across driving/walking/cycling. See docs/design/global_junction_segmentation.md
-    infer_separate_sidewalks: bool = True  # a road with footway=sidewalk lines beside it on both sides and no sidewalk tag gets sidewalk=separate (walked on its sidewalks, not its carriageway). See processors/separate_sidewalks.py
+    infer_separate_sidewalks: bool = True  # a road with footway=sidewalk lines beside it on both sides and no sidewalk tag gets sidewalk=separate (walked on its sidewalks, not its carriageway). See rust/duckosm-core/src/sidewalks.rs
     functional_types: bool = True          # add walk_type (walking) / cycle_type (cycling) functional-class columns from OSM sub-tags. See docs/design/walk_cycle_type.md
     cycling_dismount: bool = True          # cycling also gets footway/pedestrian as dismount=TRUE edges (push-the-bike: walking speed, bidirectional) so cycleways connected only via them survive the component clean-up. See docs/design/cycling_dismount_edges.md
     process_speeds: bool = True
@@ -145,8 +145,7 @@ class Viz:
 @dataclass
 class Elevation:
     """The area's DEM, its ground reference (docs/concepts/ground-reference.md). The Rust build
-    (duckosm) reads it; its --dem wins. `duckosm studio` and Build again of `duckosm edit` sample it
-    after the build (duckosm.edit.build_area). `duckosm elevation` takes its file on the command line."""
+    (duckosm) reads it; its --dem wins. `duckosm elevation` takes its file on the command line."""
     dem: Optional[str] = None
     product: Optional[str] = None                  # DTM or DSM
     vertical_datum: Optional[str] = None
@@ -317,6 +316,24 @@ class Config:
             raise FileNotFoundError(f"OSM fixes file not found: {shown(self.osm_overrides)}")
         if self.effective_boundary_path and not Path(self.effective_boundary_path).exists():
             raise FileNotFoundError(f"Boundary file not found: {shown(self.effective_boundary_path)}")
+
+    def to_dict(self) -> dict:
+        """The config as the keys of a config file (for the Rust build): no unset value, the flat keys in their sections."""
+        from dataclasses import asdict
+
+        def clean(d):
+            return {k: clean(v) if isinstance(v, dict) and k not in ("transfer_costs",) else v
+                    for k, v in d.items() if v is not None}
+        d = asdict(self)
+        for flat in ("pbf_path", "boundary_path", "h3_cell"):
+            d.pop(flat)
+        if self.source_type == "pbf":
+            d["source"]["pbf_path"] = self.effective_pbf_path or None
+        d["boundary"]["path"] = self.effective_boundary_path
+        d["boundary"]["h3_cell"] = self.boundary.h3_cell or self.h3_cell
+        if self.options.sea is None:
+            d["options"]["sea"] = False            # None is no sea here; a missing key is the default (overture) in a file
+        return clean(d)
 
     def get_db_path(self) -> Path:
         """Full path to the output DuckDB file.

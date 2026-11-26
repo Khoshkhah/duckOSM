@@ -8,7 +8,7 @@ import duckdb
 import pytest
 
 from duckosm.gmns import to_gmns
-from duckosm.lanelet2 import to_lanelet2
+from duckosm._api import to_lanelet2
 
 A, B, AR = 6141068311830699705, 3843102655846694531, 1234567890123456789
 
@@ -83,5 +83,5 @@ def test_node_snapping_dedups(tmp_path):
 def test_bad_db_raises(tmp_path):
     bare = tmp_path / "bare.duckdb"
     duckdb.connect(str(bare)).close()
-    with pytest.raises(ValueError, match="lane"):
+    with pytest.raises(RuntimeError, match="lane"):
         to_lanelet2(str(bare), tmp_path / "m.osm")

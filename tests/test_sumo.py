@@ -81,7 +81,7 @@ def test_no_edge_graph_falls_back_to_inference(tmp_path):
                     reason="netconvert not installed (pip install duckosm[sumo])")
 def test_netconvert_preserves_ids_and_connections(tmp_path):
     out = to_sumo(_db(), str(tmp_path), net_name="t", run_netconvert=True)
-    assert out["net"].endswith("t.net.xml")
+    assert str(out["net"]).endswith("t.net.xml")
     net = (tmp_path / "t.net.xml").read_text()
     sumo_ids = set(re.findall(r'<edge id="([^":][^"]*)"', net))   # exclude internal ':' edges
     assert {str(E1), str(E2)} <= sumo_ids                         # both duckOSM ids survived

@@ -148,3 +148,39 @@ pub fn text(db: &Path, d: &J) -> String {
     out += &format!("also: {}\n", if also.is_empty() { "nothing else".to_string() } else { also.join(", ") });
     out
 }
+
+/// The exact number of rows of each table `(schema, table)` (`Network.schema`).
+pub fn row_counts(db: &std::path::Path, tables: &[(String, String)]) -> Result<Vec<i64>> {
+    let con = crate::open_read_only(db)?;
+    tables
+        .iter()
+        .map(|(s, t)| {
+            let q = |x: &str| format!("\"{}\"", x.replace('"', "\"\""));
+            con.query_row(&format!("SELECT count(*) FROM {}.{}", q(s), q(t)), [], |r| r.get(0)).map_err(|e| e.to_string())
+        })
+        .collect()
+}
+
+/// One row for each mode of `modes` (`Network.summary`): the edges, the nodes, the km of the edges and the km of the one-way
+/// edges (each rounded to 0.1 km; NULL km when the mode has no edges).
+pub fn mode_summary(db: &std::path::Path, modes: &[String]) -> Result<Vec<(String, i64, i64, Option<f64>, f64)>> {
+    let con = crate::open_read_only(db)?;
+    modes
+        .iter()
+        .map(|m| {
+            if m.is_empty() || !m.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+                return Err(format!("{m:?} is not a mode name"));
+            }
+            con.query_row(
+                &format!(
+                    "SELECT (SELECT count(*) FROM {m}.edges), (SELECT count(*) FROM {m}.nodes), \
+                            (SELECT round(sum(length_m) / 1000, 1) FROM {m}.edges)::DOUBLE, \
+                            (SELECT round(coalesce(sum(length_m) FILTER (WHERE oneway), 0) / 1000, 1) FROM {m}.edges)::DOUBLE"
+                ),
+                [],
+                |r| Ok((m.clone(), r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .map_err(|e| e.to_string())
+        })
+        .collect()
+}

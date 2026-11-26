@@ -25,13 +25,6 @@ PLOT_LAYERS = {"ocean": ("ocean", "#aad3df"), "landcover": ("land", "#dde8cf"), 
 _MAP_COUNT = 0          # the <n> of the default file names of show="link" and show="picture"
 
 
-def _modes_label(modes):
-    """The dashboard's name of the modes that can use a road: "all modes", "driving + walking", ... or "driving"."""
-    if set(DEFAULT_MODES) <= modes:
-        return "all modes"
-    return " + ".join(m for m in DEFAULT_MODES if m in modes) or " + ".join(sorted(modes))
-
-
 def _show(show):
     show = show or os.environ.get("DUCKOSM_MAP_SHOW") or "live"
     if show not in MAP_SHOWS:
@@ -340,10 +333,9 @@ class Network(os.PathLike):
         if schema is not None and not len(df):
             raise DuckOSMError(f"no schema {schema!r} in {shown(self.path)}; the schemas: "
                                f"{', '.join(sorted({t.split('.')[0] for t in self.tables()}))}")
-        if len(df):                                  # exact counts: duckdb_tables().estimated_size is an estimate
-            counts = self.sql(" UNION ALL ".join(f"SELECT {i} AS i, count(*) AS n FROM \"{s}\".\"{n}\""
-                                                 for i, (s, n) in enumerate(zip(df.schema, df.table))))
-            df.insert(2, "rows", counts.sort_values("i").n.to_numpy())
+        if len(df):                                  # exact counts (Rust): duckdb_tables().estimated_size is an estimate
+            from duckosm import _rust
+            df.insert(2, "rows", _rust.row_counts(str(self.path), list(zip(df.schema, df.table))))
         return df
 
     def _table(self, table):
@@ -377,12 +369,9 @@ class Network(os.PathLike):
 
         >>> net.summary()"""
         import pandas as pd
-        rows = [self.sql(f"SELECT '{m}' AS mode, (SELECT count(*) FROM {m}.edges) AS edges, "
-                         f"(SELECT count(*) FROM {m}.nodes) AS nodes, "
-                         f"(SELECT round(sum(length_m) / 1000, 1) FROM {m}.edges) AS km, "
-                         f"(SELECT round(coalesce(sum(length_m) FILTER (WHERE oneway), 0) / 1000, 1) FROM {m}.edges) AS oneway_km")
-                for m in self.modes]
-        return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame(columns=["mode", "edges", "nodes", "km"])
+        from duckosm import _rust
+        return pd.DataFrame(_rust.mode_summary(str(self.path), list(self.modes)),
+                            columns=["mode", "edges", "nodes", "km", "oneway_km"])
 
     def _meta(self) -> dict:
         """The build time, the version and the fixes file of the build (``main.visualization_metadata``)."""
@@ -702,26 +691,22 @@ class Network(os.PathLike):
             raise DuckOSMError(f"plot draws the layers {', '.join(PLOT_LAYERS)}, not {', '.join(wrong)}; "
                                "the live map (show='live' or 'picture') draws all of roadstyle's layers")
         gpd = require("geopandas", "Network.plot")
-        have = set(self.tables())
-        for name in PLOT_LAYERS:                     # draw order: ocean, land, water, buildings
-            table, color = PLOT_LAYERS[name]
-            if name in names and f"features.{table}" in have:
-                box = "ST_MakeEnvelope({}, {}, {}, {})".format(*(float(v) for v in view))
-                df = self.sql(f"SELECT ST_AsWKB(ST_Intersection(geom, {box})) AS wkb FROM features.{table} "
-                              f"WHERE ST_Intersects(geom, {box})")
-                gdf = gpd.GeoDataFrame(geometry=gpd.GeoSeries.from_wkb(df.wkb.map(bytes), crs="EPSG:4326"))
-                if len(gdf):
-                    kw = {"linewidth": 0.6} if name == "waterways" else {"linewidth": 0}
-                    gdf.plot(ax=ax, color=color, zorder=0, **kw)
+        from duckosm import _rust
+        draw = [n for n in PLOT_LAYERS if n in names]          # draw order: ocean, land, water, buildings
+        found = _rust.plot_layers(str(self.path), [PLOT_LAYERS[n][0] for n in draw], [float(v) for v in view])
+        for name, wkbs in zip(draw, found):
+            if wkbs:
+                kw = {"linewidth": 0.6} if name == "waterways" else {"linewidth": 0}
+                gpd.GeoSeries.from_wkb([bytes(w) for w in wkbs], crs="EPSG:4326").plot(ax=ax, color=PLOT_LAYERS[name][1], zorder=0, **kw)
 
     def _colored(self, mode, color_by, style):
         """The edges to draw, and the column to color by: a column of the edges, or your own data joined on ``edge_id``."""
         import pandas as pd
         gdf = self.edges(mode)
-        if "mode" in gdf and mode is None:           # all modes on one map: each road once, with all its modes
-            used = gdf.groupby("edge_id")["mode"].agg(frozenset)
+        if "mode" in gdf and mode is None:           # all modes on one map: each road once, with all its modes (from Rust)
+            from duckosm import _rust
             gdf = gdf.drop_duplicates("edge_id", keep="first").copy()
-            gdf["modes"] = gdf.edge_id.map(used).map(_modes_label)
+            gdf["modes"] = gdf.edge_id.map(dict(_rust.modes_labels(str(self.path))))
         if color_by is None:
             return gdf, None
         if isinstance(color_by, pd.Series):
@@ -747,19 +732,18 @@ class Network(os.PathLike):
             routes = [routes]
         items = routes.items() if isinstance(routes, dict) else ((f"route {i + 1}", r) for i, r in enumerate(routes))
         gpd = require("geopandas", "the routes of a map")
-        union = " UNION ALL ".join(f"SELECT edge_id, geometry FROM {m}.edges" for m in self.modes)
+        from duckosm import _rust
         out = {}
         for label, r in items:
             if r is None:
                 continue
             ids = [int(e[1] if isinstance(e, (list, tuple)) else e) for e in r["edges"]]   # [mode, id] in multimodal
-            df = self.sql(f"SELECT DISTINCT ON (edge_id) edge_id, ST_AsWKB(geometry) AS wkb FROM ({union}) "
-                          "WHERE list_contains($ids, edge_id)", {"ids": ids})
-            if df.empty:
+            wkb = _rust.route_union(str(self.path), ids)
+            if wkb is None:
                 continue
-            geom = gpd.GeoSeries.from_wkb(df.wkb.map(bytes), crs="EPSG:4326").union_all()
             out[str(label)] = gpd.GeoDataFrame({"route": [str(label)], "time_s": [round(r.get("time_s", 0), 1)],
-                                                "length_m": [round(r.get("length_m", 0))]}, geometry=[geom], crs="EPSG:4326")
+                                                "length_m": [round(r.get("length_m", 0))]},
+                                               geometry=gpd.GeoSeries.from_wkb([bytes(wkb)]), crs="EPSG:4326")
         return out
 
     # ---- analysis, routes, graphs and exports: the functions of the modules -----------------------------------------
@@ -1041,13 +1025,12 @@ class Network(os.PathLike):
 
         >>> net.edit(load="data/osm_fixes.yaml", save="data/osm_fixes_v2.yaml")"""
         from duckosm import _rust
-        from duckosm.edit import _Db
         if fixes is not None:
             import warnings
             warnings.warn("net.edit(fixes=F) is an old name: use net.edit(load=F, save=F)", DeprecationWarning, stacklevel=2)
             load = save = fixes
         path = lambda f: None if f is None else str(Path(f).resolve())  # noqa: E731
-        return _rust.edit(str(self.path.resolve()), path(load), path(save), port, _Db(self.path.resolve()))
+        return _rust.edit(str(self.path.resolve()), path(load), path(save), port)
 
     def to_gis(self, out, mode: str | None = None, progress: Any = None, **kwargs) -> dict:
         """:func:`duckosm.gis.to_gis`: a GeoPackage, GeoParquet or shapefiles (``mode=None``: all modes).

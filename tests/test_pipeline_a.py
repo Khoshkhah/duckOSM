@@ -1,14 +1,15 @@
 """
 Tests for the Workstream-A pipeline: config schema, the duckdb clip,
-and the Validator. Run: pytest tests/ -q
+and the validation of a build. Run: pytest tests/ -q
 """
 from pathlib import Path
 
 import duckdb
 import pytest
 
+from cli_run import invoke
+
 from duckosm import DuckOSM, Config
-from duckosm.validate import Validator
 
 # Clip a sub-area (Sodermalm) out of the country parent (Sweden); both must be built.
 PARENT = Path(__file__).resolve().parents[1] / "data" / "db" / "sweden.duckdb"
@@ -42,39 +43,18 @@ def test_config_backcompat_flat(tmp_path):
     assert c.effective_boundary_path == "/x/bnd.geojson"
 
 
-# ---- a toy graph: a triangle and one fragment ---------------------------------------
-def _toy_graph():
-    con = duckdb.connect()
-    con.execute("CREATE TABLE edges(edge_id BIGINT, source BIGINT, target BIGINT)")
-    con.execute("CREATE TABLE nodes(node_id BIGINT)")
-    con.execute("CREATE TABLE edge_graph(from_edge BIGINT, to_edge BIGINT)")
-    con.executemany("INSERT INTO edges VALUES (?,?,?)",
-                    [(1, 1, 2), (2, 2, 3), (3, 3, 1), (99, 10, 11)])  # triangle + 1 fragment
-    con.executemany("INSERT INTO nodes VALUES (?)", [(1,), (2,), (3,), (10,), (11,)])
-    con.executemany("INSERT INTO edge_graph VALUES (?,?)", [(1, 2), (2, 3), (3, 1)])
-    return con
-
-
-# ---- Validator ---------------------------------------------------------------------
-def test_validator_layer_without_structure_warns_not_fails():
-    con = _toy_graph()
-    con.execute("CREATE SCHEMA driving")
-    # every edge layer=1 with no bridge/tunnel → the warn-only check must flag it without raising
-    con.execute('CREATE TABLE driving.edges AS SELECT edge_id, source, target, '
-                "CAST(NULL AS VARCHAR) AS name, '1' AS layer, "
-                'CAST(NULL AS VARCHAR) AS bridge, CAST(NULL AS VARCHAR) AS tunnel FROM edges')
-
-    class V:  # minimal validation config
-        assert_unique_node_id = False
-        assert_way_length_conserved = False
-        warn_layer_without_structure = True
-        fail_on_error = True
-    res = {c: ok for c, ok, _ in Validator(con, "driving", V()).run()}  # no raise despite fail_on_error
-    assert res["layer_without_structure"] is None  # None == WARN
-
-    con.execute("UPDATE driving.edges SET bridge = 'yes'")
-    res = {c: ok for c, ok, _ in Validator(con, "driving", V()).run()}
-    assert res["layer_without_structure"] is True
+# ---- validation in a build ---------------------------------------------------------
+def test_validation_layer_without_structure_warns_not_fails(tmp_path):
+    """The warn-only check is flagged in the build output and does not fail the build, even with fail_on_error."""
+    pbf = Path(__file__).resolve().parents[1] / "data" / "sample" / "monaco.osm.pbf"
+    cfg = tmp_path / "c.yaml"
+    cfg.write_text(
+        f"name: m\noutput_path: {tmp_path / 'out'}\nsource: {{type: pbf, pbf_path: {pbf}}}\nmodes: [driving]\n"
+        "options: {build_features: false, h3_indexing: false, bus_routes: false, levels: false}\n"
+        "validation: {enabled: true, fail_on_error: true, warn_layer_without_structure: true}\n")
+    r = invoke(["-c", cfg])
+    assert r.exit_code == 0, r.output
+    assert "validate[driving] layer_without_structure: WARN" in r.output   # Monaco has layer tags with no bridge or tunnel
 
 
 # ---- duckdb clip integration (skips if the parent isn't built) ---------------------

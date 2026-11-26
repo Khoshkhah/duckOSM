@@ -7,6 +7,7 @@ import shutil
 import time
 
 import duckdb
+import yaml
 import pytest
 
 from editor_fixtures import (AMBER, BLUE, ROAD, ROOT, TURN_IN, TURN_OUT, WALL_BUILDING, _LIT, _QUERY, _free_port, _open, _pick_road, _serve, monaco, page_url, pw,  # noqa: F401
@@ -57,7 +58,7 @@ def test_edit_save_box_and_build(monaco, page_url):
     lanes = {r[0] for r in con.execute(f"SELECT lanes FROM driving.edges WHERE osm_id = {ROAD}").fetchall()}
     assert lanes == {3}, lanes
     record = con.execute("SELECT build_config FROM main.visualization_metadata").fetchone()[0]
-    assert f"osm_overrides: '{fixes}'" in record, "the build's record names the save file (net.fixes, net.rebuild)"
+    assert yaml.safe_load(record)["osm_overrides"] == str(fixes), "the build's record names the save file (net.fixes, net.rebuild)"
     con.close()
 
 

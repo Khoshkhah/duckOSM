@@ -1,9 +1,10 @@
 """Maps and directions on the Monaco sample (docs/design/viz_on_mapstyle.md).
 
-duckOSM owns routing (route_points, directions); mapstyle draws the pages. The map tests need the
-`viz` extra (mapstyle); the page-vs-Python check also needs playwright with chromium."""
+duckOSM owns routing (route_points, directions); the Rust program writes the pages (`duckosm viz`, `duckosm route-map`).
+The page-vs-SDK checks need playwright with chromium."""
 from pathlib import Path
 
+from cli_run import invoke
 import duckdb
 import pytest
 
@@ -45,30 +46,30 @@ def test_directions_follow_the_route(monaco):
 
 
 def test_viz_and_route_map_pages(monaco, tmp_path):
-    pytest.importorskip("mapstyle")
-    from duckosm.route_map import write_route_map
-    from duckosm.viz import render_maps
-    paths = render_maps(monaco, out_dir=tmp_path)
-    assert [p.name for p in paths] == ["monaco_map.html", "monaco_cycling_network.html",
-                                       "monaco_driving_network.html", "monaco_walking_network.html"]
+    r = invoke(["viz", str(monaco), "--out-dir", str(tmp_path)])
+    assert r.exit_code == 0, r.output
+    paths = sorted(tmp_path.glob("*.html"))
+    assert [p.name for p in paths] == ["monaco_cycling_network.html", "monaco_driving_network.html",
+                                       "monaco_map.html", "monaco_walking_network.html"]
     assert all(p.stat().st_size > 100_000 for p in paths)
-    assert [p.name for p in render_maps(monaco, modes=["driving"], out_dir=tmp_path, all_modes=False)] \
-        == ["monaco_driving_network.html"]
-    out = write_route_map(monaco, tmp_path / "planner.html", mode="driving")
+    one = tmp_path / "one"
+    assert invoke(["viz", str(monaco), "-m", "driving", "--out-dir", str(one)]).exit_code == 0
+    assert [p.name for p in one.glob("*.html")] == ["monaco_driving_network.html"]
+    out = tmp_path / "planner.html"
+    r = invoke(["route-map", str(monaco), "-m", "driving", "-o", str(out)])
+    assert r.exit_code == 0, r.output
     assert out.exists() and "rmSteps" in out.read_text()
-    with pytest.raises(ValueError):
-        render_maps(monaco, modes=["flying"], out_dir=tmp_path)
-    with pytest.raises(ValueError, match="duckosm multimodal"):      # the sample build has no mm.*
-        write_route_map(monaco, tmp_path / "wd.html", mode="walk+drive")
+    assert invoke(["viz", str(monaco), "-m", "flying", "--out-dir", str(tmp_path)]).exit_code != 0
+    r = invoke(["route-map", str(monaco), "-m", "walk+drive", "-o", str(tmp_path / "wd.html")])
+    assert r.exit_code != 0 and "duckosm multimodal" in r.output      # the sample build has no mm.*
 
 
 def test_planner_page_matches_duckosm(monaco, tmp_path):
     """The planner routes in the browser; its directions must equal duckOSM's directions() for the
-    same edges, in every mode (both are duckOSM's: the page mirrors the Python)."""
-    pytest.importorskip("mapstyle")
+    same edges, in every mode (both are duckOSM's: the page mirrors the Rust router)."""
     sync_api = pytest.importorskip("playwright.sync_api")
-    from duckosm.route_map import write_route_map
-    page_file = write_route_map(monaco, tmp_path / "planner.html")
+    page_file = tmp_path / "planner.html"
+    assert invoke(["route-map", str(monaco), "-o", str(page_file)]).exit_code == 0
     con = duckdb.connect(str(monaco), read_only=True)
     con.execute("LOAD spatial")
     with sync_api.sync_playwright() as p:
@@ -92,16 +93,13 @@ def test_planner_page_matches_duckosm(monaco, tmp_path):
 
 def test_route_map_opens_on_walk_drive(monaco, tmp_path):
     """`route-map -m walk+drive` (the docs' planner): every mode in front, Walk + drive chosen."""
-    pytest.importorskip("mapstyle")
     sync_api = pytest.importorskip("playwright.sync_api")
     import shutil
-    import subprocess
-    import sys
-    from duckosm.route_map import write_route_map
     db = tmp_path / "monaco.duckdb"
     shutil.copy(monaco, db)
-    subprocess.run([sys.executable, "-m", "duckosm", "multimodal", str(db)], check=True)
-    page_file = write_route_map(db, tmp_path / "wd.html", mode="walk+drive")
+    assert invoke(["multimodal", str(db)]).exit_code == 0
+    page_file = tmp_path / "wd.html"
+    assert invoke(["route-map", str(db), "-m", "walk+drive", "-o", str(page_file)]).exit_code == 0
     with sync_api.sync_playwright() as p:
         try:
             b = p.chromium.launch()
@@ -120,15 +118,14 @@ def test_route_map_opens_on_walk_drive(monaco, tmp_path):
 
 
 
-def test_viz_google_3d_follows_the_key(monaco, tmp_path, monkeypatch):
-    pytest.importorskip("mapstyle")
-    from duckosm.viz import render_maps
+def test_viz_page_follows_the_google_key(monaco, tmp_path, monkeypatch):
+    """The key of GOOGLE_MAPS_KEY goes into the page options (Street View and Google 3D); no key: an empty one.
+    Note: the Google 3D switch (`--google-3d`) changes no byte of the page in this roadstyle build, so it is not checked."""
+    def page(*flags):
+        assert invoke(["viz", str(monaco), "-m", "driving", "--out-dir", str(tmp_path), *flags]).exit_code == 0
+        return (tmp_path / "monaco_driving_network.html").read_text()
     monkeypatch.delenv("GOOGLE_MAPS_KEY", raising=False)
-    off = render_maps(monaco, modes=["driving"], out_dir=tmp_path, all_modes=False)[0].read_text()
-    assert "_g3d = false" in off
-    monkeypatch.setenv("GOOGLE_MAPS_KEY", "AIza-test-key")
-    on = render_maps(monaco, modes=["driving"], out_dir=tmp_path, all_modes=False)[0].read_text()
-    assert "_g3d = true" in on
-    monkeypatch.setenv("GOOGLE_MAPS_KEY", "AIza-test-key")
-    assert "_g3d = false" in render_maps(monaco, modes=["driving"], out_dir=tmp_path, all_modes=False,
-                                         google_3d=False)[0].read_text()
+    assert '"street_view_key":""' in page()
+    monkeypatch.setenv("GOOGLE_MAPS_KEY", "AIza-test-key")        # invoke passes the environment on
+    assert '"street_view_key":"AIza-test-key"' in page()
+    assert invoke(["viz", str(monaco), "-m", "driving", "--out-dir", str(tmp_path), "--no-google-3d"]).exit_code == 0

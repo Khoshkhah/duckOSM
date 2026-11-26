@@ -126,6 +126,6 @@ m = net.driving.matrix(r.edge_ids[:10])                       # 10 x 10 travel t
 iso = net.walking.isochrones([(7.4246, 43.7384)], minutes=[5, 10])
 ```
 
-The old names of this module stay: `to_networkx`, `to_networkx_nodes`, `write_graph` and `Router` (the Python router,
-with `.graph`). The top-level `duckosm.Router` is the Rust router. Guides: [Route](../../guides/route.md),
+The old names of this module stay: `to_networkx`, `to_networkx_nodes`, `write_graph` and `Router` (the same as
+`duckosm.Router`, the Rust router: it keeps its graph in Rust). Guides: [Route](../../guides/route.md),
 [duckOSM for routing users](../../compare/for-routing-users.md).

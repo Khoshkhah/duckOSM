@@ -660,8 +660,9 @@ pub fn node_graph(con: &Connection, mode: &str, geometry: &str) -> Result<Doc> {
 }
 
 /// duckOSM `to_networkx` (with the node data): each node an `edge_id` with `name`, `highway`, `length_m`, `maxspeed_kmh`,
-/// `cost_s`, `geometry` (WKT) and with `uses` its `access`; each arc a legal turn with its `weight`.
-pub fn edge_graph(con: &Connection, mode: &str, weight: &str, uses: &[String]) -> Result<Doc> {
+/// `cost_s`, `geometry` (WKT) and with `uses` its `access`; each arc a legal turn with its `weight`. Without `node_attrs` the
+/// nodes have no data (`to_networkx(node_attrs=False)`) and the edges table needs only `edge_id`.
+pub fn edge_graph(con: &Connection, mode: &str, weight: &str, uses: &[String], node_attrs: bool) -> Result<Doc> {
     let g = crate::route::routing_graph(con, mode, weight, uses)?;
     let roads = crate::route::roads_relation(mode, uses);
     let with_access = !uses.is_empty();
@@ -671,7 +672,7 @@ pub fn edge_graph(con: &Connection, mode: &str, weight: &str, uses: &[String]) -
         "SELECT edge_id, name, highway, length_m, maxspeed_kmh, cost_s, ST_AsText(geometry) AS geometry{} FROM {roads}",
         if with_access { ", access" } else { "" }
     );
-    for r in rows(con, &sql)? {
+    for r in if node_attrs { rows(con, &sql)? } else { Vec::new() } {
         let Some(i) = int(&r[0].1).and_then(|e| g.index_of(e)) else { continue };
         let d = &mut data[i];
         let mut set = |k: &str, v: &Py| match d.iter_mut().find(|x| x.0 == k) {
@@ -692,5 +693,53 @@ pub fn edge_graph(con: &Connection, mode: &str, weight: &str, uses: &[String]) -
     let mut doc = Doc::default();
     doc.nodes = g.ids.iter().zip(data).map(|(&id, d)| (id, d)).collect();
     doc.edges = g.arcs().map(|(u, v, w)| (u, v, None, vec![("weight".to_string(), if w.is_nan() { Py::None } else { Py::Float(w) })])).collect();
+    Ok(doc)
+}
+
+/// duckOSM `analysis.to_osmnx`: the junction graph of `mode` in the form of OSMnx. Each node is a `node_id` with `x`, `y` and
+/// `street_count` (from `streets`); each edge keeps its `edge_id` and has the OSMnx names (`osmid`, `length`, `geometry` as a
+/// shapely line, `highway`, `name`, `oneway`, `lanes`, `speed_kph`, `travel_time`), keys 0, 1, … for the edges between the
+/// same two nodes, no NULL values. The graph is marked `simplified` (each edge has its line).
+pub fn osmnx_graph(con: &Connection, mode: &str, name: &str, streets: &HashMap<i64, usize>) -> Result<Doc> {
+    let mut doc = Doc {
+        graph: vec![
+            ("crs".into(), Py::Str("epsg:4326".into())),
+            ("name".into(), Py::Str(name.into())),
+            ("mode".into(), Py::Str(mode.into())),
+            ("simplified".into(), Py::Bool(true)),
+        ],
+        ..Default::default()
+    };
+    let mut known: std::collections::HashSet<i64> = Default::default();
+    for r in rows(con, &format!("SELECT node_id, ST_X(geom) AS x, ST_Y(geom) AS y FROM {mode}.nodes ORDER BY node_id"))? {
+        let id = int(&r[0].1).ok_or("a node with no node_id")?;
+        let count = Py::Int(streets.get(&id).copied().unwrap_or(0) as i128);
+        doc.nodes.push((id, vec![r[1].clone(), r[2].clone(), ("street_count".into(), count)]));
+        known.insert(id);
+    }
+    let have = columns(con, &format!("{mode}.edges"))?;
+    let names = [("edge_id", "edge_id"), ("osm_id", "osmid"), ("length_m", "length"), ("highway", "highway"), ("name", "name"),
+                 ("oneway", "oneway"), ("lanes", "lanes"), ("maxspeed_kmh", "speed_kph"), ("cost_s", "travel_time")];
+    let cols: Vec<String> = names.iter().filter(|(c, _)| have.iter().any(|h| h == c)).map(|(c, _)| format!("\"{c}\"")).collect();
+    let sql = format!("SELECT source, target, ST_AsWKB(geometry)::BLOB AS geometry, {} FROM {mode}.edges", cols.join(", "));
+    let mut keys: HashMap<(i64, i64), i64> = HashMap::new();
+    for r in rows(con, &sql)? {
+        let (u, v) = (int(&r[0].1).ok_or("no source")?, int(&r[1].1).ok_or("no target")?);
+        for n in [u, v] {
+            if known.insert(n) {
+                doc.nodes.push((n, Vec::new()));
+            }
+        }
+        let mut d: Data = vec![("geometry".into(), r[2].1.clone())];
+        for (c, val) in r.into_iter().skip(3) {
+            let nan = matches!(val, Py::Float(f) if f.is_nan());
+            if !matches!(val, Py::None) && !nan {
+                d.push((names.iter().find(|n| n.0 == c).map_or(c.clone(), |n| n.1.to_string()), val));
+            }
+        }
+        let k = keys.entry((u, v)).or_insert(0);
+        doc.edges.push((u, v, Some(*k), d));
+        *k += 1;
+    }
     Ok(doc)
 }

@@ -1,87 +1,83 @@
-"""OsmOverrides — local corrections applied to the `ways` table before GraphBuilder."""
+"""The OSM fixes file (`osm_overrides`): local corrections that the Rust build applies to the OSM data before it makes the network.
+Each test writes OSM nodes and ways, a fixes file, builds with `duckosm build --fixes` (tests/osm_build.py) and reads the tables
+(`<mode>.edges`, and `raw.*` for the tag fixes). The parse rules are also tested in rust/duckosm-build/src/config.rs
+(`osm_fixes_file`, `extra_tag_edits`) and the tag edits in rust/duckosm-core/tests/tag_edits.rs."""
+import subprocess
+import sys
+from pathlib import Path
+
 import duckdb
 import pytest
 
-from duckosm.processors.osm_overrides import OsmOverrides
+sys.path.insert(0, str(Path(__file__).parent))
+from osm_build import build, write
+
+# three roads of about 100 m; 4392632 and 507979055 are two-way, 999 is the control that no rule names
+NODES = {i: (7.0 + 0.001 * i, 43.0) for i in range(1, 7)}
+WAYS = {w: (refs, {"highway": "residential"}) for w, refs in {4392632: [1, 2], 507979055: [3, 4], 999: [5, 6]}.items()}
 
 
-def _ways():
-    con = duckdb.connect()
-    con.execute("CREATE TABLE ways(osm_id BIGINT, oneway BOOLEAN, lanes_fwd INT, lanes_bwd INT)")
-    # rows: Hökens Gata (-> oneway), Trans-Canada WB (-> lanes 3), and an untouched control (999)
-    con.execute("INSERT INTO ways VALUES (4392632, FALSE, 1, 1), "
-                "(507979055, TRUE, 2, 2), (999, FALSE, 1, 1)")
-    return con
+def _build(tmp_path, text, nodes=NODES, ways=WAYS, modes=("driving",)):
+    f = tmp_path / "ov.yaml"
+    f.write_text(text)
+    return duckdb.connect(str(build(tmp_path, nodes, ways, modes=modes, args=["--fixes", f])), read_only=True)
 
 
-def _rules(tmp_path, text):
-    p = tmp_path / "ov.yaml"; p.write_text(text); return str(p)
+def _edges(con, mode="driving"):
+    """``{edge_ref: (lanes, oneway)}``: ``<osm id>#1f`` is the forward edge of a way, ``#1r`` its reverse."""
+    return {r: v for r, *v in con.execute(f"SELECT edge_ref, lanes, oneway FROM {mode}.edges").fetchall()}
 
 
 def test_oneway_and_lanes_overrides_apply(tmp_path):
-    con = _ways()
-    path = _rules(tmp_path, """
+    con = _build(tmp_path, """
 overrides:
   - osm_id: 4392632
     oneway: true
   - osm_id: 507979055
     lanes: 3
 """)
-    n = OsmOverrides(con, path).run()
-    assert n == 2
-    assert con.execute("SELECT oneway FROM ways WHERE osm_id=4392632").fetchone()[0] is True
-    assert con.execute("SELECT lanes_fwd, lanes_bwd FROM ways WHERE osm_id=507979055").fetchone() == (3, 3)
-    # control row untouched
-    assert con.execute("SELECT oneway, lanes_fwd FROM ways WHERE osm_id=999").fetchone() == (False, 1)
+    e = _edges(con)
+    assert "4392632#1f" in e and "4392632#1r" not in e                       # a one-way road has no reverse edge
+    assert e["507979055#1f"][0] == e["507979055#1r"][0] == 3
+    assert e["999#1f"] == [1, False] and e["999#1r"] == [1, False]           # control row untouched
 
 
-def test_absent_osm_id_is_noop_not_counted(tmp_path):
-    con = _ways()
-    path = _rules(tmp_path, "overrides:\n  - osm_id: 111222333\n    oneway: true\n")
-    assert OsmOverrides(con, path).run() == 0     # rule valid but no such way here
+def test_absent_osm_id_is_noop(tmp_path):
+    con = _build(tmp_path, "overrides:\n  - osm_id: 111222333\n    oneway: true\n")   # a valid rule, but no such way here
+    assert len(_edges(con)) == 6 and not any(o for *_, o in _edges(con).values())
 
 
 def test_asymmetric_lane_override(tmp_path):
-    con = _ways()
-    path = _rules(tmp_path, "overrides:\n  - osm_id: 999\n    lanes_forward: 4\n    lanes_backward: 2\n")
-    assert OsmOverrides(con, path).run() == 1
-    assert con.execute("SELECT lanes_fwd, lanes_bwd FROM ways WHERE osm_id=999").fetchone() == (4, 2)
+    con = _build(tmp_path, "overrides:\n  - osm_id: 999\n    lanes_forward: 4\n    lanes_backward: 2\n")
+    e = _edges(con)
+    assert (e["999#1f"][0], e["999#1r"][0]) == (4, 2)
 
 
-def test_missing_file_is_noop():
-    con = _ways()
-    assert OsmOverrides(con, "/no/such/overrides.yaml").run() == 0
-    assert OsmOverrides(con, None).run() == 0
+def test_missing_file_stops_the_build(tmp_path):
+    """A named fixes file that does not exist is an error, not a no-op."""
+    pbf = write(tmp_path / "t.osm.pbf", NODES, WAYS)
+    p = subprocess.run([sys.executable, "-m", "duckosm", "build", "-p", str(pbf), "-o", str(tmp_path / "t.duckdb"), "--no-features",
+                        "--fixes", str(tmp_path / "no_such.yaml")], capture_output=True, text=True)
+    assert p.returncode != 0
 
 
 def test_tags_rule_retags_the_raw_way(tmp_path):
-    """`tags:` is set on raw.ways in the global step, so RoadFilter and global_junctions see the new class."""
-    from types import SimpleNamespace
-    from duckosm.importer import DuckOSM
-    d = DuckOSM.__new__(DuckOSM)
-    d.con = duckdb.connect()
-    d.con.execute("CREATE SCHEMA raw; CREATE TABLE raw.ways(osm_id BIGINT, tags MAP(VARCHAR, VARCHAR))")
-    d.con.execute("INSERT INTO raw.ways VALUES (755033491, MAP {'highway': 'pedestrian', 'name': 'Fredsgatan'}), (999, MAP {'highway': 'pedestrian'})")
-    d.config = SimpleNamespace(osm_overrides=_rules(tmp_path, "overrides:\n  - osm_id: 755033491\n    tags: {highway: unclassified}\n"))
-    d._raw_way_fixes()
-    tags = dict(d.con.execute("SELECT osm_id, tags FROM raw.ways").fetchall())
+    """`tags:` is set on raw.ways in the global step, so the road filter sees the new class: a pedestrian way becomes a road."""
+    ways = {755033491: ([1, 2], {"highway": "pedestrian", "name": "Fredsgatan"}), 999: ([3, 4], {"highway": "pedestrian"})}
+    con = _build(tmp_path, "overrides:\n  - osm_id: 755033491\n    tags: {highway: unclassified}\n", ways=ways)
+    tags = dict(con.execute("SELECT osm_id, tags FROM raw.ways").fetchall())
     assert tags[755033491] == {"highway": "unclassified", "name": "Fredsgatan"}
     assert tags[999] == {"highway": "pedestrian"}
+    assert {r[0] for r in con.execute("SELECT osm_id FROM driving.edges").fetchall()} == {755033491}   # only the retagged way is a road
 
 
 def test_tag_edits_set_then_delete_on_raw_ways_nodes_and_relations(tmp_path):
-    """`extra.tag_edits` (the fixes editor of the page) act on raw.* after the `tags` of the rules, as raw.rs of the Rust engine."""
-    from types import SimpleNamespace
-    from duckosm.importer import DuckOSM
-    d = DuckOSM.__new__(DuckOSM)
-    d.con = duckdb.connect()
-    d.con.execute("CREATE SCHEMA raw")
-    for t in ("ways", "nodes", "relations"):
-        d.con.execute(f"CREATE TABLE raw.{t}(osm_id BIGINT, tags MAP(VARCHAR, VARCHAR))")
-    d.con.execute("INSERT INTO raw.ways VALUES (5, MAP {'highway': 'residential', 'roof:shape': 'flat'}), (6, MAP {'highway': 'service'})")
-    d.con.execute("INSERT INTO raw.nodes VALUES (7, NULL)")
-    d.con.execute("INSERT INTO raw.relations VALUES (8, MAP {'type': 'multipolygon', 'building': 'yes'})")
-    d.config = SimpleNamespace(osm_overrides=_rules(tmp_path, """
+    """`extra.tag_edits` (the fixes editor of the page) act on raw.* after the `tags` of the rules."""
+    nodes = {**NODES, 7: (7.0, 43.001, {})}
+    ways = {5: ([1, 2], {"highway": "residential", "roof:shape": "flat"}), 6: ([3, 4], {"highway": "service"})}
+    rels = {8: ([("way", 5, "outer")], {"type": "multipolygon", "building": "yes"})}
+    f = tmp_path / "ov.yaml"
+    f.write_text("""
 overrides:
   - osm_id: 5
     tags: {surface: asphalt}
@@ -91,44 +87,19 @@ extra:
     - {type: node, id: 7, set: {highway: traffic_signals}}
     - {type: relation, id: 8, delete: [building]}
     - {type: way, id: 999, set: {a: b}}
-"""))
-    d._raw_way_fixes()
-    tags = {t: dict(d.con.execute(f"SELECT osm_id, tags FROM raw.{t}").fetchall()) for t in ("ways", "nodes", "relations")}
+""")
+    con = duckdb.connect(str(build(tmp_path, nodes, ways, rels, args=["--fixes", f])), read_only=True)
+    tags = {t: dict(con.execute(f"SELECT osm_id, tags FROM raw.{t}").fetchall()) for t in ("ways", "nodes", "relations")}
     assert tags["ways"] == {5: {"highway": "residential", "surface": "paved", "sidewalk": "both"}, 6: {"highway": "service"}}
-    assert tags["nodes"] == {7: {"highway": "traffic_signals"}}
+    assert tags["nodes"][7] == {"highway": "traffic_signals"}
     assert tags["relations"] == {8: {"type": "multipolygon"}}
-
-
-def test_building_faces_needs_the_rust_engine(tmp_path, caplog):
-    """The config templates turn the walls on: a build that cannot make them (here the Python engine) goes on without them, with a warning."""
-    from duckosm import Config
-    root = __import__("pathlib").Path(__file__).resolve().parents[1]
-    cfg = Config.from_args(str(root / "data/sample/monaco.osm.pbf"), str(tmp_path), boundary_path=str(root / "data/sample/monaco.geojson"),
-                           building_faces=True, engine="python")
-    with caplog.at_level("WARNING", logger="duckosm"):
-        cfg.validate()
-    assert cfg.options.building_faces is False
-    assert any("need options.engine: rust" in r.getMessage() for r in caplog.records)
-
-
-if __name__ == "__main__":
-    raise SystemExit(pytest.main([__file__, "-q"]))
+    assert con.execute("SELECT surface FROM driving.edges WHERE osm_id = 5 LIMIT 1").fetchone()[0] == "paved"   # the edge has it too
 
 
 def test_exclude_modes_removes_the_way_only_in_that_mode(tmp_path):
-    rules = _rules(tmp_path, """
-overrides:
-  - osm_id: 999
-    exclude_modes: [driving]
-""")
-    con = _ways()
-    assert OsmOverrides(con, rules, mode="driving").run() == 1
-    assert con.execute("SELECT count(*) FROM ways WHERE osm_id=999").fetchone()[0] == 0
-    assert con.execute("SELECT count(*) FROM ways").fetchone()[0] == 2        # the others stay
-    con = _ways()
-    assert OsmOverrides(con, rules, mode="walking").run() == 0               # kept for walking
-    assert con.execute("SELECT count(*) FROM ways WHERE osm_id=999").fetchone()[0] == 1
-
+    con = _build(tmp_path, "overrides:\n  - osm_id: 999\n    exclude_modes: [driving]\n", modes=("driving", "walking"))
+    assert {r[0] for r in con.execute("SELECT osm_id FROM driving.edges").fetchall()} == {4392632, 507979055}   # the others stay
+    assert 999 in {r[0] for r in con.execute("SELECT osm_id FROM walking.edges").fetchall()}                    # kept for walking
 
 
 def test_fixes_file_is_only_used_when_named(tmp_path, monkeypatch):
@@ -144,7 +115,6 @@ def test_fixes_file_is_only_used_when_named(tmp_path, monkeypatch):
 
 
 def test_a_named_fixes_file_must_exist(tmp_path):
-    import pytest
     from duckosm import Config
     pbf = tmp_path / "x.osm.pbf"
     pbf.write_bytes(b"")
@@ -156,58 +126,52 @@ def test_a_named_fixes_file_must_exist(tmp_path):
 
 def test_turn_lanes_override_sets_the_raw_tag(tmp_path):
     """The painted arrows: turn_lanes_forward becomes the way's turn:lanes:forward tag in raw.ways (every lane reader's source)."""
-    con = _ways()
-    con.execute("CREATE SCHEMA raw; CREATE TABLE raw.ways(osm_id BIGINT, tags MAP(VARCHAR, VARCHAR), refs BIGINT[])")
-    con.execute("INSERT INTO raw.ways VALUES (999, MAP {'turn:lanes:forward': 'through|right', 'lanes': '3'}, [1, 2])")
-    path = _rules(tmp_path, "overrides:\n  - osm_id: 999\n    turn_lanes_forward: \"through;left|right\"\n")
-    assert OsmOverrides(con, path).run() == 1
+    ways = {999: ([1, 2], {"highway": "residential", "turn:lanes:forward": "through|right", "lanes": "3"})}
+    con = _build(tmp_path, "overrides:\n  - osm_id: 999\n    turn_lanes_forward: \"through;left|right\"\n", ways=ways)
     tags = con.execute("SELECT tags FROM raw.ways WHERE osm_id = 999").fetchone()[0]
     assert tags["turn:lanes:forward"] == "through;left|right" and tags["lanes"] == "3"
 
 
-def _raw_fixer(tmp_path, text):
-    from types import SimpleNamespace
-    from duckosm.importer import DuckOSM
-    d = DuckOSM.__new__(DuckOSM)
-    d.con = duckdb.connect()
-    d.con.execute("CREATE SCHEMA raw; CREATE TABLE raw.ways(osm_id BIGINT, tags MAP(VARCHAR, VARCHAR), refs BIGINT[]); "
-                  "CREATE TABLE raw.nodes(osm_id BIGINT, lat DOUBLE, lon DOUBLE, tags MAP(VARCHAR, VARCHAR))")
-    d.con.execute("INSERT INTO raw.ways VALUES (40274443, MAP {'highway': 'cycleway', 'foot': 'yes'}, [1, 2, 3, 4, 5])")
-    d.con.execute("INSERT INTO raw.nodes SELECT i, 59.3, 18.0, NULL FROM range(1, 6) t(i)")
-    d.config = SimpleNamespace(osm_overrides=_rules(tmp_path, text))
-    return d
+# a cycleway of five nodes in a row (11..15), 50 m apart
+CYCLE = {i: (7.0 + 0.0005 * i, 43.0) for i in range(11, 16)}
+CYCLEWAY = {40274443: ([11, 12, 13, 14, 15], {"highway": "cycleway", "foot": "yes"})}
 
 
 def test_keep_nodes_and_new_ways(tmp_path):
     """A way cut (keep_nodes) and a new way on OSM nodes and a [lon, lat] node, its tags from the cut way before any fix."""
-    d = _raw_fixer(tmp_path, """
+    con = _build(tmp_path, """
 overrides:
   - osm_id: 40274443
-    keep_nodes: [1, 3]
+    keep_nodes: [11, 13]
 new_ways:
   - id: 9000003678314
     source: nvdb:3678314
-    nodes: [3, [18.1, 59.3], 5]
+    nodes: [13, [7.003, 43.0], 15]
     tags_from: 40274443
     tags: {highway: unclassified, oneway: "yes"}
-""")
-    d._raw_way_fixes()
-    ways = {w: (t, r) for w, t, r in d.con.execute("SELECT osm_id, tags, refs FROM raw.ways").fetchall()}
-    assert ways[40274443] == ({"highway": "cycleway", "foot": "yes"}, [1, 2, 3])
-    assert ways[9000003678314] == ({"highway": "unclassified", "foot": "yes", "oneway": "yes"}, [3, 9000003678314002, 5])
-    assert d.con.execute("SELECT lon, lat FROM raw.nodes WHERE osm_id = 9000003678314002").fetchone() == (18.1, 59.3)
+""", nodes=CYCLE, ways=CYCLEWAY, modes=("driving", "cycling"))
+    ways = {w: (t, r) for w, t, r in con.execute("SELECT osm_id, tags, refs FROM raw.ways").fetchall()}
+    assert ways[40274443] == ({"highway": "cycleway", "foot": "yes"}, [11, 12, 13])
+    assert ways[9000003678314] == ({"highway": "unclassified", "foot": "yes", "oneway": "yes"}, [13, 9000003678314002, 15])
+    assert con.execute("SELECT lon, lat FROM raw.nodes WHERE osm_id = 9000003678314002").fetchone() == (7.003, 43.0)
+    assert con.execute("SELECT refs FROM cycling.edges WHERE edge_ref = '40274443#1f'").fetchone()[0] == [11, 12, 13]   # the cut way is shorter
+    assert con.execute("SELECT highway, oneway, refs FROM driving.edges WHERE osm_id = 9000003678314").fetchall() \
+        == [("unclassified", True, [13, 9000003678314002, 15])]                                                          # the new way is a road
 
 
 def test_new_way_is_a_noop_where_its_nodes_are_not(tmp_path):
     """One global rules file: a new way whose OSM nodes are not in this area adds nothing."""
-    d = _raw_fixer(tmp_path, "new_ways:\n  - {id: 9000000000001, nodes: [1, [18.1, 59.3], 777]}\n")
-    d._raw_way_fixes()
-    assert d.con.execute("SELECT count(*) FROM raw.ways WHERE osm_id = 9000000000001").fetchone()[0] == 0
-    assert d.con.execute("SELECT count(*) FROM raw.nodes WHERE osm_id > 1000").fetchone()[0] == 0
+    con = _build(tmp_path, "new_ways:\n  - {id: 9000000000001, nodes: [11, [7.1, 43.0], 777], tags: {highway: service}}\n",
+                 nodes=CYCLE, ways=CYCLEWAY)
+    assert con.execute("SELECT count(*) FROM raw.ways WHERE osm_id = 9000000000001").fetchone()[0] == 0
+    assert con.execute("SELECT count(*) FROM raw.nodes WHERE osm_id > 1000").fetchone()[0] == 0
 
 
 @pytest.mark.parametrize("ids", [[12345], [9000000000001, 9000000000001]])
 def test_new_way_id_below_the_range_or_used_twice_stops_the_build(tmp_path, ids):
-    rules = "new_ways:\n" + "".join(f"  - {{id: {i}, nodes: [1, 2]}}\n" for i in ids)
-    with pytest.raises(ValueError):
-        _raw_fixer(tmp_path, rules)._raw_way_fixes()
+    f = tmp_path / "ov.yaml"
+    f.write_text("new_ways:\n" + "".join(f"  - {{id: {i}, nodes: [11, 12]}}\n" for i in ids))
+    pbf = write(tmp_path / "t.osm.pbf", CYCLE, CYCLEWAY)
+    p = subprocess.run([sys.executable, "-m", "duckosm", "build", "-p", str(pbf), "-o", str(tmp_path / "t.duckdb"), "--no-features",
+                        "--fixes", str(f)], capture_output=True, text=True)
+    assert p.returncode != 0 and "new_ways" in p.stderr + p.stdout, p.stderr

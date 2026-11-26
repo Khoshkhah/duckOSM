@@ -1,21 +1,8 @@
 """The Python API of duckOSM on the Rust code (the module ``duckosm._rust``). docs/design/all_in_rust.md, step 6.
 
-The functions keep the names, the arguments and the results of the Python code. Each one calls Rust, except for the
-cases that the Rust code does not have; these call the Python code (the module named in each function).
-
-TODO (step 6, before the Python engine code goes):
-- The build: ``DuckOSM.run()`` runs the Python steps with the Rust network step, as before. The whole build in Rust
-  (``duckosm --config``) is not yet equal to it: no ``features.ocean`` (``options.sea``), no
-  ``visualization.level_heads`` and the other tables of the level edits, no ``main.building_faces`` in some builds,
-  other tables with a fixes file of the page (tests/test_page_fixes.py), and ``main.visualization_metadata`` gives
-  ``duckosm 0.7.0`` as the version. tests/test_engine_rust.py, test_levels_in_build.py, test_ask_schema.py,
-  test_editor_changes.py and test_page_fixes.py fail with it.
-- GMNS (group C): the command ``duckosm gmns`` is Rust; the functions ``to_gmns``, ``to_meso``, ``to_micro``,
-  ``check_gmns`` and ``to_sumo`` with ``bus_edges``, ``edge_attrs`` or ``lanes`` still call the Python code.
-- The commands with no Rust port yet: ``levels``, ``clip-pbf`` (see ``duckosm/_main.py``).
-- ``to_networkx``, ``to_networkx_nodes`` and ``write_graph`` give networkx graphs: they stay Python.
-- ``to_sumo`` with a ``dict`` config or ``netconvert_bin``, ``to_railml`` with other ``rail_types``,
-  ``route`` with a ``graph`` and ``route_multimodal`` with ``_points``.
+The functions keep the names, the arguments and the results of the old Python code, and each one calls Rust. A
+connection to an in-memory database is copied to a temporary file first (``_file``). The build (``DuckOSM.run()``)
+is the last Python code to port: tests/test_no_python_engine.py lists the modules still to go.
 """
 
 import json
@@ -31,8 +18,8 @@ def _rust():
 
 
 def _db(con):
-    """The file of a database: a path, or a DuckDB connection to a database file. None: an in-memory database (the Rust
-    code cannot read it, so the Python code runs)."""
+    """The file of a database: a path, or a DuckDB connection to a database file. None: an in-memory database (``_file``
+    copies it to a file for the Rust code)."""
     if isinstance(con, (str, os.PathLike)):
         return str(con)
     row = con.execute("SELECT path FROM duckdb_databases() WHERE database_name = current_database()").fetchone()
@@ -48,52 +35,129 @@ def _paths(d, keys):
 
 # ---- exports -----------------------------------------------------------------------------------------------------
 
+class _file:
+    """``with _file(con) as path``: the database file of ``con`` for the Rust code. An in-memory database is copied to a
+    temporary ``.duckdb`` file (DuckDB's ``COPY FROM DATABASE``), which goes after the call."""
+
+    def __init__(self, con):
+        self.con, self.tmp = con, None
+
+    def __enter__(self):
+        db = _db(self.con)
+        if db is not None:
+            return db
+        import tempfile
+        self.tmp = tempfile.mkdtemp(prefix="duckosm-")
+        path = os.path.join(self.tmp, "db.duckdb")
+        name = self.con.execute("SELECT current_database()").fetchone()[0]
+        self.con.execute(f"ATTACH '{path}' AS _duckosm_file")
+        try:
+            self.con.execute(f'COPY FROM DATABASE "{name}" TO _duckosm_file')
+        finally:
+            self.con.execute("DETACH _duckosm_file")
+        return path
+
+    def __exit__(self, *exc):
+        if self.tmp:
+            import shutil
+            shutil.rmtree(self.tmp, ignore_errors=True)
+
+
+def _netconvert_env(netconvert_bin):
+    """The environment for the Rust code's netconvert: an explicit program (``netconvert_bin``), and the SUMO_HOME of the
+    eclipse-sumo wheel when it is installed (netconvert reads its type maps there)."""
+    if netconvert_bin:
+        os.environ["DUCKOSM_NETCONVERT"] = str(netconvert_bin)
+    else:
+        os.environ.pop("DUCKOSM_NETCONVERT", None)
+    # the folder of the wheel, found without importing it: `import sumo` sets PROJ_LIB and PROJ_DATA to SUMO's old PROJ
+    # database for the whole process, and rasterio then fails
+    import importlib.util
+    spec = importlib.util.find_spec("sumo")
+    if spec is not None and spec.origin:
+        os.environ.setdefault("SUMO_HOME", os.path.dirname(spec.origin))
+
+
 def to_sumo(con, out_dir, mode: str = "driving", net_name: str = "network", run_netconvert: bool = False,
             netconvert_bin: str = None, connections: bool = True, config=None, bus_edges: bool = False,
             edge_attrs: dict = None, lanes: dict = None, merge: bool = False):
-    """See :func:`duckosm.sumo.to_sumo`. ``merge=True``: one SUMO edge for each chain of ``driving.chains`` (Rust export only)."""
-    from duckosm import sumo
-    if bus_edges or edge_attrs or lanes or isinstance(config, dict) or netconvert_bin or _db(con) is None:
-        if merge:
-            from duckosm.errors import DuckOSMError
-            raise DuckOSMError("merge=True works only with a database path and without bus_edges, edge_attrs, lanes, "
-                               "netconvert_bin or a config dict")
-        def run(c):   # the paths as Path objects, as the Rust code gives them
-            return _paths(sumo.to_sumo(c, out_dir, mode=mode, net_name=net_name, run_netconvert=run_netconvert,
-                                netconvert_bin=netconvert_bin, connections=connections, config=config,
-                                bus_edges=bus_edges, edge_attrs=edge_attrs, lanes=lanes), ("nod", "edg", "con", "add", "netccfg", "net", "tll"))
-        if not isinstance(con, (str, os.PathLike)):
-            return run(con)
-        import duckdb
-        c = duckdb.connect(os.fspath(con), read_only=True)   # the Python code reads a connection, not a path or a Network
-        try:
-            return run(c)
-        finally:
-            c.close()
-    if run_netconvert:
-        try:
-            sumo._find_netconvert()   # the eclipse-sumo wheel: it sets SUMO_HOME, where the Rust code looks first
-        except RuntimeError:
-            pass                      # not found: the Rust code gives the error
-    r = json.loads(_rust().to_sumo(_db(con), str(out_dir), mode, net_name, connections,
-                                   None if config is None else str(config), run_netconvert, merge))
+    """See :func:`duckosm.sumo.to_sumo`. ``config``: a ``.netccfg`` path, or a dict of netconvert options over the built-in
+    ones. ``merge=True``: one SUMO edge for each chain of ``driving.chains``."""
+    _netconvert_env(netconvert_bin)
+    path = None if config is None or isinstance(config, dict) else str(config)
+    opts = [(str(k), str(v)) for k, v in config.items()] if isinstance(config, dict) else None
+    lanes = None if lanes is None else {int(e): [(str(u), float(w), t) for u, w, *rest in ls for t in [rest[0] if rest else None]]
+                                        for e, ls in lanes.items()}
+    edge_attrs = None if edge_attrs is None else {int(e): [(str(k), str(v)) for k, v in a.items()] for e, a in edge_attrs.items()}
+    with _file(con) as db:
+        r = json.loads(_rust().to_sumo(db, str(out_dir), mode, net_name, connections, path, run_netconvert, merge,
+                                       bus_edges, lanes, edge_attrs, opts))
     return _paths(r, ("nod", "edg", "con", "add", "netccfg", "net", "tll"))
+
+
+def find_netconvert(netconvert_bin=None):
+    """The netconvert program (SUMO), or None when it is not found."""
+    _netconvert_env(netconvert_bin)
+    return _rust().find_netconvert()
+
+
+def sumo_lane_diff(db, osm_file, work_dir, netconvert_bin=None):
+    """See :func:`duckosm.sumo_compare.lane_diff`."""
+    _netconvert_env(netconvert_bin)
+    with _file(db) as path:
+        r = json.loads(_rust().sumo_lane_diff(path, str(osm_file), str(work_dir)))
+    rows = [dict(x, duckosm=tuple(x["duckosm"]), sumo_osm=tuple(x["sumo_osm"])) for x in r["rows"]]
+    return rows, r["compared"]
 
 
 def to_gis(con, out, modes=None, fmt: str = "gpkg", boundary: bool = True, name: str = None,
            srs: str = "EPSG:4326", ogr2ogr_bin: str = None):
-    """See :func:`duckosm._gis_py.to_gis`. ``ogr2ogr_bin`` is not used: Rust writes the GeoPackage through DuckDB."""
-    if _db(con) is None:
-        from duckosm import _gis_py as gis
-        return gis.to_gis(con, out, modes, fmt, boundary, name, srs, ogr2ogr_bin)
+    """The edges, nodes and boundary as a GeoPackage, GeoJSON or shapefiles (``duckosm export-gis``). ``ogr2ogr_bin`` is
+    not used: Rust writes the files through DuckDB."""
     modes = [modes] if isinstance(modes, str) else list(modes or [])
-    r = json.loads(_rust().to_gis(_db(con), str(out), modes, fmt, boundary, name, srs))
+    with _file(con) as db:
+        r = json.loads(_rust().to_gis(db, str(out), modes, fmt, boundary, name, srs))
     r["files"] = [Path(f) for f in r["files"]]
     return _paths(r, ("path", "dir"))
 
 
+def to_gmns(source_db, out_path, modes=None, to_csv=None, lane_geometry=True, combined=False, drive_side="right",
+            pair_carriageways=True, csv_extensions=False, gtfs=None, gtfs_max_m=30.0, walk_frame=False, walk_clearance_m=0.0,
+            lane_source="rules"):
+    """See :func:`duckosm.gmns.to_gmns` (the Rust build of ``duckosm gmns``)."""
+    modes = [modes] if isinstance(modes, str) else list(modes or [])
+    gtfs = [gtfs] if isinstance(gtfs, (str, os.PathLike)) else list(gtfs or [])
+    r = json.loads(_rust().to_gmns(_db(source_db), str(out_path), modes, None if to_csv is None else str(to_csv), lane_geometry,
+                                   combined, drive_side, pair_carriageways, csv_extensions, [str(g) for g in gtfs], float(gtfs_max_m),
+                                   walk_frame, float(walk_clearance_m), lane_source))
+    return _paths(r, ("path", "csv"))
+
+
+def to_meso(gmns_db, modes=None, trim_m=6.0):
+    """See :func:`duckosm.gmns.to_meso`."""
+    modes = [modes] if isinstance(modes, str) else list(modes or [])
+    return json.loads(_rust().to_meso(str(gmns_db), modes, float(trim_m)))
+
+
+def to_micro(gmns_db, modes=None, cell_length_m=7.0):
+    """See :func:`duckosm.gmns.to_micro`."""
+    modes = [modes] if isinstance(modes, str) else list(modes or [])
+    return json.loads(_rust().to_micro(str(gmns_db), modes, float(cell_length_m)))
+
+
+def check_gmns(path, modes=None):
+    """See :func:`duckosm.gmns_check.check_gmns`: ``[(schema, check, bad, total), ...]``."""
+    modes = [modes] if isinstance(modes, str) else list(modes or [])
+    return [tuple(r) for r in json.loads(_rust().check_gmns(str(path), modes))]
+
+
+def gmns_viewer(gmns_db, out, mode="driving"):
+    """See :func:`duckosm.gmns_viewer.write_viewer`."""
+    return _paths(json.loads(_rust().gmns_viewer(str(gmns_db), str(out), mode)), ("path",))
+
+
 def to_matsim(source, out_path, mode="driving", crs=None, gzip=True, merge=False):
-    """See :func:`duckosm.matsim.to_matsim`. ``merge=True``: driving only, one link for each chain (``driving.chains``;
+    """See :func:`duckosm.sim.to_matsim`. ``merge=True``: driving only, one link for each chain (``driving.chains``;
     a GMNS db: ``gmns_driving.chains``), its edges in the link attribute ``edge_ids``."""
     if not isinstance(mode, str):
         mode = ",".join(mode)
@@ -101,12 +165,12 @@ def to_matsim(source, out_path, mode="driving", crs=None, gzip=True, merge=False
 
 
 def to_matsim_lanes(gmns_db, out_dir=".", mode="driving", signals=True, cycle_s=90, merge=False):
-    """See :func:`duckosm.matsim_lanes.to_matsim_lanes`. ``merge=True``: the links of ``to_matsim(merge=True)``."""
+    """See :func:`duckosm.sim.to_matsim_lanes`. ``merge=True``: the links of ``to_matsim(merge=True)``."""
     return json.loads(_rust().to_matsim_lanes(_db(gmns_db), str(out_dir), mode, signals, int(cycle_s), merge))
 
 
 def to_opendrive(source, out_path, mode="driving", crs=None, junctions=False):
-    """See :func:`duckosm.opendrive.to_opendrive`."""
+    """See :func:`duckosm.hdmap.to_opendrive`."""
     return json.loads(_rust().to_opendrive(_db(source), str(out_path), mode, crs, junctions))
 
 
@@ -114,21 +178,21 @@ _RAIL = ("rail", "light_rail", "subway", "tram", "narrow_gauge", "funicular")
 
 
 def to_railml(source, out_path, rail_types=_RAIL):
-    """See :func:`duckosm.railml.to_railml`."""
-    if tuple(rail_types) != _RAIL:
-        from duckosm import railml
-        return railml.to_railml(source, out_path, rail_types)
-    return json.loads(_rust().to_railml(_db(source), str(out_path)))
+    """A railML 2.4 infrastructure file from the ``raw`` OSM schema (``duckosm railml``): the ways with a ``railway`` tag in
+    ``rail_types``."""
+    with _file(source) as db:
+        return json.loads(_rust().to_railml(db, str(out_path), list(rail_types)))
 
 
 def to_lanelet2(gmns_db, out_path, mode="driving", snap_m=0.01):
-    """See :func:`duckosm.lanelet2.to_lanelet2`."""
+    """See :func:`duckosm.hdmap.to_lanelet2`."""
     return json.loads(_rust().to_lanelet2(_db(gmns_db), str(out_path), mode, snap_m))
 
 
 def to_elevation(db, dem=None, source="auto", modes=None, nodata_fill=0.0, suffix="",
                  vertical_datum=None, license=None, reference=True, product=None):
-    """See :func:`duckosm.elevation.to_elevation`."""
+    """``duckosm elevation``: the heights of the nodes and the edges from a DEM file, or from the DEM source of the area
+    (``source="auto"``). The database is changed in place. Returns the numbers of the command."""
     modes = [modes] if isinstance(modes, str) else list(modes or [])
     return json.loads(_rust().to_elevation(_db(db), None if dem is None else str(dem), source, modes, float(nodata_fill),
                                            suffix, product, vertical_datum, license, reference))
@@ -145,90 +209,140 @@ def overture_buildings(db, release=None, overwrite=False):
 
 # ---- routing -----------------------------------------------------------------------------------------------------
 
+_INPUT_ERRORS = ("not in the", "no road within")      # the Rust messages of a bad edge id or point: a ValueError, as before
+
+
+def _json(call, *args):
+    """``json.loads`` of a Rust routing call; a bad edge id or point raises ValueError."""
+    try:
+        return json.loads(call(*args))
+    except RuntimeError as e:
+        if any(m in str(e) for m in _INPUT_ERRORS):
+            raise ValueError(str(e)) from None
+        raise
+
+
 class Router:
-    """Build the routing graph of one mode once, then answer many shortest-route queries. See
-    :class:`duckosm._routing_py.Router`; the graph is in Rust, so there is no ``.graph``."""
+    """Build the routing graph of one mode once, then answer many shortest-route queries (the graph is in Rust)."""
 
     def __init__(self, con, mode: str = "driving", weight: str = "time"):
         self.con, self.mode, self.weight = con, mode, weight
-        db = _db(con)
-        if db is None:
-            from duckosm import _routing_py as routing
-            self._py = routing.Router(con, mode, weight)
-        else:
-            self._py, self._r = None, _rust().Router(db, mode, weight)
+        with _file(con) as db:
+            self._r = _rust().Router(db, mode, weight)
 
     def route(self, from_edge, to_edge):
         """Shortest route between two edge ids: the dict of :func:`route`, or None."""
-        if self._py is not None:
-            return self._py.route(from_edge, to_edge)
-        try:
-            return json.loads(self._r.route(int(from_edge), int(to_edge)))
-        except RuntimeError as e:
-            if "not in the" in str(e):        # as networkx: a ValueError
-                raise ValueError(str(e)) from None
-            raise
+        return _json(self._r.route, int(from_edge), int(to_edge))
 
 
-def route(con, from_edge, to_edge, mode: str = "driving", weight: str = "time", graph=None):
-    """See :func:`duckosm._routing_py.route`. With a networkx ``graph``, the Python code."""
-    if graph is not None or _db(con) is None:
-        from duckosm import _routing_py as routing
-        return routing.route(con, from_edge, to_edge, mode=mode, weight=weight, graph=graph)
+def route(con, from_edge, to_edge, mode: str = "driving", weight: str = "time"):
+    """Shortest route between two edge ids: ``{edges, time_s, length_m, path}``, or None when they are not connected. For
+    many routes on one graph, use :class:`Router`."""
     return Router(con, mode, weight).route(from_edge, to_edge)
 
 
 def route_multimodal(con, src_node, dst_node, schema: str = "mm", start_mode: str = "walking",
-                     end_mode: str = "walking", enforce_sequence: bool = True, allowed_modes=None, _points=None):
-    """See :func:`duckosm._routing_py.route_multimodal`."""
-    if _points is not None or _db(con) is None:
-        from duckosm import _routing_py as routing
-        return routing.route_multimodal(con, src_node, dst_node, schema, start_mode, end_mode, enforce_sequence,
-                                        allowed_modes, _points)
+                     end_mode: str = "walking", enforce_sequence: bool = True, allowed_modes=None):
+    """The fastest trip between two nodes over the multimodal ``mm`` graph (``duckosm route-multimodal``)."""
     modes = None if allowed_modes is None else list(allowed_modes)
-    return json.loads(_rust().route_multimodal(_db(con), int(src_node), int(dst_node), schema, start_mode, end_mode,
-                                               enforce_sequence, modes))
+    with _file(con) as db:
+        r = _json(_rust().route_multimodal, db, int(src_node), int(dst_node), schema, start_mode, end_mode,
+                  enforce_sequence, modes)
+    if r:
+        r["edges"] = [tuple(e) for e in r["edges"]]      # (mode, edge_id), as before
+    return r
 
 
 def route_points(con, a, b, mode="driving", weight="time", radius_m=50.0, access_kmh=4.5):
-    """See :func:`duckosm.point_routing.route_points`."""
-    if _db(con) is None:
-        from duckosm import point_routing
-        return point_routing.route_points(con, a, b, mode, weight, radius_m, access_kmh)
-    return json.loads(_rust().route_points(_db(con), tuple(a), tuple(b), mode, weight, float(radius_m), float(access_kmh)))
+    """The route between two points ``(lng, lat)`` (``duckosm route-points``, docs/design/point_routing.md)."""
+    with _file(con) as db:
+        return _json(_rust().route_points, db, tuple(a), tuple(b), mode, weight, float(radius_m), float(access_kmh))
 
 
 def route_multimodal_points(con, a, b, radius_m=50.0, access_kmh=4.5, schema="mm", allowed_modes=None,
                             enforce_sequence=True):
-    """See :func:`duckosm.point_routing.route_multimodal_points`."""
-    if _db(con) is None:
-        from duckosm import point_routing
-        return point_routing.route_multimodal_points(con, a, b, radius_m, access_kmh, schema, allowed_modes, enforce_sequence)
+    """The multimodal trip between two points ``(lng, lat)`` (``duckosm route-multimodal-points``)."""
     modes = None if allowed_modes is None else list(allowed_modes)
-    return json.loads(_rust().route_multimodal_points(_db(con), tuple(a), tuple(b), float(radius_m), float(access_kmh),
-                                                      schema, modes, enforce_sequence))
+    with _file(con) as db:
+        return _json(_rust().route_multimodal_points, db, tuple(a), tuple(b), float(radius_m), float(access_kmh),
+                     schema, modes, enforce_sequence)
 
 
 def directions(con, route, mode="driving"):
-    """See :func:`duckosm.directions.directions`."""
-    if _db(con) is None:
-        from duckosm import directions as d
-        return d.directions(con, route, mode)
-    return json.loads(_rust().directions(_db(con), json.dumps(route), mode))
+    """The turn-by-turn steps of a route (``duckosm directions``)."""
+    with _file(con) as db:
+        return json.loads(_rust().directions(db, json.dumps(route), mode))
 
 
 def build_lane_graph(gmns_db, mode="driving"):
-    """See :func:`duckosm.lane_routing.build_lane_graph`."""
+    """See :func:`duckosm.hdmap.build_lane_graph`."""
     lanes, lc, turn = _rust().build_lane_graph(_db(gmns_db), mode)
     return {"lanes": lanes, "lane_change": lc, "turn": turn, "edges": lc + turn}
 
 
 def route_lanes(gmns_db, from_lane, to_lane, mode="driving"):
-    """See :func:`duckosm.lane_routing.route_lanes`."""
+    """See :func:`duckosm.hdmap.route_lanes`."""
     return json.loads(_rust().route_lanes(_db(gmns_db), str(from_lane), str(to_lane), mode))
 
 
 # ---- graphs ------------------------------------------------------------------------------------------------------
+
+def _uses(uses):
+    return ",".join(uses) if isinstance(uses, (list, tuple)) else uses
+
+
+def _graph(con, kind, mode, weight="time", geometry="wkt", uses=None, node_attrs=True):
+    """The networkx graph that Rust writes as a pickle (duckosm_route::graphml, the ``gpickle`` of ``export-graph``)."""
+    try:
+        import networkx  # noqa: F401  (the pickle makes networkx classes)
+    except ImportError as e:
+        raise ImportError("this needs networkx: pip install networkx") from e
+    import pickle
+    with _file(con) as db:
+        data, _, _ = _rust().graph_bytes(db, mode, kind, "gpickle", weight, geometry, _uses(uses), node_attrs)
+    return pickle.loads(data)
+
+
+def to_networkx(con, mode: str = "driving", weight: str = "time", node_attrs: bool = True, uses=None):
+    """The turn graph of ``mode`` as a ``networkx.DiGraph``: a node is an ``edge_id`` (with ``name``, ``highway``,
+    ``length_m``, ``maxspeed_kmh``, ``cost_s``, ``geometry`` as WKT when ``node_attrs``), an arc a legal turn with its
+    ``weight`` (``"time"`` in seconds or ``"length"`` in metres). ``uses``: the turns into and out of the restricted edges
+    with these labels too (``bus``, ``private``, ``pedestrian``, ``delivery``)."""
+    if weight not in ("time", "length"):
+        raise ValueError("weight must be 'time' or 'length'")
+    return _graph(con, "edge", mode, weight=weight, uses=uses, node_attrs=node_attrs)
+
+
+def to_networkx_nodes(con, mode: str = "driving", geometry: str = "wkt"):
+    """The junction graph of ``mode`` as a ``networkx.MultiDiGraph`` in the layout of osmnx: a node is a junction (``x``,
+    ``y``), an edge a road keyed by ``edge_id`` with all its columns. ``geometry``: ``"wkt"``, ``"shapely"`` or ``"none"``."""
+    if geometry not in ("wkt", "shapely", "none"):
+        raise ValueError("geometry must be 'wkt', 'shapely' or 'none'")
+    return _graph(con, "node", mode, geometry=geometry)
+
+
+_GRAPH_EXTS = {".graphml": "graphml", ".gpickle": "gpickle", ".pkl": "gpickle", ".pickle": "gpickle"}
+
+
+def write_graph(con, path, mode: str = "driving", graph: str = "node", fmt=None, weight: str = "time",
+                geometry: str = "wkt", uses=None):
+    """Write the junction graph (``graph="node"``) or the turn graph (``"edge"``) of ``mode`` as GraphML or a networkx
+    pickle (``duckosm export-graph``). Gives ``{path, fmt, graph, mode, n_nodes, n_edges}``."""
+    path = Path(path)
+    fmt = fmt or _GRAPH_EXTS.get(path.suffix.lower(), "graphml")
+    if fmt not in ("graphml", "gpickle"):
+        raise ValueError("fmt must be 'graphml' or 'gpickle'")
+    if graph not in ("node", "edge"):
+        raise ValueError("graph must be 'node' or 'edge'")
+    if uses and graph != "edge":
+        raise ValueError("uses is for the edge graph (graph='edge'): its turns carry the labels")
+    geom = "wkt" if (fmt == "graphml" and geometry == "shapely") else geometry
+    with _file(con) as db:
+        data, n, m = _rust().graph_bytes(db, mode, graph, fmt, weight, geom, _uses(uses), True)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+    return {"path": str(path), "fmt": fmt, "graph": graph, "mode": mode, "n_nodes": n, "n_edges": m}
+
 
 def to_rustworkx(con, mode="driving", graph="turns", weight="time"):
     """The graph of ``mode`` as a ``rustworkx.PyDiGraph``, from the rows of the Rust code (no networkx).
@@ -399,6 +513,31 @@ def build(pbf=None, *, config=None, boundary=None, modes=None, output=None, sour
     return net
 
 
+class DuckOSM:
+    """A build from a :class:`duckosm.Config`: ``DuckOSM(config).run()`` runs ``duckosm build`` (Rust) and returns the path
+    of the ``.duckdb`` file. ``on_step``: a function that gets each progress line."""
+
+    def __init__(self, config):
+        self.config = config
+        self.output_path = config.get_db_path()
+        self.on_step = None
+
+    def run(self) -> Path:
+        import tempfile
+        f = tempfile.NamedTemporaryFile("w", suffix=".json", prefix="duckosm-config-", delete=False, encoding="utf-8")
+        with f:
+            json.dump(self.config.to_dict(), f)
+        try:
+            text = _run("build", "-c", f.name, progress=self.on_step)
+        finally:
+            Path(f.name).unlink(missing_ok=True)
+        import logging
+        for line in text.splitlines():           # the warnings of the Rust build, to the logger "duckosm"
+            if line.startswith("warning:"):
+                logging.getLogger("duckosm").warning(line.removeprefix("warning:").strip())
+        return Path(text.rsplit("Output: ", 1)[1].strip().splitlines()[0])
+
+
 def levels(db):
     """``duckosm levels``: make the drawing order of the roads again (``visualization.edge_levels``), with the edits, heads and caps of
     ``visualization.level_*``. The database is changed in place. Returns its path."""
@@ -564,14 +703,10 @@ def get(place=None, *, osm_id=None, bbox=None, h3_cell=None, boundary=None, poin
 
     >>> area = duckosm.get("Monaco")
     >>> area = duckosm.get(point=(7.4246, 43.7384), dist_m=500)"""
-    import math
     from duckosm._progress import reporter
     if out is None and not dry_run:
-        out = _new_work(name or (_slug(place) if place else f"osm_{osm_id}" if osm_id else None))
-    if point is not None:            # the box around the point (as osmnx graph_from_point)
-        lon, lat = (float(v) for v in point)
-        dy, dx = dist_m / 111_320, dist_m / (111_320 * math.cos(math.radians(lat)))
-        bbox, name = (lon - dx, lat - dy, lon + dx, lat + dy), name or "point"
+        out = _new_work(name or (_slug(place) if place else f"osm_{osm_id}" if osm_id else "point" if point else None))
+    point = None if point is None else ",".join(str(float(v)) for v in point)   # the box around it: duckosm get --point
     if boundary is not None and not isinstance(boundary, (str, os.PathLike)):
         geo = getattr(boundary, "__geo_interface__", boundary)
         if not isinstance(geo, dict):
@@ -584,6 +719,8 @@ def get(place=None, *, osm_id=None, bbox=None, h3_cell=None, boundary=None, poin
     if bbox is not None and not isinstance(bbox, str):
         bbox = ",".join(str(float(v)) for v in bbox)
     args = [place]
+    if point is not None:
+        args += ["--point", point, "--dist-m", float(dist_m)]
     for flag, value in (("--osm-id", osm_id), ("--bbox", bbox), ("--h3-cell", h3_cell), ("--boundary", boundary),
                         ("-o", out), ("--name", name), ("--fixes", fixes), ("--cache", cache)):
         if value is not None:

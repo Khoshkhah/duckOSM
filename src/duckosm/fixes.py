@@ -140,44 +140,19 @@ class Fixes(os.PathLike):
         return f"<div><b>Fixes</b> <code>{escape(str(self))}</code>: {len(self)} rules{', not saved' if self.changed else ''}{extra}{table}</div>"
 
 
-# the columns that diff compares (those of both files); geometry is compared as WKB
-_SKIP = {"edge_id", "geometry", "from_cell", "to_cell", "lca_res", "from_tile", "to_tile", "lca_zoom"}
-
-
 def diff(net, other, mode=None):
     """The edges that are different in ``other`` (a Network or a path), by ``edge_id``: one row for each edge that was
     added, removed or changed, with the columns ``mode``, ``edge_id``, ``change`` (``"added"``, ``"removed"`` or
     ``"changed"``) and ``changed`` (the columns with a new value). The modes of both files are compared, or ``mode``.
-    DuckDB joins the two files.
+    DuckDB joins the two files (in Rust).
 
     >>> net.diff(fixed)"""
     import pandas as pd
+
+    from duckosm import _rust
     from duckosm.network import ModeView, Network
     if isinstance(net, ModeView):
         net, mode = net.network, mode or net.mode
     net, other = Network(net), Network(getattr(other, "network", other))
-    modes = [mode] if mode else [m for m in net.modes if m in other.modes]
-    con = net._connect()
-    try:
-        con.execute(f"ATTACH '{str(other.path).replace(chr(39), chr(39) * 2)}' AS other (READ_ONLY)")
-        frames = []
-        for m in modes:
-            cols = [c for c, in con.execute(
-                "SELECT column_name FROM duckdb_columns() WHERE schema_name = ? AND table_name = 'edges' "
-                "AND database_name = current_database() INTERSECT SELECT column_name FROM duckdb_columns() "
-                "WHERE schema_name = ? AND table_name = 'edges' AND database_name = 'other'", [m, m]).fetchall()]
-            cols = sorted(c for c in cols if c not in _SKIP) + ["geometry"]
-            changed = ", ".join(
-                f"CASE WHEN ST_AsWKB(a.geometry) IS DISTINCT FROM ST_AsWKB(b.geometry) THEN 'geometry' END" if c == "geometry"
-                else f"CASE WHEN a.\"{c}\" IS DISTINCT FROM b.\"{c}\" THEN '{c}' END" for c in cols)
-            frames.append(con.execute(f"""
-                SELECT '{m}' AS mode, coalesce(a.edge_id, b.edge_id) AS edge_id,
-                       CASE WHEN a.edge_id IS NULL THEN 'added' WHEN b.edge_id IS NULL THEN 'removed' ELSE 'changed' END AS change,
-                       CASE WHEN a.edge_id IS NULL OR b.edge_id IS NULL THEN []
-                            ELSE list_filter([{changed}], x -> x IS NOT NULL) END AS changed
-                FROM "{m}".edges a FULL JOIN other."{m}".edges b ON a.edge_id = b.edge_id
-                WHERE a.edge_id IS NULL OR b.edge_id IS NULL OR len(list_filter([{changed}], x -> x IS NOT NULL)) > 0
-                ORDER BY change, edge_id""").df())
-    finally:
-        con.close()
-    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=["mode", "edge_id", "change", "changed"])
+    rows = _rust.fixes_diff(str(net.path), str(other.path), mode)
+    return pd.DataFrame(rows, columns=["mode", "edge_id", "change", "changed"])

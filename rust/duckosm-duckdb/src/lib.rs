@@ -269,11 +269,20 @@ pub fn write_building_faces(db: &Path, parquet_dir: &Path) -> Result<(usize, usi
     Ok((n("building_faces")?, n("building_entrances")?))
 }
 
+/// The box of the sea query: the box `(x0, y0, x1, y1)` of the area grown by 10 % on each side, and by at least 500 m.
+pub fn ocean_box(x0: f64, y0: f64, x1: f64, y1: f64) -> (f64, f64, f64, f64) {
+    let my = (0.10 * (y1 - y0)).max(500.0 / 111320.0);
+    let mx = (0.10 * (x1 - x0)).max(500.0 / (111320.0 * ((y0 + y1) / 2.0).to_radians().cos()));
+    (x0 - mx, y0 - my, x1 + mx, y1 + my)
+}
+
 /// The sea of the area, `features.ocean`, from Overture Maps (duckOSM `features/ocean.py`): the polygons of `base/water` with the
 /// subtype `ocean` of the newest release, cut to the box of `main.boundary` grown by 10 % (at least 500 m). It reads Overture's
 /// public GeoParquet on S3. Offline or on any error: a warning, an empty table, and `Ok(0)`, as duckOSM does.
 pub fn write_ocean(db: &Path) -> Result<usize, String> {
-    const OVERTURE: &str = "s3://overturemaps-us-west-2/release";
+    // DUCKOSM_OVERTURE: another place of Overture's releases (a mirror, or a test of the offline case)
+    let overture = std::env::var("DUCKOSM_OVERTURE").unwrap_or_else(|_| "s3://overturemaps-us-west-2/release".into());
+    let overture = overture.as_str();
     let con = Connection::open(db).map_err(|e| e.to_string())?;
     con.execute_batch(
         "INSTALL spatial; LOAD spatial; SET geometry_always_xy = false; CREATE SCHEMA IF NOT EXISTS features;
@@ -296,9 +305,7 @@ pub fn write_ocean(db: &Path) -> Result<usize, String> {
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
             )
             .map_err(|e| e.to_string())?;
-        let my = (0.10 * (y1 - y0)).max(500.0 / 111320.0);
-        let mx = (0.10 * (x1 - x0)).max(500.0 / (111320.0 * ((y0 + y1) / 2.0).to_radians().cos()));
-        let (x0, y0, x1, y1) = (x0 - mx, y0 - my, x1 + mx, y1 + my);
+        let (x0, y0, x1, y1) = ocean_box(x0, y0, x1, y1);
         let remote = Connection::open_in_memory().map_err(|e| e.to_string())?; // its own connection: the S3 settings stay out of the file
         remote
             .execute_batch(
@@ -308,7 +315,7 @@ pub fn write_ocean(db: &Path) -> Result<usize, String> {
         let release: String = remote
             .query_row(
                 &format!(
-                    "SELECT max(regexp_extract(file, 'release/([^/]+)/', 1)) FROM glob('{OVERTURE}/*/theme=base/type=water/*')"
+                    "SELECT max(regexp_extract(file, 'release/([^/]+)/', 1)) FROM glob('{overture}/*/theme=base/type=water/*')"
                 ),
                 [],
                 |r| r.get(0),
@@ -318,7 +325,7 @@ pub fn write_ocean(db: &Path) -> Result<usize, String> {
             .prepare(&format!(
                 "SELECT ST_AsWKB(g)::BLOB FROM (
                     SELECT ST_Intersection(geometry, ST_MakeEnvelope({x0}, {y0}, {x1}, {y1})) AS g
-                    FROM read_parquet('{OVERTURE}/{release}/theme=base/type=water/*', hive_partitioning = 1)
+                    FROM read_parquet('{overture}/{release}/theme=base/type=water/*', hive_partitioning = 1)
                     WHERE subtype = 'ocean'
                       AND bbox.xmin < {x1} AND bbox.xmax > {x0} AND bbox.ymin < {y1} AND bbox.ymax > {y0})
                  WHERE NOT ST_IsEmpty(g)"
@@ -421,6 +428,33 @@ pub(crate) fn write_schema(
 mod tests {
     use duckdb::Connection;
     use duckosm_core::hash;
+
+    #[test]
+    fn the_sea_box_grows_by_a_tenth_and_at_least_500_m() {
+        let (x0, _, _, y1) = super::ocean_box(7.409, 43.725, 7.439, 43.752); // 3 km wide: 500 m wins
+        assert!((x0 - (7.409 - 500.0 / (111320.0 * 43.7385f64.to_radians().cos()))).abs() < 1e-9);
+        assert!((y1 - (43.752 + 500.0 / 111320.0)).abs() < 1e-12);
+        assert!((super::ocean_box(17.0, 59.0, 19.0, 60.0).0 - 16.8).abs() < 1e-9); // 10 % of 2 degrees
+    }
+
+    #[test]
+    fn offline_the_sea_is_an_empty_table_and_no_error() {
+        // no boundary: the box comes from the nodes of the file; the release list cannot be read
+        let dir = std::env::temp_dir().join(format!("duckosm-ocean-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("t.duckdb");
+        let con = Connection::open(&db).unwrap();
+        con.execute_batch("CREATE SCHEMA raw; CREATE TABLE raw.nodes AS SELECT 7.42 AS lon, 43.73 AS lat").unwrap();
+        drop(con);
+        std::env::set_var("DUCKOSM_OVERTURE", dir.join("no-overture").display().to_string());
+        assert_eq!(super::write_ocean(&db).unwrap(), 0);
+        std::env::remove_var("DUCKOSM_OVERTURE");
+        let con = Connection::open(&db).unwrap();
+        let cols: Vec<String> = con.prepare("SELECT column_name FROM duckdb_columns() WHERE table_name = 'ocean' ORDER BY column_index")
+            .unwrap().query_map([], |r| r.get(0)).unwrap().map(|r| r.unwrap()).collect();
+        assert_eq!(cols, ["osm_id", "osm_type", "kind", "name", "source", "geom"]);
+        std::fs::remove_dir_all(&dir).ok();
+    }
 
     /// The edge_id of duckosm-core must equal the hash() of the DuckDB inside this program.
     /// If a new DuckDB changes hash(), this test fails.

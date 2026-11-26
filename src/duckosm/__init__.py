@@ -16,14 +16,13 @@ module for each group of users: ``analysis``, ``gis``, ``routing``, ``sim``, ``p
 __version__ = "0.9.0"
 
 _NAMES = {
-    "DuckOSM": "duckosm.importer", "Config": "duckosm.config",
+    "DuckOSM": "duckosm._api", "Config": "duckosm.config",
     "edge_id_hash": "duckosm.edge_id", "edge_id_expr": "duckosm.edge_id", "edge_id_hash_v1": "duckosm.edge_id",
     "edge_id_expr_v1": "duckosm.edge_id", "create_edge_id_macro": "duckosm.edge_id",
-    "to_networkx": "duckosm._routing_py", "to_networkx_nodes": "duckosm._routing_py", "write_graph": "duckosm._routing_py",
+    "to_networkx": "duckosm._api", "to_networkx_nodes": "duckosm._api", "write_graph": "duckosm._api",
     "route": "duckosm._api", "Router": "duckosm._api", "route_multimodal": "duckosm._api",
     "route_points": "duckosm._api", "route_multimodal_points": "duckosm._api", "directions": "duckosm._api",
     "to_sumo": "duckosm._api", "DEFAULT_NETCFG": "duckosm.sumo", "to_gis": "duckosm._api",
-    # TODO (step 6): GMNS is still Python, until its Rust PR merges
     "to_gmns": "duckosm.gmns", "to_meso": "duckosm.gmns", "to_micro": "duckosm.gmns", "check_gmns": "duckosm.gmns_check",
     "to_matsim": "duckosm._api", "to_matsim_lanes": "duckosm._api", "to_opendrive": "duckosm._api",
     "to_railml": "duckosm._api", "to_lanelet2": "duckosm._api",

@@ -1,5 +1,6 @@
 """The published config/ files: the template matches the one the package ships, and the Monaco
 sample builds end to end (the only full build CI runs; the data is in data/sample/)."""
+from cli_run import invoke
 from pathlib import Path
 
 import duckdb
@@ -48,9 +49,9 @@ def test_monaco_sample_builds(tmp_path, monkeypatch):
     # an extract keeps the boundary in `geom`, like a build, so maps can draw its outline
     # (it once wrote `geometry`, and the viz / route-map outline silently disappeared)
     import duckosm
-    from duckosm.viz import _boundary_geojson
     part = duckosm.extract(tmp_path / "monaco.duckdb", tmp_path / "part.duckdb", boundary=ROOT / "data" / "sample" / "monaco.geojson")
-    assert _boundary_geojson(duckdb.connect(str(part), read_only=True)) is not None
+    cols = [r[0] for r in duckdb.connect(str(part), read_only=True).execute("DESCRIBE main.boundary").fetchall()]
+    assert "geom" in cols and "geometry" not in cols
     # a bus lane against a one-way street is in driving, with the private roads: Boulevard des Moulins
     # (way 166009794) is one-way for cars, its reverse a bus lane (docs/design/bus_only_edges.md)
     lane = 1964280132851416298                                   # that reverse; the same id in cycling
@@ -61,19 +62,17 @@ def test_monaco_sample_builds(tmp_path, monkeypatch):
     assert con.execute(f"SELECT count(*) FROM cycling.edges WHERE edge_id = {lane}").fetchone()[0] == 1
     # `duckosm info` and `way --json`, the commands an agent reads first
     import json
-    from click.testing import CliRunner
     from duckosm import __version__
-    from duckosm.cli import main
-    r = CliRunner().invoke(main, ["info", str(tmp_path / "monaco.duckdb"), "--json"])
+    r = invoke(["info", str(tmp_path / "monaco.duckdb"), "--json"])
     assert r.exit_code == 0, r.output
     d = json.loads(r.output)
     assert [m["mode"] for m in d["modes"]] == ["driving", "walking", "cycling"]
     assert d["modes"][0]["edges"] > 100 and d["modes"][0]["turn_restrictions"] > 0
     assert d["timezone"] == "Europe/Monaco" and d["duckosm_version"] == __version__ and d["built_at"]
     assert d["raw"] and d["boundary"] and len(d["features"]) >= 5
-    text = CliRunner().invoke(main, ["info", str(tmp_path / "monaco.duckdb")]).output
+    text = invoke(["info", str(tmp_path / "monaco.duckdb")]).output
     assert "driving" in text and "time zone Europe/Monaco" in text
-    r = CliRunner().invoke(main, ["way", str(tmp_path / "monaco.duckdb"), "4230100", "--json"])
+    r = invoke(["way", str(tmp_path / "monaco.duckdb"), "4230100", "--json"])
     w = json.loads(r.output)
     assert w["raw"]["tags"]["name"] == "Avenue Delphine" and {e["mode"] for e in w["edges"]} >= {"driving"}
     # every area db stores its time zone (required, not an option)
