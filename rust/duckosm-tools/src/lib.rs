@@ -2,6 +2,7 @@
 //! [`cli::run`]; [`cli::COMMANDS`] has the names.
 
 pub mod admin;
+pub mod buildings;
 pub mod cli;
 pub mod dem_sources;
 pub mod elevation;

@@ -251,5 +251,7 @@ others. Their mode default is `"driving"`, as before. `build` gives a `Network`,
 
 The other top-level functions are on the pages of their modules: [routing](sdk/routing.md), [ml](sdk/ml.md),
 [sim](sdk/sim.md), [planning](sdk/planning.md), [hdmap](sdk/hdmap.md) and [gis](sdk/gis.md).
-`to_railml(source, out_path)` (experimental) and `to_elevation(db, dem=None, ...)` ([Add elevation](../guides/elevation.md))
-stay in the core.
+`to_railml(source, out_path)` (experimental), `to_elevation(db, dem=None, ...)` ([Add elevation](../guides/elevation.md))
+and `overture_buildings(db, release=None)` ([`duckosm overture-buildings`](cli.md#overture-buildings)) stay in the core.
+`overture_buildings` gives a dict: `release`, `buildings`, `matched`, `updated` and `tags` (the number of new tags of
+each key).

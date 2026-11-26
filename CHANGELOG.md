@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **`duckosm overture-buildings DB`: the building attributes of Overture Maps.** It joins `features.buildings` to
+  Overture on the OSM id that Overture keeps, and adds the tags that OSM does not have: `height`, `building:levels`,
+  `roof:*`, colours and materials, with `overture:id` and `source:height`. OSM always wins. Python:
+  `duckosm.overture_buildings(db)`. Norrmalm (782 buildings): 781 matched, 12 new heights (5 before, 17 after).
+
 - **`duckosm elevation --source eudtm` works again.** OpenTopography sends EU-DTM in EPSG:3035, and the command stopped
   with "the DEM must be in EPSG:4326". Now it converts the raster to EPSG:4326 with 32-bit floats (the nearest pixel at
   each point; the Lambert azimuthal equal-area projection of EPSG:3035 is new in `duckosm_build::elevation`), then

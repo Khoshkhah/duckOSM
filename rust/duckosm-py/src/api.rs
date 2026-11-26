@@ -125,6 +125,14 @@ fn to_elevation(
     Ok(text(&json!({"source": s.source, "modes": modes, "column": s.column, "n_nodes": s.n_nodes, "n_nodata": s.n_nodata})))
 }
 
+#[pyfunction]
+#[pyo3(signature = (db, release=None))]
+fn overture_buildings(py: Python<'_>, db: PathBuf, release: Option<String>) -> PyResult<String> {
+    let s = py.detach(|| duckosm_tools::buildings::overture_buildings(&db, release.as_deref())).map_err(err)?;
+    let tags: serde_json::Map<String, J> = s.tags.into_iter().map(|(k, n)| (k, json!(n))).collect();
+    Ok(text(&json!({"release": s.release, "buildings": s.buildings, "matched": s.matched, "updated": s.updated, "tags": tags})))
+}
+
 impl Router {
     /// The edge ids not in the graph, as an error.
     fn check(&self, ids: &[i64]) -> PyResult<()> {
@@ -355,6 +363,7 @@ pub fn add(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(to_railml, m)?)?;
     m.add_function(wrap_pyfunction!(to_lanelet2, m)?)?;
     m.add_function(wrap_pyfunction!(to_elevation, m)?)?;
+    m.add_function(wrap_pyfunction!(overture_buildings, m)?)?;
     m.add_function(wrap_pyfunction!(route_multimodal, m)?)?;
     m.add_function(wrap_pyfunction!(route_points, m)?)?;
     m.add_function(wrap_pyfunction!(graph_rows, m)?)?;
