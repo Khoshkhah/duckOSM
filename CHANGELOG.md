@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **`duckosm overture-buildings --overwrite`: Overture values replace OSM values.** An Overture value also replaces a
+  different OSM value, and the OSM value stays in `osm:<key>`. Python: `overture_buildings(db, overwrite=True)`.
+  Norrmalm: 75 buildings changed, most of them colours in a new format (`white` to `#FFFFFF`).
+
 - **`duckosm overture-buildings DB`: the building attributes of Overture Maps.** It joins `features.buildings` to
   Overture on the OSM id that Overture keeps, and adds the tags that OSM does not have: `height`, `building:levels`,
   `roof:*`, colours and materials, with `overture:id` and `source:height`. OSM always wins. Python:

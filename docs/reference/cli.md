@@ -777,9 +777,10 @@ duckosm admin --pbf PBF --db DB [--gpkg GPKG]
 
 Adds the building attributes of [Overture Maps](https://overturemaps.org) to `features.buildings`. Overture keeps the
 OSM id of each building that comes from OSM, and adds attributes from other datasets to it, mostly the heights of
-Microsoft ML Buildings. The command joins on that id. It adds a tag only where the OSM building does not have it, so
-OSM always wins. It does not add the buildings that are only in Overture. It changes the database in place. Run it
-again to get a new release: a tag that is already there stays.
+Microsoft ML Buildings. The command joins on that id. By default, it adds a tag only where the OSM building does not
+have it, so OSM wins. With `--overwrite`, an Overture value also replaces a different OSM value, and the OSM value
+stays in `osm:<key>` (for example `osm:height`). The command does not add the buildings that are only in Overture. It
+changes the database in place. A second run with the same release changes nothing.
 
 ```text
 duckosm overture-buildings [OPTIONS] DB
@@ -788,6 +789,7 @@ duckosm overture-buildings [OPTIONS] DB
 | Option | Does | Default |
 |---|---|---|
 | `--release TEXT` | the Overture release, for example `2026-11-18.0` | the newest |
+| `--overwrite` | an Overture value replaces a different OSM value; the OSM value stays in `osm:<key>` | OSM wins |
 
 `DB` must have `features.buildings` (a build with `--features`). The command reads Overture from its public S3
 bucket, so it needs the internet.
@@ -803,8 +805,19 @@ bucket, so it needs the internet.
 | `id` | `overture:id` |
 | the dataset of a height that is not from OSM | `source:height`, for example `Microsoft ML Buildings` |
 
-The command prints the number of new tags for each key. The values are rounded to 1 cm. Python:
-`duckosm.overture_buildings(db, release=None)`.
+The command prints the number of new tags for each key and, with `--overwrite`, the number of replaced values for each
+key. The values are rounded to 1 cm. Python: `duckosm.overture_buildings(db, release=None, overwrite=False)`.
+
+Most of the differences are not errors in OSM. On Norrmalm (782 buildings), `--overwrite` replaced values on 75
+buildings:
+
+| Key | Replaced | Why the values are different |
+|---|---|---|
+| `building:colour`, `roof:colour` | 43, 43 | the same colour in a different format: OSM `white`, Overture `#FFFFFF` |
+| `building:levels` | 7 | Overture rounds a half level up: OSM `2.5`, Overture `3` |
+| `roof:shape` | 4 | |
+| `height` | 2 | Overture gives the height of the whole building with its `building:part` heights: OSM `35`, Overture `86.5` |
+| `building:material` | 1 | |
 
 ### `multimodal`
 

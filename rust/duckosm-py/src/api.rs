@@ -126,11 +126,12 @@ fn to_elevation(
 }
 
 #[pyfunction]
-#[pyo3(signature = (db, release=None))]
-fn overture_buildings(py: Python<'_>, db: PathBuf, release: Option<String>) -> PyResult<String> {
-    let s = py.detach(|| duckosm_tools::buildings::overture_buildings(&db, release.as_deref())).map_err(err)?;
-    let tags: serde_json::Map<String, J> = s.tags.into_iter().map(|(k, n)| (k, json!(n))).collect();
-    Ok(text(&json!({"release": s.release, "buildings": s.buildings, "matched": s.matched, "updated": s.updated, "tags": tags})))
+#[pyo3(signature = (db, release=None, overwrite=false))]
+fn overture_buildings(py: Python<'_>, db: PathBuf, release: Option<String>, overwrite: bool) -> PyResult<String> {
+    let s = py.detach(|| duckosm_tools::buildings::overture_buildings(&db, release.as_deref(), overwrite)).map_err(err)?;
+    let map = |v: Vec<(String, i64)>| -> serde_json::Map<String, J> { v.into_iter().map(|(k, n)| (k, json!(n))).collect() };
+    Ok(text(&json!({"release": s.release, "buildings": s.buildings, "matched": s.matched, "updated": s.updated, "tags": map(s.tags),
+                    "changed": s.changed, "changed_tags": map(s.changed_tags)})))
 }
 
 impl Router {
